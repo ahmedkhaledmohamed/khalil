@@ -1,0 +1,32 @@
+# Khalil — Personal AI Assistant
+# Core
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-telegram-bot==21.10
+anthropic==0.43.0
+
+# Knowledge layer
+sqlite-vec==0.1.6
+
+# Google API (reuses existing OAuth from ../credentials.json)
+google-auth-oauthlib==1.2.3
+google-api-python-client==2.187.0
+
+# Embeddings
+httpx==0.28.1
+
+# MCP server for Claude Code integration
+mcp>=1.26.0
+
+# Utilities
+keyring==25.6.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+apscheduler==3.11.0
+
+# Recurring reminders
+croniter>=2.0.0
+
+# Job scraper dependencies
+beautifulsoup4>=4.12.0
+requests>=2.31.0

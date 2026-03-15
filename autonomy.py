@@ -1,0 +1,270 @@
+"""Autonomy controller — classifies actions and manages approval flow."""
+
+import json
+import logging
+import sqlite3
+from datetime import datetime, timedelta, timezone
+
+from config import AutonomyLevel, ActionType, HARD_GUARDRAILS
+
+log = logging.getLogger("khalil.autonomy")
+
+
+# Action classification rules
+ACTION_RULES = {
+    # Read actions — always safe
+    "search_knowledge": ActionType.READ,
+    "get_context": ActionType.READ,
+    "search_email": ActionType.READ,
+    "search_drive": ActionType.READ,
+    "get_timeline": ActionType.READ,
+    "summarize": ActionType.READ,
+    # Write actions — need approval in supervised mode
+    "send_email": ActionType.WRITE,
+    "draft_email": ActionType.WRITE,
+    "create_reminder": ActionType.WRITE,
+    "modify_file": ActionType.WRITE,
+    # Dangerous actions — always need approval
+    "send_money": ActionType.DANGEROUS,
+    "delete_data": ActionType.DANGEROUS,
+    "share_externally": ActionType.DANGEROUS,
+    "modify_financial_account": ActionType.DANGEROUS,
+    "generate_capability": ActionType.DANGEROUS,
+    # Shell command tiers
+    "shell_read": ActionType.READ,
+    "shell_write": ActionType.WRITE,
+    "shell_dangerous": ActionType.DANGEROUS,
+}
+
+# Safe writes: auto-approved in GUIDED mode (low risk, easily reversible)
+SAFE_WRITES = {"create_reminder", "draft_email", "shell_read"}
+
+# Pending action TTL: expire after 1 hour
+PENDING_TTL_SECONDS = 3600
+
+
+class AutonomyController:
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self._level = self._load_level()
+
+    def _load_level(self) -> AutonomyLevel:
+        row = self.conn.execute(
+            "SELECT value FROM settings WHERE key = 'autonomy_level'"
+        ).fetchone()
+        if row:
+            return AutonomyLevel(int(row[0]))
+        # Default to supervised
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('autonomy_level', ?)",
+            (str(AutonomyLevel.SUPERVISED.value),),
+        )
+        self.conn.commit()
+        return AutonomyLevel.SUPERVISED
+
+    @property
+    def level(self) -> AutonomyLevel:
+        return self._level
+
+    def set_level(self, level: AutonomyLevel):
+        self._level = level
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('autonomy_level', ?)",
+            (str(level.value),),
+        )
+        self.conn.commit()
+
+    def log_audit(self, action_type: str, description: str, payload: dict | None = None, result: str | None = None):
+        """Write an entry to the audit log."""
+        self.conn.execute(
+            "INSERT INTO audit_log (action_type, description, payload, result, autonomy_level) VALUES (?, ?, ?, ?, ?)",
+            (action_type, description, json.dumps(payload) if payload else None, result, self._level.name),
+        )
+        self.conn.commit()
+
+    def get_audit_log(self, limit: int = 10) -> list[dict]:
+        """Get recent audit log entries."""
+        rows = self.conn.execute(
+            "SELECT id, timestamp, action_type, description, result, autonomy_level FROM audit_log ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {"id": r[0], "timestamp": r[1], "action_type": r[2], "description": r[3], "result": r[4], "autonomy_level": r[5]}
+            for r in rows
+        ]
+
+    def classify_action(self, action_name: str) -> ActionType:
+        """Classify an action into read/write/dangerous."""
+        return ACTION_RULES.get(action_name, ActionType.WRITE)
+
+    def needs_approval(self, action_name: str) -> bool:
+        """Check if an action needs user approval given current autonomy level."""
+        action_type = self.classify_action(action_name)
+
+        # Hard guardrails always need approval
+        if action_name in HARD_GUARDRAILS:
+            return True
+
+        # Dangerous always needs approval
+        if action_type == ActionType.DANGEROUS:
+            return True
+
+        # Read is always auto-approved
+        if action_type == ActionType.READ:
+            return False
+
+        # Write depends on level
+        if self._level == AutonomyLevel.SUPERVISED:
+            return True
+        elif self._level == AutonomyLevel.GUIDED:
+            # Safe writes auto-approved, risky writes need approval
+            return action_name not in SAFE_WRITES
+        else:  # AUTONOMOUS
+            return False
+
+    def create_pending_action(self, action_name: str, description: str, payload: dict | None = None) -> int:
+        """Queue an action for approval. Returns the action ID."""
+        cursor = self.conn.execute(
+            "INSERT INTO pending_actions (action_type, description, payload, status) VALUES (?, ?, ?, 'pending')",
+            (action_name, description, json.dumps(payload) if payload else None),
+        )
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def approve_action(self, action_id: int) -> dict | None:
+        """Approve a pending action. Returns the action details."""
+        row = self.conn.execute(
+            "SELECT * FROM pending_actions WHERE id = ? AND status = 'pending'", (action_id,)
+        ).fetchone()
+        if not row:
+            return None
+
+        self.conn.execute(
+            "UPDATE pending_actions SET status = 'approved', resolved_at = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), action_id),
+        )
+        self.conn.commit()
+        action = {
+            "id": row[0],
+            "action_type": row[1],
+            "description": row[2],
+            "payload": json.loads(row[3]) if row[3] else None,
+        }
+        self.log_audit(action["action_type"], action["description"], action.get("payload"), "approved")
+        # Record signal for self-improvement reflection
+        try:
+            from learning import record_signal
+            record_signal("action_decision", {"action_type": action["action_type"], "decision": "approved"}, value=1.0)
+        except Exception:
+            pass
+        return action
+
+    def deny_action(self, action_id: int) -> bool:
+        """Deny a pending action."""
+        # Fetch details before updating for audit
+        row = self.conn.execute(
+            "SELECT action_type, description FROM pending_actions WHERE id = ?", (action_id,)
+        ).fetchone()
+        result = self.conn.execute(
+            "UPDATE pending_actions SET status = 'denied', resolved_at = ? WHERE id = ? AND status = 'pending'",
+            (datetime.now(timezone.utc).isoformat(), action_id),
+        )
+        self.conn.commit()
+        if result.rowcount > 0 and row:
+            self.log_audit(row[0], row[1], result="denied")
+            # Record signal for self-improvement reflection
+            try:
+                from learning import record_signal
+                record_signal("action_decision", {"action_type": row[0], "decision": "denied"}, value=0.0)
+            except Exception:
+                pass
+        return result.rowcount > 0
+
+    def expire_stale_actions(self) -> int:
+        """Expire pending actions older than PENDING_TTL_SECONDS. Returns count expired."""
+        # SQLite CURRENT_TIMESTAMP uses "YYYY-MM-DD HH:MM:SS" format (space, no TZ)
+        # so cutoff must match that format for correct string comparison
+        cutoff = datetime.utcnow() - timedelta(seconds=PENDING_TTL_SECONDS)
+        cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        result = self.conn.execute(
+            "UPDATE pending_actions SET status = 'expired', resolved_at = ? WHERE status = 'pending' AND created_at < ?",
+            (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), cutoff_str),
+        )
+        if result.rowcount:
+            self.conn.commit()
+            self.log_audit("system", f"Expired {result.rowcount} stale pending action(s)", result="expired")
+            log.info("Expired %d stale pending actions", result.rowcount)
+        return result.rowcount
+
+    def get_pending_actions(self) -> list[dict]:
+        """Get all pending actions (expires stale ones first)."""
+        self.expire_stale_actions()
+        rows = self.conn.execute(
+            "SELECT id, action_type, description, payload, created_at FROM pending_actions WHERE status = 'pending' ORDER BY created_at DESC"
+        ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "action_type": r[1],
+                "description": r[2],
+                "payload": json.loads(r[3]) if r[3] else None,
+                "created_at": r[4],
+            }
+            for r in rows
+        ]
+
+    def get_latest_pending(self) -> dict | None:
+        """Get the most recent pending action."""
+        pending = self.get_pending_actions()
+        return pending[0] if pending else None
+
+    async def execute_action(self, action: dict) -> str:
+        """Execute an approved action by dispatching to the appropriate handler.
+
+        Returns a status message string.
+        """
+        action_type = action["action_type"]
+        payload = action.get("payload") or {}
+
+        if action_type == "send_email":
+            from actions.gmail import draft_email, send_draft
+            # Create draft then send it
+            draft = await draft_email(
+                to=payload["to"],
+                subject=payload["subject"],
+                body=payload["body"],
+            )
+            await send_draft(draft["draft_id"])
+            return f"📧 Email sent to {payload['to']}: {payload['subject']}"
+
+        elif action_type == "create_reminder":
+            from actions.reminders import create_reminder
+            from datetime import datetime
+            due_at = datetime.fromisoformat(payload["due_at"])
+            result = create_reminder(payload["text"], due_at)
+            return f"⏰ Reminder #{result['id']} created: {result['text']} (due {result['due_at']})"
+
+        elif action_type in ("shell_write", "shell_read"):
+            from actions.shell import execute_shell, format_output
+            cmd = payload["command"]
+            result = await execute_shell(cmd, cwd=payload.get("cwd"))
+            self.log_audit(action_type, f"Executed: {cmd}", payload, f"exit={result['returncode']}")
+            return format_output(result, cmd)
+
+
+
+        elif action_type == "generate_capability":
+            from actions.extend import generate_and_pr
+            return await generate_and_pr(payload)
+
+        else:
+            return f"Unknown action type: {action_type}. No executor available."
+
+    def format_level(self) -> str:
+        """Format current autonomy level for display."""
+        icons = {
+            AutonomyLevel.SUPERVISED: "🔒",
+            AutonomyLevel.GUIDED: "🔓",
+            AutonomyLevel.AUTONOMOUS: "⚡",
+        }
+        return f"{icons[self._level]} {self._level.name.title()} (Level {self._level.value})"
