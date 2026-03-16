@@ -27,6 +27,10 @@ class TestClassifyError:
     def test_permanent(self, stderr):
         assert classify_error(1, stderr) == "permanent"
 
+    def test_assistive_access_is_correctable(self):
+        """Accessibility errors have alternative approaches — should be correctable, not permanent."""
+        assert classify_error(1, "osascript is not allowed assistive access. (-25211)") == "correctable"
+
     @pytest.mark.parametrize("stderr", [
         "execution error: The variable cursor is not defined. (-2753)",
         "syntax error: expected end of line but found identifier",
