@@ -199,7 +199,8 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         "This means you CAN check running processes (pgrep, ps), count app windows "
         "(osascript), check disk space (df), list files (ls), open apps (open -a), "
         "and perform other local system queries. If the user asks about their machine "
-        "state, use a shell command — don't say you can't access their device.\n\n"
+        "state, DO NOT suggest they run a command — just tell them you'll check. "
+        "The shell execution happens automatically through your action system.\n\n"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "(e.g., read Slack messages, post to Twitter, create a Jira ticket, book a flight), "
         "include this exact tag in your response:\n"
@@ -275,6 +276,11 @@ _ACTION_PATTERNS = [
     (r"\bopen\s+https?://", "shell"),
     (r"\bcheck\s+(?:disk\s+)?(?:space|storage)\b", "shell"),
     (r"\brun\s+(?:the\s+)?command\b", "shell"),
+    (r"\bhow\s+many\b.*\b(?:open|running|active)\b", "shell"),
+    (r"\b(?:running|open)\b.*\b(?:on\s+my\s+(?:mac|machine|computer)|right\s+now)\b", "shell"),
+    (r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", "shell"),
+    (r"\b(?:battery|cpu|memory|ram|uptime)\b.*\b(?:status|level|usage)\b", "shell"),
+    (r"\bwhat'?s\s+my\s+(?:ip|battery|uptime)\b", "shell"),
 ]
 
 
