@@ -18,7 +18,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from config import CREDENTIALS_FILE, TOKEN_FILE, TOKEN_FILE_COMPOSE, TOKEN_FILE_MODIFY
+from config import CREDENTIALS_FILE, TOKEN_FILE, TOKEN_FILE_COMPOSE, TOKEN_FILE_MODIFY, TOKEN_FILE_CONTACTS, TOKEN_FILE_TASKS
 
 log = logging.getLogger("khalil.actions.gmail")
 
@@ -30,6 +30,12 @@ SCOPES_COMPOSE = [
 SCOPES_MODIFY = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.modify",
+]
+SCOPES_CONTACTS = ["https://www.googleapis.com/auth/contacts.readonly"]
+SCOPES_TASKS = ["https://www.googleapis.com/auth/tasks.readonly"]
+SCOPES_TASKS_WRITE = [
+    "https://www.googleapis.com/auth/tasks.readonly",
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 
@@ -236,3 +242,98 @@ async def apply_label(message_id: str, label_name: str) -> dict:
 async def remove_label(message_id: str, label_name: str) -> dict:
     """Remove a label from a Gmail message. Requires gmail.modify scope (#46)."""
     return await asyncio.to_thread(_remove_label_sync, message_id, label_name)
+
+
+# --- #49: Google Contacts Search ---
+
+def _get_people_service():
+    """Get Google People API service for contacts search."""
+    creds = _get_credentials(SCOPES_CONTACTS, TOKEN_FILE_CONTACTS)
+    return build("people", "v1", credentials=creds)
+
+
+def _search_contacts_sync(query: str, max_results: int = 10) -> list[dict]:
+    """Synchronous contacts search via People API."""
+    service = _get_people_service()
+    results = service.people().searchContacts(
+        query=query,
+        readMask="names,emailAddresses,phoneNumbers",
+        pageSize=max_results,
+    ).execute()
+
+    contacts = []
+    for person in results.get("results", []):
+        p = person.get("person", {})
+        names = p.get("names", [])
+        emails = p.get("emailAddresses", [])
+        phones = p.get("phoneNumbers", [])
+        contacts.append({
+            "name": names[0]["displayName"] if names else "",
+            "email": emails[0]["value"] if emails else "",
+            "phone": phones[0]["value"] if phones else "",
+        })
+
+    return contacts
+
+
+async def search_contacts(query: str, max_results: int = 10) -> list[dict]:
+    """Search Google Contacts by name or email. Returns list of {name, email, phone}."""
+    return await asyncio.to_thread(_search_contacts_sync, query, max_results)
+
+
+# --- #50: Google Tasks Integration ---
+
+def _get_tasks_service(write: bool = False):
+    """Get Google Tasks API service."""
+    scopes = SCOPES_TASKS_WRITE if write else SCOPES_TASKS
+    creds = _get_credentials(scopes, TOKEN_FILE_TASKS)
+    return build("tasks", "v1", credentials=creds)
+
+
+def _list_tasks_sync(tasklist: str = "@default") -> list[dict]:
+    """Synchronous task listing — called via asyncio.to_thread()."""
+    service = _get_tasks_service()
+    results = service.tasks().list(tasklist=tasklist, showCompleted=False).execute()
+    tasks = results.get("items", [])
+    return [
+        {
+            "id": t["id"],
+            "title": t.get("title", ""),
+            "notes": t.get("notes", ""),
+            "due": t.get("due", ""),
+            "status": t.get("status", ""),
+        }
+        for t in tasks
+    ]
+
+
+def _create_task_sync(title: str, notes: str = "", due_date: str | None = None,
+                      tasklist: str = "@default") -> dict:
+    """Synchronous task creation — called via asyncio.to_thread()."""
+    service = _get_tasks_service(write=True)
+    body = {"title": title}
+    if notes:
+        body["notes"] = notes
+    if due_date:
+        # Tasks API expects RFC 3339 date
+        body["due"] = due_date if "T" in due_date else f"{due_date}T00:00:00.000Z"
+
+    task = service.tasks().insert(tasklist=tasklist, body=body).execute()
+    log.info("Task created: %s — %s", task["id"], title)
+    return {
+        "id": task["id"],
+        "title": task.get("title", ""),
+        "notes": task.get("notes", ""),
+        "due": task.get("due", ""),
+        "status": task.get("status", ""),
+    }
+
+
+async def list_tasks(tasklist: str = "@default") -> list[dict]:
+    """List Google Tasks. Returns list of {id, title, notes, due, status}."""
+    return await asyncio.to_thread(_list_tasks_sync, tasklist)
+
+
+async def create_task(title: str, notes: str = "", due_date: str | None = None) -> dict:
+    """Create a Google Task. Returns the created task dict."""
+    return await asyncio.to_thread(_create_task_sync, title, notes, due_date)

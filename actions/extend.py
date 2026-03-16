@@ -14,6 +14,7 @@ import json
 import logging
 import py_compile
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -23,7 +24,7 @@ from pathlib import Path
 
 from config import (
     KHALIL_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
-    KEYRING_SERVICE, CLAUDE_CODE_BIN,
+    KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH,
 )
 
 log = logging.getLogger("khalil.extend")
@@ -189,6 +190,316 @@ def _get_extension_capabilities() -> list[str]:
     return capabilities
 
 
+# --- #26: Extension Version Tracking ---
+
+
+def get_extension_versions() -> list[dict]:
+    """Read all extension manifests and return version info.
+
+    Returns list of {name, version, created_at} dicts.
+    """
+    versions = []
+    if EXTENSIONS_DIR.exists():
+        for manifest_path in EXTENSIONS_DIR.glob("*.json"):
+            if manifest_path.name.endswith(".prev.json"):
+                continue
+            try:
+                manifest = json.loads(manifest_path.read_text())
+                versions.append({
+                    "name": manifest.get("name", manifest_path.stem),
+                    "version": manifest.get("version", 1),
+                    "created_at": manifest.get("generated_at", "unknown"),
+                })
+            except Exception:
+                continue
+    return versions
+
+
+def _backup_manifest(manifest_path: Path) -> None:
+    """Backup an existing manifest to manifest.prev.json."""
+    prev_path = manifest_path.with_suffix(".prev.json")
+    shutil.copy2(str(manifest_path), str(prev_path))
+
+
+def _write_versioned_manifest(manifest_path: Path, manifest: dict) -> dict:
+    """Write a manifest with version tracking. Backs up old one if it exists.
+
+    Returns the manifest dict with version field set.
+    """
+    if manifest_path.exists():
+        try:
+            old_manifest = json.loads(manifest_path.read_text())
+            old_version = old_manifest.get("version", 1)
+            _backup_manifest(manifest_path)
+            manifest["version"] = old_version + 1
+        except Exception:
+            manifest["version"] = 1
+    else:
+        manifest.setdefault("version", 1)
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    return manifest
+
+
+def rollback_extension(name: str) -> bool:
+    """Rollback an extension to its previous version.
+
+    Restores from manifest.prev.json and decrements version.
+    Returns True if rollback succeeded, False otherwise.
+    """
+    manifest_path = EXTENSIONS_DIR / f"{name}.json"
+    prev_path = manifest_path.with_suffix(".prev.json")
+
+    if not prev_path.exists():
+        return False
+
+    try:
+        prev_manifest = json.loads(prev_path.read_text())
+        # Write the previous manifest back as current
+        manifest_path.write_text(json.dumps(prev_manifest, indent=2))
+        prev_path.unlink()
+        return True
+    except Exception:
+        return False
+
+
+# --- #27: Extension Template Library ---
+
+EXTENSION_TEMPLATES = {
+    "crud": """\"\"\"CRUD operations for {name}.\"\"\"
+
+import logging
+import sqlite3
+from config import DB_PATH, TIMEZONE
+
+log = logging.getLogger("khalil.actions.{name}")
+
+_tables_created = False
+
+def _get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def ensure_tables(conn: sqlite3.Connection):
+    conn.execute('''CREATE TABLE IF NOT EXISTS {name} (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        data TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.commit()
+
+def _ensure():
+    global _tables_created
+    if not _tables_created:
+        conn = _get_conn()
+        try:
+            ensure_tables(conn)
+        finally:
+            conn.close()
+        _tables_created = True
+
+async def cmd_{command}(update, context):
+    \"\"\"Handle /{command} command. Subcommands: add, list, remove.\"\"\"
+    _ensure()
+    args = context.args or []
+    sub = args[0] if args else "list"
+    conn = _get_conn()
+    try:
+        if sub == "add" and len(args) > 1:
+            name_val = " ".join(args[1:])
+            conn.execute("INSERT INTO {name} (name) VALUES (?)", (name_val,))
+            conn.commit()
+            await update.message.reply_text(f"Added: {{name_val}}")
+        elif sub == "list":
+            rows = conn.execute("SELECT id, name FROM {name} ORDER BY created_at DESC LIMIT 20").fetchall()
+            if rows:
+                lines = [f"{{r['id']}}. {{r['name']}}" for r in rows]
+                await update.message.reply_text("\\n".join(lines))
+            else:
+                await update.message.reply_text("No items yet.")
+        elif sub == "remove" and len(args) > 1:
+            conn.execute("DELETE FROM {name} WHERE id = ?", (args[1],))
+            conn.commit()
+            await update.message.reply_text("Removed.")
+        else:
+            await update.message.reply_text("Usage: /{command} [add|list|remove] ...")
+    finally:
+        conn.close()
+""",
+    "api_backed": """\"\"\"API-backed capability: {description}.\"\"\"
+
+import asyncio
+import logging
+import httpx
+import keyring
+from config import KEYRING_SERVICE
+
+log = logging.getLogger("khalil.actions.{name}")
+
+async def _fetch_data(endpoint: str, params: dict | None = None) -> dict:
+    api_key = keyring.get_password(KEYRING_SERVICE, "{name}-api-key")
+    if not api_key:
+        raise RuntimeError("API key not configured. Use keyring to set '{name}-api-key'.")
+    headers = {{"Authorization": f"Bearer {{api_key}}"}}
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(endpoint, headers=headers, params=params or {{}}, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+async def cmd_{command}(update, context):
+    \"\"\"Handle /{command} command.\"\"\"
+    args = context.args or []
+    try:
+        data = await _fetch_data("https://api.example.com/{name}", {{"q": " ".join(args)}})
+        await update.message.reply_text(str(data)[:4000])
+    except Exception as e:
+        await update.message.reply_text(f"Error: {{e}}")
+""",
+    "periodic_poller": """\"\"\"Periodic poller: {description}.\"\"\"
+
+import asyncio
+import logging
+import sqlite3
+from datetime import datetime
+from config import DB_PATH
+
+log = logging.getLogger("khalil.actions.{name}")
+
+_tables_created = False
+
+def _get_conn() -> sqlite3.Connection:
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def ensure_tables(conn: sqlite3.Connection):
+    conn.execute('''CREATE TABLE IF NOT EXISTS {name}_state (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    conn.commit()
+
+def _ensure():
+    global _tables_created
+    if not _tables_created:
+        conn = _get_conn()
+        try:
+            ensure_tables(conn)
+        finally:
+            conn.close()
+        _tables_created = True
+
+async def poll():
+    \"\"\"Run one poll cycle. Call this from a scheduler.\"\"\"
+    _ensure()
+    # TODO: Implement polling logic
+    log.info("{name} poll cycle complete")
+
+async def cmd_{command}(update, context):
+    \"\"\"Handle /{command} command. Subcommands: status, poll.\"\"\"
+    _ensure()
+    args = context.args or []
+    sub = args[0] if args else "status"
+    if sub == "poll":
+        await poll()
+        await update.message.reply_text("Poll cycle completed.")
+    else:
+        conn = _get_conn()
+        try:
+            row = conn.execute("SELECT value, updated_at FROM {name}_state WHERE key = 'last_poll'").fetchone()
+            if row:
+                await update.message.reply_text(f"Last poll: {{row['updated_at']}}")
+            else:
+                await update.message.reply_text("No polls run yet. Use /{command} poll")
+        finally:
+            conn.close()
+""",
+}
+
+# Keywords used to match specs to templates
+_TEMPLATE_KEYWORDS = {
+    "crud": {"create", "add", "remove", "delete", "list", "manage", "track", "log", "store"},
+    "api_backed": {"api", "fetch", "external", "service", "integration", "webhook", "slack", "github"},
+    "periodic_poller": {"poll", "monitor", "check", "watch", "periodic", "schedule", "recurring"},
+}
+
+
+def get_template_for_spec(spec: dict) -> str | None:
+    """Pick the best matching template based on description keywords.
+
+    Returns template key ("crud", "api_backed", "periodic_poller") or None.
+    """
+    desc_lower = spec.get("description", "").lower()
+    name_lower = spec.get("name", "").lower()
+    combined = f"{desc_lower} {name_lower}"
+
+    best_key = None
+    best_score = 0
+    for key, keywords in _TEMPLATE_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in combined)
+        if score > best_score:
+            best_score = score
+            best_key = key
+    return best_key if best_score > 0 else None
+
+
+# --- #32: Human-in-loop PR Feedback ---
+
+
+def record_pr_feedback(pr_number: int, feedback_text: str):
+    """Store PR rejection/review comments in the interaction_signals table.
+
+    This feedback is retrieved during future generation attempts for similar capabilities.
+    """
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute(
+            "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+            (
+                "pr_feedback",
+                json.dumps({"pr_number": pr_number, "feedback": feedback_text}),
+                -1.0,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_pr_feedback(capability_name: str) -> list[str]:
+    """Retrieve past PR feedback relevant to a capability name.
+
+    Searches interaction_signals for pr_feedback entries whose context
+    mentions the capability name.
+    """
+    import sqlite3 as _sqlite3
+    conn = _sqlite3.connect(str(DB_PATH))
+    conn.row_factory = _sqlite3.Row
+    try:
+        rows = conn.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'pr_feedback' "
+            "ORDER BY created_at DESC LIMIT 50"
+        ).fetchall()
+
+        feedback = []
+        for row in rows:
+            try:
+                ctx = json.loads(row["context"])
+                fb_text = ctx.get("feedback", "")
+                if capability_name.lower() in fb_text.lower():
+                    feedback.append(fb_text)
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return feedback
+    finally:
+        conn.close()
+
+
 # --- Complexity Routing ---
 
 SIMPLE_CAPABILITIES = {
@@ -329,7 +640,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
             lines = lines[:-1]
         source = "\n".join(lines)
 
-    # Generate manifest
+    # Generate manifest with version tracking (#26)
     manifest = {
         "name": spec["name"],
         "command": spec["command"],
@@ -338,7 +649,12 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         "handler_function": f"cmd_{spec['command']}",
         "generated_at": datetime.utcnow().isoformat(),
         "generated_for": spec.get("original_query", spec["description"]),
+        "version": 1,
     }
+
+    # Write versioned manifest (backs up old one if exists)
+    manifest_path = EXTENSIONS_DIR / f"{spec['name']}.json"
+    manifest = _write_versioned_manifest(manifest_path, manifest)
 
     return source, json.dumps(manifest, indent=2)
 

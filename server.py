@@ -586,6 +586,40 @@ _ACTION_PATTERNS = [
     (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
     (r"\binstall\s+(?:via\s+)?brew\b", "shell"),
     (r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", "shell"),
+    # #38: Window management
+    (r"\b(?:arrange|tile|put)\s+windows?\s+(?:side\s+by\s+side|split)\b", "shell"),
+    (r"\bresize\s+(?:the\s+)?window\b", "shell"),
+    (r"\bminimize\s+(?:all\s+)?windows?\b", "shell"),
+    (r"\bshow\s+(?:all\s+)?windows?\b", "shell"),
+    # #49: Google Contacts
+    (r"\bfind\s+contact\b", "contacts"),
+    (r"\bwho\s+is\b.*\b(?:email|phone|contact)\b", "contacts"),
+    (r"\bemail\s+address\s+for\b", "contacts"),
+    (r"\bsearch\s+(?:my\s+)?contacts?\b", "contacts"),
+    # #56: iCloud Reminders
+    (r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminder", "icloud_reminder"),
+    (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),
+    (r"\breminders?\s+app\b", "icloud_reminder"),
+    (r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
+    # #42: Network diagnostics
+    (r"\b(?:check|test)\s+(?:my\s+)?(?:network|internet|connection)\b", "shell"),
+    (r"\bnetwork\s+status\b", "shell"),
+    (r"\bping\s+\w+", "shell"),
+    (r"\b(?:check|test)\s+(?:internet|connectivity)\b", "shell"),
+    (r"\bdns\s+lookup\b", "shell"),
+    (r"\bnslookup\b", "shell"),
+    (r"\bcheck\s+wifi\b", "shell"),
+    (r"\bwifi\s+status\b", "shell"),
+    # #50: Google Tasks
+    (r"\b(?:my|show|list)\s+tasks?\b", "tasks"),
+    (r"\btodo\s+list\b", "tasks"),
+    (r"\badd\s+(?:a\s+)?task\b", "tasks"),
+    (r"\bcreate\s+(?:a\s+)?task\b", "tasks"),
+    # #44: Login item management
+    (r"\b(?:list|show|get)\s+(?:my\s+)?(?:login|startup)\s+items?\b", "shell"),
+    (r"\bstartup\s+items?\b", "shell"),
+    (r"\bshow\s+launch\s+agents?\b", "shell"),
+    (r"\blist\s+launch\s+agents?\b", "shell"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
 ]
@@ -718,6 +752,39 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:uptime|how\s+long.*(?:running|been\s+on|up))\b", text_lower):
         return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
 
+    # #42: Network diagnostics
+    if re.search(r"\b(?:check|test)\s+(?:my\s+)?(?:network|connection)\b", text_lower) or \
+       re.search(r"\bnetwork\s+status\b", text_lower):
+        return {"action": "shell", "command": "networksetup -getinfo Wi-Fi", "description": "Check network info"}
+
+    if re.search(r"\bping\s+(\S+)", text_lower):
+        m = re.search(r"\bping\s+(\S+)", text_lower)
+        target = m.group(1) if m else "google.com"
+        return {"action": "shell", "command": f"ping -c 3 {target}", "description": f"Ping {target}"}
+
+    if re.search(r"\b(?:check|test)\s+internet\b", text_lower) or \
+       re.search(r"\bcheck\s+connectivity\b", text_lower):
+        return {"action": "shell", "command": "ping -c 3 google.com", "description": "Check internet connectivity"}
+
+    if re.search(r"\bdns\s+lookup\b", text_lower) or re.search(r"\bnslookup\s+(\S+)", text_lower):
+        m = re.search(r"\bnslookup\s+(\S+)", text_lower)
+        target = m.group(1) if m else "google.com"
+        return {"action": "shell", "command": f"nslookup {target}", "description": f"DNS lookup for {target}"}
+
+    if re.search(r"\bcheck\s+wifi\b", text_lower) or re.search(r"\bwifi\s+status\b", text_lower):
+        return {"action": "shell", "command": "networksetup -getairportnetwork en0", "description": "Check Wi-Fi status"}
+
+    if re.search(r"\bpublic\s+ip\b", text_lower) or re.search(r"\bexternal\s+ip\b", text_lower):
+        return {"action": "shell", "command": "curl -s ifconfig.me", "description": "Get public IP address"}
+
+    # #44: Login items / launch agents
+    if re.search(r"\b(?:list|show|get)\s+(?:my\s+)?(?:login|startup)\s+items?\b", text_lower) or \
+       re.search(r"\bstartup\s+items?\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to get the name of every login item'", "description": "List login items"}
+
+    if re.search(r"\b(?:show|list)\s+launch\s+agents?\b", text_lower):
+        return {"action": "shell", "command": "ls ~/Library/LaunchAgents/", "description": "Show launch agents"}
+
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
        re.search(r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", text_lower):
@@ -726,6 +793,23 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     # #36: Clipboard — "process/summarize my clipboard"
     if re.search(r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", text_lower):
         return {"action": "shell", "command": "pbpaste", "description": "Read clipboard for processing"}
+
+    # #49: Google Contacts search (before Spotlight to avoid "find contact" matching file search)
+    m = re.search(r"\b(?:find\s+contact|email\s+address\s+for|search\s+contacts?\s+(?:for\s+)?)\s*(.+?)$", text_lower)
+    if m:
+        query = text_stripped[m.start(1):m.end(1)].strip()
+        if query:
+            return {"action": "contacts_search", "query": query, "description": f"Search contacts for: {query}"}
+
+    # #56: iCloud Reminders (before Spotlight to avoid "find" overlap)
+    if re.search(r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", text_lower):
+        return {"action": "icloud_reminder_list", "description": "List Apple Reminders"}
+
+    m = re.search(r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminders?\s+(.+?)$", text_lower)
+    if m:
+        reminder_text = text_stripped[m.start(1):m.end(1)].strip()
+        if reminder_text:
+            return {"action": "icloud_reminder_create", "text": reminder_text, "description": f"Create Apple Reminder: {reminder_text}"}
 
     # #40: Spotlight file search — "find file X", "locate my .py files"
     m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
@@ -774,12 +858,35 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\bbrew\s+cleanup\b", text_lower):
         return {"action": "shell", "command": "brew cleanup", "description": "Clean up old brew package versions"}
 
+    # #38: Window management
+    if re.search(r"\b(?:arrange|tile|put)\s+windows?\s+(?:side\s+by\s+side|split)\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set position of every window to {0, 0}'", "description": "Arrange windows side by side"}
+
+    if re.search(r"\bresize\s+(?:the\s+)?window\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set size of first window of first process whose frontmost is true to {800, 600}'", "description": "Resize front window"}
+
+    if re.search(r"\bminimize\s+(?:all\s+)?windows?\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set visible of every process to false'", "description": "Minimize all windows"}
+
+    if re.search(r"\bshow\s+(?:all\s+)?windows?\b", text_lower) and not re.search(r"\bwhat\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set visible of every process to true'", "description": "Show all windows"}
+
     # #52: GitHub issue creation — "create issue <title>"
     m = re.search(r"\b(?:create|open|file|new)\s+(?:a\s+)?(?:github\s+)?issue\s+(?:for\s+|about\s+|titled?\s+)?['\"]?(.+?)['\"]?\s*$", text_lower)
     if m:
         title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
         if title:
             return {"action": "shell", "command": f"gh issue create --title '{title}'", "description": f"Create GitHub issue: {title}"}
+
+    # #50: Google Tasks — "my tasks", "todo list", "add task <title>"
+    if re.search(r"\b(?:my|show|list)\s+tasks?\b", text_lower) or re.search(r"\btodo\s+list\b", text_lower):
+        return {"action": "tasks_list", "description": "List Google Tasks"}
+
+    m = re.search(r"\b(?:add|create)\s+(?:a\s+)?task\s+(.+?)$", text_lower)
+    if m:
+        task_title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if task_title:
+            return {"action": "tasks_create", "title": task_title, "description": f"Create task: {task_title}"}
 
     return None
 

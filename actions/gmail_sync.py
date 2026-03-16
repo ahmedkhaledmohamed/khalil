@@ -61,6 +61,72 @@ def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50) -
     return emails
 
 
+# --- #47: Email Auto-Categorization ---
+
+_CATEGORY_KEYWORDS = {
+    "finance": [
+        "invoice", "receipt", "payment", "bank", "transaction", "statement",
+        "credit card", "debit", "refund", "tax", "rrsp", "tfsa", "investment",
+        "dividend", "portfolio", "mortgage", "salary", "payroll", "expense",
+    ],
+    "work": [
+        "sprint", "standup", "jira", "confluence", "slack", "meeting",
+        "deadline", "project", "deploy", "release", "review", "okr",
+        "roadmap", "backlog", "scrum", "agile", "manager", "team",
+    ],
+    "shopping": [
+        "order", "shipped", "delivery", "tracking", "purchase", "cart",
+        "amazon", "shopify", "store", "return", "refund", "coupon",
+    ],
+    "travel": [
+        "flight", "hotel", "booking", "airline", "boarding", "itinerary",
+        "reservation", "check-in", "airbnb", "expedia", "travel",
+    ],
+    "newsletters": [
+        "unsubscribe", "newsletter", "digest", "weekly", "roundup",
+        "subscribe", "mailing list",
+    ],
+    "notifications": [
+        "notification", "alert", "reminder", "automated", "noreply",
+        "no-reply", "do-not-reply", "donotreply",
+    ],
+    "personal": [
+        "family", "kids", "birthday", "party", "dinner", "weekend",
+        "vacation", "photo", "wedding",
+    ],
+}
+
+
+def categorize_email(email_dict: dict) -> str:
+    """Categorize an email using keyword matching.
+
+    Args:
+        email_dict: dict with keys like 'subject', 'from', 'body', 'snippet'.
+
+    Returns:
+        Category string, e.g. "finance", "work", "personal", etc.
+    """
+    # Build searchable text from available fields
+    parts = [
+        email_dict.get("subject", ""),
+        email_dict.get("from", ""),
+        email_dict.get("snippet", ""),
+        (email_dict.get("body", "") or "")[:500],
+    ]
+    text_lower = " ".join(parts).lower()
+
+    best_category = "personal"  # default
+    best_score = 0
+
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        score = sum(1 for kw in keywords if kw in text_lower)
+        if score > best_score:
+            best_score = score
+            best_category = category
+
+    return best_category
+
+
 async def sync_new_emails() -> dict:
     """Fetch new emails since last sync and index them into the knowledge base.
 
@@ -88,17 +154,23 @@ async def sync_new_emails() -> dict:
     log.info("Fetched %d new emails", len(emails))
 
     # Convert to indexer entry format (same as parse_email_file output)
+    # #47: Auto-categorize each email during sync
     entries = []
     for e in emails:
+        category = categorize_email(e)
         content = f"From: {e['from']}\nDate: {e['date']}\n{e['subject']}\n{e['body'][:1000] or e['snippet']}"
         entries.append({
             "title": e["subject"],
             "content": content,
             "metadata": f"from={e['from']}; date={e['date']}; gmail_id={e['id']}",
+            "category": f"email:{category}",
         })
 
-    # Index into knowledge base
-    indexed = await index_source(conn, "gmail_sync", "email:synced", entries)
+    # Index into knowledge base (use per-email category)
+    indexed = 0
+    for entry in entries:
+        cat = entry.pop("category")
+        indexed += await index_source(conn, "gmail_sync", cat, [entry])
 
     # Update sync timestamp
     _update_sync_timestamp(conn)

@@ -6,10 +6,11 @@ All changes are transparent (visible via /learn) and safe (hard guardrails immut
 
 import json
 import logging
+import re as _re_module
 import sqlite3
 from datetime import datetime, timedelta
 
-from config import DB_PATH, HARD_GUARDRAILS
+from config import DB_PATH, GOALS_DIR, HARD_GUARDRAILS
 
 log = logging.getLogger("khalil.learning")
 
@@ -1246,3 +1247,417 @@ def decay_preferences():
     conn.execute("DELETE FROM learned_preferences WHERE confidence <= 0")
     conn.commit()
     log.info("Preference confidence decay applied")
+
+
+# --- #94: Goal Progress Auto-Check ---
+
+def check_goal_progress(days: int = 7) -> list[dict]:
+    """Check progress on goals by correlating with recent activity signals.
+
+    Reads goal files from GOALS_DIR, then queries recent audit_log entries
+    and conversations mentioning goal keywords.
+
+    Returns list of {goal, activity_count, status} where status is
+    "active", "stale", or "no_activity".
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Read goals from the goals directory
+    goals: list[str] = []
+    if GOALS_DIR and GOALS_DIR.exists():
+        for f in GOALS_DIR.iterdir():
+            if f.suffix in (".md", ".txt"):
+                try:
+                    content = f.read_text(errors="replace")
+                    # Extract goal lines — lines starting with "- " or "* " or "## "
+                    for line in content.splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith(("- ", "* ", "## ")) and len(stripped) > 4:
+                            goal_text = stripped.lstrip("-*# ").strip()
+                            if goal_text:
+                                goals.append(goal_text)
+                except Exception:
+                    continue
+
+    if not goals:
+        return []
+
+    results = []
+    for goal in goals[:20]:  # Cap at 20 goals
+        # Extract keywords (words > 3 chars, lowered)
+        keywords = [w.lower() for w in goal.split() if len(w) > 3]
+        if not keywords:
+            continue
+
+        # Search audit_log and conversations for keyword mentions
+        activity_count = 0
+        for keyword in keywords[:5]:
+            # Audit log mentions
+            count = conn.execute(
+                "SELECT COUNT(*) FROM audit_log WHERE LOWER(description) LIKE ? AND timestamp > ?",
+                (f"%{keyword}%", cutoff),
+            ).fetchone()[0]
+            activity_count += count
+
+            # Conversation mentions
+            count = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE LOWER(content) LIKE ? AND timestamp > ?",
+                (f"%{keyword}%", cutoff),
+            ).fetchone()[0]
+            activity_count += count
+
+        if activity_count >= 5:
+            status = "active"
+        elif activity_count >= 1:
+            status = "stale"
+        else:
+            status = "no_activity"
+
+        results.append({"goal": goal, "activity_count": activity_count, "status": status})
+
+    return results
+
+
+# --- #6: Multi-turn Coherence Analysis ---
+
+_COHERENCE_ISSUE_PATTERNS = [
+    (r"\bi\s+already\s+(?:told|said|mentioned)\b", "repeated_info"),
+    (r"\bthat'?s\s+not\s+what\s+i\s+(?:asked|meant|said)\b", "misunderstanding"),
+    (r"\bno,?\s+i\s+(?:said|meant|want)\b", "correction"),
+    (r"\byou\s+(?:forgot|missed|ignored)\b", "lost_context"),
+    (r"\bi\s+just\s+(?:told|said)\s+you\b", "repeated_info"),
+    (r"\bwrong\b.*\bi\s+(?:said|asked|want)\b", "correction"),
+    (r"\bcan\s+you\s+re-?read\b", "lost_context"),
+    (r"\bas\s+i\s+(?:said|mentioned)\s+(?:before|earlier)\b", "repeated_info"),
+]
+
+
+def detect_coherence_issues(days: int = 7) -> list[dict]:
+    """Detect multi-turn coherence issues from conversation patterns.
+
+    Queries user follow-up messages for patterns suggesting lost context,
+    corrections, or repeated questions.
+
+    Returns list of {chat_id, timestamp, issue_type, context}.
+    """
+    import re as _re
+
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Get user messages (potential follow-ups that indicate coherence issues)
+    rows = conn.execute(
+        "SELECT chat_id, content, timestamp FROM conversations "
+        "WHERE role = 'user' AND timestamp > ? ORDER BY timestamp",
+        (cutoff,),
+    ).fetchall()
+
+    issues = []
+    for row in rows:
+        content = row["content"] if isinstance(row, dict) else row[1]
+        chat_id = row["chat_id"] if isinstance(row, dict) else row[0]
+        timestamp = row["timestamp"] if isinstance(row, dict) else row[2]
+        content_lower = (content or "").lower()
+
+        for pattern, issue_type in _COHERENCE_ISSUE_PATTERNS:
+            if _re.search(pattern, content_lower):
+                issues.append({
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "issue_type": issue_type,
+                    "context": content[:200] if content else "",
+                })
+                break  # One issue per message
+
+    return issues
+
+
+# --- #58: Semantic Memory Consolidation ---
+
+def consolidate_memories(similarity_threshold: float = 0.5) -> list[dict]:
+    """Identify document pairs with high word-overlap similarity within the same category.
+
+    Uses simple word-overlap (Jaccard-like) similarity, same approach as
+    _compute_topic_similarity in server.py.
+
+    Returns list of {doc_id_a, doc_id_b, title_a, title_b, similarity, category}.
+    Does NOT auto-merge — just surfaces candidates for review.
+    """
+    conn = _get_conn()
+
+    # Get all categories that have 2+ documents
+    categories = conn.execute(
+        "SELECT DISTINCT category FROM documents GROUP BY category HAVING COUNT(*) >= 2"
+    ).fetchall()
+
+    stopwords = {"the", "a", "an", "is", "are", "was", "were", "i", "you", "my", "your",
+                 "he", "she", "it", "we", "they", "in", "on", "at", "to", "for", "of",
+                 "and", "or", "but", "not", "with", "this", "that", "from", "by", "as"}
+
+    candidates = []
+    for cat_row in categories:
+        category = cat_row[0] if not isinstance(cat_row, dict) else cat_row["category"]
+        docs = conn.execute(
+            "SELECT id, title, content FROM documents WHERE category = ?",
+            (category,),
+        ).fetchall()
+
+        # Build word sets for each doc
+        doc_words = []
+        for d in docs:
+            doc_id = d["id"] if isinstance(d, dict) else d[0]
+            title = d["title"] if isinstance(d, dict) else d[1]
+            content = d["content"] if isinstance(d, dict) else d[2]
+            text = f"{title} {content}"
+            words = set(text.lower().split()) - stopwords
+            doc_words.append((doc_id, title, words))
+
+        # Compare all pairs
+        for i in range(len(doc_words)):
+            for j in range(i + 1, len(doc_words)):
+                id_a, title_a, words_a = doc_words[i]
+                id_b, title_b, words_b = doc_words[j]
+                if not words_a or not words_b:
+                    continue
+                intersection = len(words_a & words_b)
+                union = len(words_a | words_b)
+                similarity = intersection / union if union > 0 else 0.0
+                if similarity >= similarity_threshold:
+                    candidates.append({
+                        "doc_id_a": id_a,
+                        "doc_id_b": id_b,
+                        "title_a": title_a,
+                        "title_b": title_b,
+                        "similarity": round(similarity, 3),
+                        "category": category,
+                    })
+
+    return candidates
+
+
+# --- #64: Structured Data Extraction from Emails ---
+
+_FLIGHT_PATTERNS = [
+    _re_module.compile(
+        r"(?:flight|confirmation)\s*[#:]?\s*([A-Z]{2}\d{2,4})",
+        _re_module.IGNORECASE,
+    ),
+    _re_module.compile(
+        r"(?P<airline>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:flight\s+)?(?P<flight_num>[A-Z]{2}\d{2,4})",
+        _re_module.IGNORECASE,
+    ),
+]
+
+_RECEIPT_PATTERN = _re_module.compile(
+    r"(?:total|amount|charged|paid)[:\s]*\$?\s*(?P<amount>\d+[.,]\d{2})\s*(?P<currency>[A-Z]{3})?",
+    _re_module.IGNORECASE,
+)
+
+_MEETING_PATTERN = _re_module.compile(
+    r"(?:meeting|invite|event)[:\s]*(?P<subject>.+?)(?:\n|$)",
+    _re_module.IGNORECASE,
+)
+
+_DATE_PATTERN = _re_module.compile(
+    r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}|\w+ \d{1,2},?\s*\d{4})\b"
+)
+
+_TIME_PATTERN = _re_module.compile(
+    r"\b(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\b"
+)
+
+
+def extract_structured_data(email_content: str) -> dict:
+    """Extract structured fields from email content using regex patterns.
+
+    Detects flight confirmations, receipts, and meeting invites.
+    Returns {type: "flight"|"receipt"|"meeting"|"unknown", fields: {...}}.
+    """
+    content_lower = email_content.lower()
+    dates = _DATE_PATTERN.findall(email_content)
+    times = _TIME_PATTERN.findall(email_content)
+
+    # Flight detection
+    if any(kw in content_lower for kw in ("flight", "boarding", "airline", "departure", "arrival")):
+        fields = {"date": dates[0] if dates else None}
+        for pat in _FLIGHT_PATTERNS:
+            m = pat.search(email_content)
+            if m:
+                gd = m.groupdict()
+                fields["flight_number"] = gd.get("flight_num") or m.group(1)
+                fields["airline"] = gd.get("airline")
+                break
+        # Try to find departure/arrival
+        dep_match = _re_module.search(r"(?:depart\w*|from)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        arr_match = _re_module.search(r"(?:arriv\w*|to|destination)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["departure"] = dep_match.group(1).strip() if dep_match else None
+        fields["arrival"] = arr_match.group(1).strip() if arr_match else None
+        return {"type": "flight", "fields": fields}
+
+    # Receipt detection
+    if any(kw in content_lower for kw in ("receipt", "invoice", "total", "amount", "charged", "payment")):
+        fields = {"date": dates[0] if dates else None}
+        m = _RECEIPT_PATTERN.search(email_content)
+        if m:
+            fields["amount"] = m.group("amount")
+            fields["currency"] = m.group("currency") or "USD"
+        vendor_match = _re_module.search(r"(?:from|vendor|merchant|store)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["vendor"] = vendor_match.group(1).strip() if vendor_match else None
+        return {"type": "receipt", "fields": fields}
+
+    # Meeting detection
+    if any(kw in content_lower for kw in ("meeting", "invite", "calendar event", "rsvp")):
+        fields = {"datetime": None, "location": None, "subject": None, "organizer": None}
+        m = _MEETING_PATTERN.search(email_content)
+        if m:
+            fields["subject"] = m.group("subject").strip()
+        if dates:
+            dt_str = dates[0]
+            if times:
+                dt_str += " " + times[0]
+            fields["datetime"] = dt_str
+        loc_match = _re_module.search(r"(?:location|where|room|venue)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["location"] = loc_match.group(1).strip() if loc_match else None
+        org_match = _re_module.search(r"(?:organizer|host|from)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["organizer"] = org_match.group(1).strip() if org_match else None
+        return {"type": "meeting", "fields": fields}
+
+    return {"type": "unknown", "fields": {}}
+
+
+# --- #93: Expense Tracking from Email ---
+
+
+def track_expenses_from_emails(days: int = 30) -> dict:
+    """Extract and aggregate expense data from recent email documents.
+
+    Uses extract_structured_data() on recent email documents, filters for
+    receipt-type extractions, and aggregates by vendor and month.
+
+    Returns {total, count, by_vendor: [{vendor, amount, count}], by_month: [{month, total}]}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT content FROM documents WHERE category LIKE 'email%' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    vendor_agg: dict[str, dict] = {}  # vendor -> {amount, count}
+    month_agg: dict[str, float] = {}  # YYYY-MM -> total
+    total = 0.0
+    count = 0
+
+    for row in rows:
+        content = row["content"] if isinstance(row, sqlite3.Row) else row[0]
+        result = extract_structured_data(content)
+        if result["type"] != "receipt":
+            continue
+
+        fields = result["fields"]
+        amount_str = fields.get("amount")
+        if not amount_str:
+            continue
+
+        try:
+            amount = float(_re_module.sub(r"[^\d.]", "", amount_str))
+        except (ValueError, TypeError):
+            continue
+
+        vendor = fields.get("vendor") or "Unknown"
+        date_str = fields.get("date") or ""
+
+        total += amount
+        count += 1
+
+        # Aggregate by vendor
+        if vendor not in vendor_agg:
+            vendor_agg[vendor] = {"amount": 0.0, "count": 0}
+        vendor_agg[vendor]["amount"] += amount
+        vendor_agg[vendor]["count"] += 1
+
+        # Aggregate by month
+        month_match = _re_module.search(r"(\d{4})-(\d{2})", date_str)
+        if month_match:
+            month_key = f"{month_match.group(1)}-{month_match.group(2)}"
+        else:
+            month_key = datetime.utcnow().strftime("%Y-%m")
+        month_agg[month_key] = month_agg.get(month_key, 0.0) + amount
+
+    by_vendor = sorted(
+        [{"vendor": v, "amount": d["amount"], "count": d["count"]} for v, d in vendor_agg.items()],
+        key=lambda x: x["amount"],
+        reverse=True,
+    )
+    by_month = sorted(
+        [{"month": m, "total": t} for m, t in month_agg.items()],
+        key=lambda x: x["month"],
+    )
+
+    return {"total": total, "count": count, "by_vendor": by_vendor, "by_month": by_month}
+
+
+# --- #97: Travel Context Mode ---
+
+
+def detect_travel_mode() -> dict:
+    """Detect if the user is currently traveling based on recent documents.
+
+    Searches recent emails and calendar events for travel-related keywords.
+    Returns {traveling: bool, destination: str|None, dates: str|None, context: str}.
+    """
+    conn = _get_conn()
+    # Look at documents from the last 7 days
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT title, content FROM documents "
+        "WHERE (category LIKE 'email%' OR category LIKE 'calendar%') "
+        "AND created_at > ? ORDER BY created_at DESC LIMIT 100",
+        (cutoff,),
+    ).fetchall()
+
+    travel_keywords = [
+        "flight", "boarding pass", "hotel", "airbnb", "check-in",
+        "itinerary", "booking confirmation", "reservation",
+        "out of office", "ooo", "traveling", "airport",
+    ]
+    calendar_travel_keywords = ["flight", "travel", "hotel", "airport", "ooo", "out of office"]
+
+    travel_hits = []
+    destination = None
+    dates = None
+
+    for row in rows:
+        title = row["title"] if isinstance(row, sqlite3.Row) else row[0]
+        content = row["content"] if isinstance(row, sqlite3.Row) else row[1]
+        combined = f"{title} {content}".lower()
+
+        if any(kw in combined for kw in travel_keywords):
+            travel_hits.append(combined[:200])
+
+            # Try to extract destination from flight data
+            if destination is None:
+                result = extract_structured_data(content)
+                if result["type"] == "flight":
+                    destination = result["fields"].get("arrival")
+                    dates = result["fields"].get("date")
+
+    if not travel_hits:
+        return {"traveling": False, "destination": None, "dates": None, "context": "No travel signals found."}
+
+    context_parts = []
+    if destination:
+        context_parts.append(f"Destination: {destination}")
+    if dates:
+        context_parts.append(f"Dates: {dates}")
+    context_parts.append(f"Found {len(travel_hits)} travel-related document(s) in last 7 days.")
+
+    return {
+        "traveling": True,
+        "destination": destination,
+        "dates": dates,
+        "context": " ".join(context_parts),
+    }

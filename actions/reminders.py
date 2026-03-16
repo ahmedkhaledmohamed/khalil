@@ -3,6 +3,7 @@
 import logging
 import re
 import sqlite3
+import subprocess
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -245,3 +246,84 @@ def check_due_reminders() -> list[dict]:
     conn.commit()
     conn.close()
     return fired
+
+
+# --- #56: iCloud Reminders Sync ---
+
+
+def get_icloud_reminders() -> list[dict]:
+    """Read reminders from Apple Reminders.app via osascript.
+
+    Returns list of {name, due_date, completed} dicts.
+    """
+    script = (
+        'tell application "Reminders"\n'
+        '  set output to ""\n'
+        '  repeat with r in (reminders of default list whose completed is false)\n'
+        '    set output to output & name of r & "|||" & (due date of r as string) & "\\n"\n'
+        '  end repeat\n'
+        '  return output\n'
+        'end tell'
+    )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            log.warning("osascript failed: %s", result.stderr.strip())
+            return []
+
+        reminders = []
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split("|||", 1)
+            name = parts[0].strip()
+            due_date = parts[1].strip() if len(parts) > 1 else ""
+            reminders.append({"name": name, "due_date": due_date, "completed": False})
+        return reminders
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        log.warning("iCloud reminders fetch failed: %s", e)
+        return []
+
+
+def create_icloud_reminder(text: str, due_date: str | None = None) -> dict:
+    """Create a reminder in Apple Reminders.app via osascript.
+
+    Args:
+        text: Reminder text.
+        due_date: Optional due date string (e.g. "2026-03-20 09:00").
+
+    Returns dict with {name, created, due_date}.
+    """
+    if due_date:
+        script = (
+            f'tell application "Reminders"\n'
+            f'  set d to date "{due_date}"\n'
+            f'  make new reminder in default list with properties '
+            f'{{name:"{text}", due date:d}}\n'
+            f'end tell'
+        )
+    else:
+        script = (
+            f'tell application "Reminders"\n'
+            f'  make new reminder in default list with properties '
+            f'{{name:"{text}"}}\n'
+            f'end tell'
+        )
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            log.warning("osascript create reminder failed: %s", result.stderr.strip())
+            return {"name": text, "created": False, "error": result.stderr.strip()}
+
+        log.info("iCloud reminder created: %s", text)
+        return {"name": text, "created": True, "due_date": due_date or ""}
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        log.warning("iCloud reminder creation failed: %s", e)
+        return {"name": text, "created": False, "error": str(e)}
