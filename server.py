@@ -251,11 +251,18 @@ def clear_conversation(chat_id: int):
 
 
 def truncate_context(results: list[dict], max_chars: int = MAX_CONTEXT_TOKENS * 4) -> str:
-    """Format search results into context string, respecting token limits."""
+    """Format search results into context string, respecting token limits.
+
+    #67: Each result is tagged with a [Source: ...] citation for cross-source fusion.
+    """
     lines = []
     total = 0
     for r in results:
-        entry = f"[{r.get('category', '')}] {r['title']}\n{r['content']}\n"
+        category = r.get('category', '')
+        title = r['title']
+        # #67: Build a source citation tag from category and title
+        source_tag = f"[Source: {category} — {title}]" if category else f"[Source: {title}]"
+        entry = f"{source_tag}\n{r['content']}\n"
         if total + len(entry) > max_chars:
             break
         lines.append(entry)
@@ -2225,10 +2232,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get conversation history for multi-turn context
     conversation = get_conversation_history(chat_id)
 
-    # Combine context
-    full_context = f"Personal Profile:\n{personal_context}\n\nArchive Results:\n{archive_context}"
+    # #67: Combine context with source citations for cross-source fusion
+    full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
     if conversation:
-        full_context = f"{conversation}\n\n{full_context}"
+        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
 
     # Ask LLM
     response = await ask_claude(query, full_context)

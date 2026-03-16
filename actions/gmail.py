@@ -18,7 +18,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from config import CREDENTIALS_FILE, TOKEN_FILE, TOKEN_FILE_COMPOSE
+from config import CREDENTIALS_FILE, TOKEN_FILE, TOKEN_FILE_COMPOSE, TOKEN_FILE_MODIFY
 
 log = logging.getLogger("khalil.actions.gmail")
 
@@ -26,6 +26,10 @@ SCOPES_READ = ["https://www.googleapis.com/auth/gmail.readonly"]
 SCOPES_COMPOSE = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/gmail.compose",
+]
+SCOPES_MODIFY = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.modify",
 ]
 
 
@@ -53,9 +57,11 @@ def _get_credentials(scopes: list[str], token_file):
     return creds
 
 
-def _get_gmail_service(write: bool = False):
-    """Get Gmail API service. Use write=True for draft/send operations."""
-    if write:
+def _get_gmail_service(write: bool = False, modify: bool = False):
+    """Get Gmail API service. Use write=True for draft/send, modify=True for label ops."""
+    if modify:
+        creds = _get_credentials(SCOPES_MODIFY, TOKEN_FILE_MODIFY)
+    elif write:
         creds = _get_credentials(SCOPES_COMPOSE, TOKEN_FILE_COMPOSE)
     else:
         creds = _get_credentials(SCOPES_READ, TOKEN_FILE)
@@ -164,3 +170,69 @@ async def draft_email(to: str, subject: str, body: str) -> dict:
 async def send_draft(draft_id: str) -> dict:
     """Send an existing Gmail draft. Returns the sent message ID."""
     return await asyncio.to_thread(_send_draft_sync, draft_id)
+
+
+# --- #46: Gmail Label Management ---
+
+def _list_labels_sync() -> list[dict]:
+    """Synchronous label listing — called via asyncio.to_thread()."""
+    service = _get_gmail_service(modify=True)
+    results = service.users().labels().list(userId="me").execute()
+    labels = results.get("labels", [])
+    return [{"id": lbl["id"], "name": lbl["name"], "type": lbl.get("type", "")} for lbl in labels]
+
+
+def _apply_label_sync(message_id: str, label_name: str) -> dict:
+    """Synchronous label application — called via asyncio.to_thread()."""
+    service = _get_gmail_service(modify=True)
+    # Resolve label name to ID
+    labels = service.users().labels().list(userId="me").execute().get("labels", [])
+    label_id = None
+    for lbl in labels:
+        if lbl["name"].lower() == label_name.lower():
+            label_id = lbl["id"]
+            break
+    if not label_id:
+        raise ValueError(f"Label not found: {label_name}")
+
+    service.users().messages().modify(
+        userId="me", id=message_id,
+        body={"addLabelIds": [label_id]},
+    ).execute()
+    log.info("Applied label %s (%s) to message %s", label_name, label_id, message_id)
+    return {"message_id": message_id, "label": label_name, "action": "applied"}
+
+
+def _remove_label_sync(message_id: str, label_name: str) -> dict:
+    """Synchronous label removal — called via asyncio.to_thread()."""
+    service = _get_gmail_service(modify=True)
+    labels = service.users().labels().list(userId="me").execute().get("labels", [])
+    label_id = None
+    for lbl in labels:
+        if lbl["name"].lower() == label_name.lower():
+            label_id = lbl["id"]
+            break
+    if not label_id:
+        raise ValueError(f"Label not found: {label_name}")
+
+    service.users().messages().modify(
+        userId="me", id=message_id,
+        body={"removeLabelIds": [label_id]},
+    ).execute()
+    log.info("Removed label %s (%s) from message %s", label_name, label_id, message_id)
+    return {"message_id": message_id, "label": label_name, "action": "removed"}
+
+
+async def list_labels() -> list[dict]:
+    """List all Gmail labels. Requires gmail.modify scope (#46)."""
+    return await asyncio.to_thread(_list_labels_sync)
+
+
+async def apply_label(message_id: str, label_name: str) -> dict:
+    """Apply a label to a Gmail message. Requires gmail.modify scope (#46)."""
+    return await asyncio.to_thread(_apply_label_sync, message_id, label_name)
+
+
+async def remove_label(message_id: str, label_name: str) -> dict:
+    """Remove a label from a Gmail message. Requires gmail.modify scope (#46)."""
+    return await asyncio.to_thread(_remove_label_sync, message_id, label_name)
