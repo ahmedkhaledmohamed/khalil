@@ -622,6 +622,21 @@ _ACTION_PATTERNS = [
     (r"\blist\s+launch\s+agents?\b", "shell"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
+    # #43: Disk cleanup assistant
+    (r"\b(?:disk\s+space|storage\s+usage)\b", "shell"),
+    (r"\b(?:large|biggest)\s+files?\b", "shell"),
+    (r"\bclean\s+cache[s]?\b", "shell"),
+    (r"\bclear\s+cache[s]?\b", "shell"),
+    (r"\bclean\s+downloads?\b", "shell"),
+    # #48: Slack message sending
+    (r"\bsend\s+(?:a\s+)?slack\s+message\b", "slack_send"),
+    (r"\bpost\s+to\s+slack\b", "slack_send"),
+    (r"\bmessage\s+on\s+slack\b", "slack_send"),
+    # #51: Spotify playback control
+    (r"\b(?:play|resume)\s+music\b", "shell"),
+    (r"\b(?:pause|stop)\s+music\b", "shell"),
+    (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
+    (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "shell"),
 ]
 
 
@@ -887,6 +902,43 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         task_title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
         if task_title:
             return {"action": "tasks_create", "title": task_title, "description": f"Create task: {task_title}"}
+
+    # #43: Disk cleanup assistant (all READ — informational only)
+    if re.search(r"\b(?:disk\s+space|storage\s+usage)\b", text_lower):
+        return {"action": "shell", "command": "df -h /", "description": "Check disk space usage"}
+
+    if re.search(r"\b(?:large|biggest)\s+files?\b", text_lower):
+        return {"action": "shell", "command": "du -sh ~/Downloads/* ~/Desktop/* 2>/dev/null | sort -rh | head -20", "description": "Show largest files in Downloads and Desktop"}
+
+    if re.search(r"\bclean\s+cache|clear\s+cache", text_lower):
+        return {"action": "shell", "command": "du -sh ~/Library/Caches/* 2>/dev/null | sort -rh | head -10", "description": "Show cache sizes (read-only)"}
+
+    if re.search(r"\bclean\s+downloads?\b", text_lower):
+        return {"action": "shell", "command": "ls -lhS ~/Downloads/ | head -20", "description": "Show largest files in Downloads"}
+
+    # #51: Spotify playback control via osascript
+    if re.search(r"\b(?:play|resume)\s+music\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to play'", "description": "Play/resume Spotify"}
+
+    if re.search(r"\b(?:pause|stop)\s+music\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to pause'", "description": "Pause Spotify"}
+
+    if re.search(r"\b(?:next|skip)\s+(?:song|track)\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to next track'", "description": "Skip to next track"}
+
+    if re.search(r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to get name of current track & \" by \" & artist of current track'", "description": "Show currently playing track"}
+
+    # #48: Slack message sending
+    m = re.search(r"\b(?:send\s+(?:a\s+)?slack\s+message|post\s+to\s+slack|message\s+on\s+slack)\b.*?(?:to\s+|in\s+)?#?(\w[\w-]*)\s*[:\-]?\s*(.+?)$", text_lower)
+    if m:
+        channel = m.group(1)
+        message_text = text_stripped[m.start(2):m.end(2)].strip()
+        return {"action": "slack_send", "channel": channel, "text": message_text, "description": f"Send Slack message to #{channel}"}
+
+    # Slack without parsed channel/message — return generic intent
+    if re.search(r"\b(?:send\s+(?:a\s+)?slack\s+message|post\s+to\s+slack|message\s+on\s+slack)\b", text_lower):
+        return {"action": "slack_send", "channel": None, "text": None, "description": "Send a Slack message"}
 
     return None
 
@@ -2566,6 +2618,71 @@ def _wrap_extension_handler(handler_fn, extension_name: str):
                 pass
             await update.message.reply_text(f"Extension error: {e}")
     return wrapper
+
+
+# --- #48: Slack Message Sending ---
+
+async def send_slack_message(channel: str, text: str) -> str:
+    """Send a message to Slack via incoming webhook.
+
+    Webhook URL is stored in keyring as 'slack-webhook-url'.
+    Returns a status message.
+    """
+    webhook_url = get_secret("slack-webhook-url")
+    if not webhook_url:
+        return ("Slack webhook not configured. Set it with:\n"
+                "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'slack-webhook-url', 'YOUR_URL')\"")
+
+    payload = {"text": text}
+    if channel:
+        payload["channel"] = f"#{channel}" if not channel.startswith("#") else channel
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            return f"Message sent to #{channel}."
+        return f"Slack API error: {resp.status_code} — {resp.text[:200]}"
+
+
+# --- #25: Extension Re-registration Helper ---
+
+def reregister_extension(application, name: str) -> str:
+    """Re-register a single extension's command handler on a running Application.
+
+    Call after hot_reload_extension() to update the Telegram handler.
+    Returns status message.
+    """
+    import importlib
+    from config import EXTENSIONS_DIR
+
+    manifest_path = EXTENSIONS_DIR / f"{name}.json"
+    if not manifest_path.exists():
+        return f"Extension '{name}' manifest not found."
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        module_name = manifest["action_module"]
+        handler_name = manifest["handler_function"]
+        command = manifest["command"]
+
+        mod = sys.modules.get(module_name)
+        if mod is None:
+            mod = importlib.import_module(module_name)
+
+        handler_fn = getattr(mod, handler_name)
+        wrapped = _wrap_extension_handler(handler_fn, manifest.get("name", command))
+
+        # Remove existing handler for this command if present
+        for group_handlers in application.handlers.values():
+            for h in group_handlers:
+                if isinstance(h, CommandHandler) and command in h.commands:
+                    group_handlers.remove(h)
+                    break
+
+        application.add_handler(CommandHandler(command, wrapped))
+        return f"Extension '{name}' re-registered as /{command}."
+    except Exception as e:
+        return f"Failed to re-register '{name}': {e}"
 
 
 def _load_extensions(application):
