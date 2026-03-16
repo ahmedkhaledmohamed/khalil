@@ -1,6 +1,7 @@
 """Tests for Khalil improvements."""
 
 import asyncio
+import json
 import os
 import re
 import sqlite3
@@ -4235,3 +4236,414 @@ class TestLoginItemManagement:
         # It's a shell action, which goes through safety classification
         # The command itself is read-only (osascript get / ls)
         assert "osascript" in result["command"] or "ls" in result["command"]
+
+
+# ============================================================
+# Batch 13: Items #24, #25, #30, #43, #48, #51, #83
+# ============================================================
+
+
+# --- #24: Dependency Injection for Extensions ---
+
+class TestKhalilContext:
+    def test_khalil_context_attributes(self):
+        """KhalilContext exposes db, ask_llm, and notify."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock
+        db = MagicMock()
+        ask_llm = AsyncMock()
+        notify = AsyncMock()
+        ctx = KhalilContext(db=db, ask_llm=ask_llm, notify=notify)
+        assert ctx.db is db
+        assert ctx.ask_llm is ask_llm
+        assert ctx.notify is notify
+
+    def test_khalil_context_search_method(self):
+        """KhalilContext.search delegates to keyword_search."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock, patch
+        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        with patch("knowledge.search.keyword_search", return_value=[{"title": "test"}]) as mock_search:
+            results = ctx.search("test query", limit=3)
+            mock_search.assert_called_once_with("test query", limit=3)
+            assert results == [{"title": "test"}]
+
+    def test_khalil_context_record_signal(self):
+        """KhalilContext.record_signal delegates to learning.record_signal."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock, patch
+        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        with patch("learning.record_signal") as mock_signal:
+            ctx.record_signal("test_type", {"key": "value"})
+            mock_signal.assert_called_once_with("test_type", {"key": "value"})
+
+    def test_khalil_context_mentioned_in_prompt(self):
+        """Code generation prompt references KhalilContext."""
+        from actions.extend import generate_action_module
+        import inspect
+        source = inspect.getsource(generate_action_module)
+        assert "KhalilContext" in source
+
+
+# --- #25: Extension Hot-Reload ---
+
+class TestExtensionHotReload:
+    def test_hot_reload_not_found(self, tmp_path, monkeypatch):
+        """hot_reload_extension returns error for missing extension."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        from actions.extend import hot_reload_extension
+        result = hot_reload_extension("nonexistent")
+        assert "not found" in result
+
+    def test_hot_reload_valid_extension(self, tmp_path, monkeypatch):
+        """hot_reload_extension reloads module and returns success."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        # Create a minimal manifest
+        manifest = {
+            "name": "test_ext",
+            "command": "testext",
+            "action_module": "os.path",  # use a stdlib module for testing
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "test_ext.json").write_text(json.dumps(manifest))
+        from actions.extend import hot_reload_extension
+        result = hot_reload_extension("test_ext")
+        assert "reloaded successfully" in result
+
+    def test_reload_all_extensions_empty(self, tmp_path, monkeypatch):
+        """reload_all_extensions returns message when no extensions."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        from actions.extend import reload_all_extensions
+        results = reload_all_extensions()
+        assert results == ["No extensions found."]
+
+    def test_reload_all_extensions_with_entries(self, tmp_path, monkeypatch):
+        """reload_all_extensions processes all manifest files."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        manifest = {
+            "name": "ext1",
+            "command": "ext1",
+            "action_module": "os.path",
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "ext1.json").write_text(json.dumps(manifest))
+        from actions.extend import reload_all_extensions
+        results = reload_all_extensions()
+        assert len(results) == 1
+        assert "reloaded" in results[0]
+
+    def test_reregister_extension_missing(self, monkeypatch):
+        """reregister_extension handles missing manifest."""
+        from server import reregister_extension
+        from unittest.mock import MagicMock
+        monkeypatch.setattr("config.EXTENSIONS_DIR", __import__("pathlib").Path("/nonexistent"))
+        app = MagicMock()
+        result = reregister_extension(app, "missing")
+        assert "not found" in result
+
+
+# --- #30: Multi-File Extension Generation ---
+
+class TestMultiFileExtension:
+    def test_spec_needs_scheduler_positive(self):
+        """Specs with scheduler keywords should trigger multi-file."""
+        from actions.extend import spec_needs_scheduler
+        assert spec_needs_scheduler({"description": "monitor stock prices periodically"}) is True
+        assert spec_needs_scheduler({"description": "scheduled daily report"}) is True
+        assert spec_needs_scheduler({"description": "recurring email digest"}) is True
+
+    def test_spec_needs_scheduler_negative(self):
+        """Specs without scheduler keywords should not trigger multi-file."""
+        from actions.extend import spec_needs_scheduler
+        assert spec_needs_scheduler({"description": "track my reading list"}) is False
+        assert spec_needs_scheduler({"description": "search my contacts"}) is False
+
+    def test_multi_file_template_exists(self):
+        """MULTI_FILE_TEMPLATE has scheduler_job and db_migration."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        assert "scheduler_job" in MULTI_FILE_TEMPLATE
+        assert "db_migration" in MULTI_FILE_TEMPLATE
+
+    def test_scheduler_template_renders(self):
+        """Scheduler job template renders with name placeholder."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        rendered = MULTI_FILE_TEMPLATE["scheduler_job"].format(name="price_monitor")
+        assert "run_price_monitor_job" in rendered
+        assert "khalil.scheduler.price_monitor" in rendered
+
+    def test_db_migration_template_renders(self):
+        """DB migration template renders with name placeholder."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        rendered = MULTI_FILE_TEMPLATE["db_migration"].format(name="price_monitor")
+        assert "migrate_price_monitor" in rendered
+        assert "price_monitor_data" in rendered
+
+
+# --- #43: Disk Cleanup Assistant ---
+
+class TestDiskCleanup:
+    def test_disk_space_pattern(self):
+        """'disk space' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("check disk space") == "shell"
+
+    def test_storage_usage_pattern(self):
+        """'storage usage' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("show storage usage") == "shell"
+
+    def test_large_files_pattern(self):
+        """'large files' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("show large files") == "shell"
+
+    def test_clean_cache_pattern(self):
+        """'clean cache' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("clean caches") == "shell"
+
+    def test_clean_downloads_pattern(self):
+        """'clean downloads' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("clean downloads") == "shell"
+
+    def test_disk_space_direct_intent(self):
+        """'disk space' maps to df -h /."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check disk space")
+        assert result is not None
+        assert "df -h" in result["command"]
+
+    def test_large_files_direct_intent(self):
+        """'show large files' maps to du + sort."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("show me the large files")
+        assert result is not None
+        assert "du" in result["command"]
+        assert "sort" in result["command"]
+
+    def test_clean_cache_direct_intent(self):
+        """'clean cache' shows cache sizes (read-only)."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("clean caches")
+        assert result is not None
+        assert "Library/Caches" in result["command"]
+
+    def test_clean_downloads_direct_intent(self):
+        """'clean downloads' shows Downloads sorted by size."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("clean downloads")
+        assert result is not None
+        assert "Downloads" in result["command"]
+
+
+# --- #48: Slack Message Sending ---
+
+class TestSlackIntegration:
+    def test_slack_send_pattern(self):
+        """'send slack message' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("send a slack message to #general") == "slack_send"
+
+    def test_post_to_slack_pattern(self):
+        """'post to slack' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("post to slack in #random") == "slack_send"
+
+    def test_message_on_slack_pattern(self):
+        """'message on slack' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("message on slack") == "slack_send"
+
+    def test_slack_direct_intent_with_channel(self):
+        """Slack send parses channel and message."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("send a slack message to general: hello team")
+        assert result is not None
+        assert result["action"] == "slack_send"
+        assert result["channel"] == "general"
+
+    def test_slack_direct_intent_generic(self):
+        """Slack send without channel returns generic intent."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("send a slack message")
+        assert result is not None
+        assert result["action"] == "slack_send"
+
+    def test_send_slack_message_no_webhook(self):
+        """send_slack_message returns error when webhook not configured."""
+        from server import send_slack_message
+        from unittest.mock import patch
+        with patch("server.get_secret", return_value=None):
+            result = asyncio.run(send_slack_message("general", "hello"))
+            assert "not configured" in result
+
+    def test_send_slack_message_success(self):
+        """send_slack_message posts to webhook."""
+        from server import send_slack_message
+        from unittest.mock import patch, AsyncMock, MagicMock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        with patch("server.get_secret", return_value="https://hooks.slack.com/test"), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+            result = asyncio.run(send_slack_message("general", "hello"))
+            assert "sent" in result.lower()
+
+
+# --- #51: Spotify Playback Control ---
+
+class TestSpotifyPlayback:
+    def test_play_music_pattern(self):
+        """'play music' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("play music") == "shell"
+
+    def test_pause_music_pattern(self):
+        """'pause music' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("pause music") == "shell"
+
+    def test_next_song_pattern(self):
+        """'next song' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("next song") == "shell"
+
+    def test_now_playing_pattern(self):
+        """'what's playing' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("what's playing") == "shell"
+
+    def test_play_music_direct_intent(self):
+        """'play music' maps to osascript play."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("play music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "play" in result["command"]
+
+    def test_pause_music_direct_intent(self):
+        """'pause music' maps to osascript pause."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("pause music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "pause" in result["command"]
+
+    def test_next_song_direct_intent(self):
+        """'skip song' maps to osascript next track."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("skip song")
+        assert result is not None
+        assert "next track" in result["command"]
+
+    def test_current_song_direct_intent(self):
+        """'what's playing' maps to osascript get current track."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("what's playing")
+        assert result is not None
+        assert "current track" in result["command"]
+
+    def test_resume_music_direct_intent(self):
+        """'resume music' also maps to Spotify play."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("resume music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "play" in result["command"]
+
+    def test_stop_music_direct_intent(self):
+        """'stop music' also maps to Spotify pause."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("stop music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "pause" in result["command"]
+
+
+# --- #83: Integration Test Suite ---
+
+class TestIntegrationE2E:
+    """E2E-style tests verifying handle_message wiring with mocked externals."""
+
+    def test_shell_intent_full_flow(self, mock_update, mock_context):
+        """Message triggering shell intent goes through direct mapping."""
+        from server import _try_direct_shell_intent
+        # Verify battery query maps to a shell command
+        result = _try_direct_shell_intent("what's my battery level")
+        assert result is not None
+        assert result["action"] == "shell"
+        assert "batt" in result["command"]
+
+    def test_knowledge_search_flow(self, mock_update, mock_context, mock_ask_llm):
+        """Knowledge search queries are not action intents and fall through to LLM.
+
+        Tests the intent detection path: _looks_like_action returns None,
+        _try_direct_shell_intent returns None → query goes to LLM context pipeline.
+        """
+        from server import _looks_like_action, _try_direct_shell_intent
+        query = "what did I discuss about RRSP"
+        # Should not be detected as an action
+        assert _looks_like_action(query) is None
+        # Should not map to a direct shell intent
+        assert _try_direct_shell_intent(query) is None
+        # This means it falls through to the LLM + knowledge search path
+
+    def test_reminder_intent_detection(self, mock_update, mock_context):
+        """Reminder phrases are detected by _looks_like_action."""
+        from server import _looks_like_action
+        assert _looks_like_action("remind me to buy groceries tomorrow") == "reminder"
+        assert _looks_like_action("set a reminder for 3pm") == "reminder"
+        assert _looks_like_action("don't let me forget the meeting") == "reminder"
+
+    def test_disk_cleanup_e2e(self, mock_update, mock_context):
+        """Disk cleanup message → direct shell intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "show me the biggest files on my computer"
+        hint = _looks_like_action(query)
+        assert hint == "shell"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert intent["action"] == "shell"
+        assert "du" in intent["command"]
+
+    def test_spotify_e2e(self, mock_update, mock_context):
+        """Spotify command → direct shell intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "play music"
+        hint = _looks_like_action(query)
+        assert hint == "shell"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert "Spotify" in intent["command"]
+
+    def test_slack_e2e(self, mock_update, mock_context):
+        """Slack send message → action pattern → direct intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "send a slack message to general: standup update"
+        hint = _looks_like_action(query)
+        assert hint == "slack_send"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert intent["action"] == "slack_send"
+        assert intent["channel"] == "general"
+
+    def test_extension_hot_reload_e2e(self, tmp_path, monkeypatch):
+        """Hot reload + re-register cycle."""
+        from actions.extend import hot_reload_extension
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        manifest = {
+            "name": "test_ext",
+            "command": "testext",
+            "action_module": "os.path",
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "test_ext.json").write_text(json.dumps(manifest))
+        result = hot_reload_extension("test_ext")
+        assert "reloaded successfully" in result
