@@ -521,6 +521,14 @@ _ACTION_PATTERNS = [
     # Email labeling / categorization
     (r"\b(?:categoriz|label|organiz|sort)\w*\s+(?:my\s+)?(?:email|inbox|mail)\b", "label"),
     (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),
+    # #36: Clipboard integration
+    (r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", "clipboard_read"),
+    (r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", "clipboard_process"),
+    (r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", "clipboard_read"),
+    # #40: Spotlight file search
+    (r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?file\b", "spotlight"),
+    (r"\bfind\s+(?:all\s+)?(?:my\s+)?\w+\s+files?\b", "spotlight"),
+    (r"\bwhere\s+is\s+(?:my\s+|the\s+)?\w+\b.*\bfile\b", "spotlight"),
 ]
 
 
@@ -618,6 +626,22 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     # "uptime"
     if re.search(r"\b(?:uptime|how\s+long.*(?:running|been\s+on|up))\b", text_lower):
         return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
+
+    # #36: Clipboard — "what's on my clipboard", "read clipboard"
+    if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
+       re.search(r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", text_lower):
+        return {"action": "shell", "command": "pbpaste", "description": "Read clipboard contents"}
+
+    # #36: Clipboard — "process/summarize my clipboard"
+    if re.search(r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", text_lower):
+        return {"action": "shell", "command": "pbpaste", "description": "Read clipboard for processing"}
+
+    # #40: Spotlight file search — "find file X", "locate my .py files"
+    m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
+    if m:
+        search_term = m.group(1).strip()
+        if search_term:
+            return {"action": "shell", "command": f"mdfind 'kMDItemFSName == \"{search_term}\"'", "description": f"Search for file: {search_term}"}
 
     return None
 
@@ -2030,6 +2054,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         record_signal("user_correction", {"query": query[:200]})
         await _try_inline_healing(update)
 
+    # #61: Implicit preference detection — detect preferences in messages
+    _PREFERENCE_PATTERNS = [
+        (r"\bi\s+prefer\s+(.+?)(?:\.|$)", "general_preference"),
+        (r"\b(?:always|never)\s+(.+?)(?:\.|$)", "behavioral_preference"),
+        (r"\b(?:i\s+like|i\s+want)\s+(?:it\s+)?(?:when\s+)?(?:you\s+)?(.+?)(?:\.|$)", "style_preference"),
+        (r"\b(?:don'?t|stop|quit)\s+(.+?)(?:\.|$)", "negative_preference"),
+        (r"\buse\s+(?:bullet\s+points?|lists?|markdown|short\s+(?:answers?|responses?))\b", "format_preference"),
+    ]
+    for p, ptype in _PREFERENCE_PATTERNS:
+        pm = re.search(p, query.lower())
+        if pm:
+            try:
+                from learning import record_signal
+                record_signal("implicit_preference", {
+                    "type": ptype, "text": query[:200], "match": pm.group(0)[:100],
+                })
+            except Exception:
+                pass
+            break
+
     # Try natural language action detection
     # 0. Check if query matches an extension command — route directly
     action_hint = _looks_like_action(query)
@@ -2053,6 +2097,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action_hint:
         intent = await detect_intent(query)
         if intent:
+            # #3: Track intent detection accuracy — pattern hint vs LLM result
+            try:
+                llm_action = intent.get("action", "unknown")
+                record_signal("intent_accuracy", {
+                    "pattern_hint": action_hint,
+                    "llm_action": llm_action,
+                    "match": action_hint == llm_action,
+                    "query": query[:100],
+                })
+            except Exception:
+                pass
             intent["user_query"] = query
             handled = await handle_action_intent(intent, update)
             if handled:
@@ -2198,12 +2253,28 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _wrap_extension_handler(handler_fn, extension_name: str):
-    """Wrap extension handler to record failures for self-healing."""
+    """Wrap extension handler to record usage and failures for monitoring (#31)."""
     async def wrapper(update, context):
         try:
-            return await handler_fn(update, context)
+            from learning import record_signal
+            record_signal("extension_usage", {"extension": extension_name, "status": "invoked"})
+        except Exception:
+            pass
+        try:
+            result = await handler_fn(update, context)
+            try:
+                from learning import record_signal
+                record_signal("extension_usage", {"extension": extension_name, "status": "success"})
+            except Exception:
+                pass
+            return result
         except Exception as e:
             log.error("Extension %s failed: %s", extension_name, e)
+            try:
+                from learning import record_signal
+                record_signal("extension_usage", {"extension": extension_name, "status": "error", "error": str(e)[:200]})
+            except Exception:
+                pass
             try:
                 from learning import record_signal
                 record_signal("extension_runtime_failure", {

@@ -150,6 +150,32 @@ async def classify_gap(query: str, ask_llm_fn) -> dict | None:
     return {"name": name, "command": command, "description": description}
 
 
+def check_extension_overlap(spec: dict) -> str | None:
+    """#29: Check if a proposed extension overlaps with existing capabilities.
+
+    Returns a message describing the overlap, or None if no overlap found.
+    """
+    name = spec.get("name", "").lower()
+    command = spec.get("command", "").lower()
+    description = spec.get("description", "").lower()
+
+    # Check against built-in capabilities
+    for cap in EXISTING_CAPABILITIES:
+        cap_lower = cap.lower()
+        cap_name = cap_lower.split(" — ")[0].strip() if " — " in cap_lower else cap_lower.split()[0]
+        if cap_name in name or cap_name in command or name in cap_lower:
+            return f"Overlaps with built-in capability: {cap}"
+
+    # Check against existing extensions
+    for ext_cap in _get_extension_capabilities():
+        ext_lower = ext_cap.lower()
+        ext_cmd = ext_lower.split(" — ")[0].strip()
+        if ext_cmd == command or name in ext_lower:
+            return f"Overlaps with existing extension: {ext_cap}"
+
+    return None
+
+
 def _get_extension_capabilities() -> list[str]:
     """Read existing extension manifests to include in capabilities list."""
     capabilities = []
@@ -939,6 +965,12 @@ async def generate_and_pr(payload: dict) -> str:
 
     if (EXTENSIONS_DIR / f"{name}.json").exists():
         return f"Extension manifest `extensions/{name}.json` already exists."
+
+    # #29: Check for overlapping capabilities before generating
+    overlap = check_extension_overlap(spec)
+    if overlap:
+        log.info("Extension dedup: %s — skipping generation for %s", overlap, name)
+        return f"Skipped: {overlap}. Consider using the existing capability instead."
 
     try:
         complexity = classify_complexity(spec)
