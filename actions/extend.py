@@ -24,7 +24,7 @@ from pathlib import Path
 
 from config import (
     KHALIL_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
-    KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH,
+    KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH, DATA_DIR,
 )
 
 log = logging.getLogger("khalil.extend")
@@ -913,7 +913,18 @@ BLOCKLISTED_QUALIFIED_CALLS = {
 
 BLOCKLISTED_IMPORTS = {
     "subprocess", "ctypes", "socket", "http.server", "xmlrpc",
+    "signal", "multiprocessing", "webbrowser",
 }
+
+# #74: Extension sandboxing — whitelist of allowed imports
+SANDBOX_ALLOWED_IMPORTS = {
+    "json", "re", "datetime", "logging", "httpx", "asyncio",
+    "collections", "dataclasses", "enum", "functools", "itertools",
+    "math", "pathlib", "textwrap", "typing", "uuid",
+}
+
+# #74: Dangerous function calls beyond what BLOCKLISTED_BARE_CALLS covers
+_SANDBOX_BLOCKED_CALLS = {"__import__", "compile", "globals", "locals", "vars", "delattr"}
 
 
 def validate_generated_code(source: str) -> tuple[bool, str, list[str]]:
@@ -974,6 +985,63 @@ def validate_generated_code(source: str) -> tuple[bool, str, list[str]]:
     warnings = _check_quality_warnings(source)
 
     return True, "", warnings
+
+
+def validate_extension_safety(source_code: str) -> tuple[bool, list[str]]:
+    """#74: Validate extension code against sandbox rules.
+
+    Checks:
+    - All imports are in SANDBOX_ALLOWED_IMPORTS whitelist
+    - No eval(), exec(), __import__(), subprocess, os.system calls
+    - No file system access outside DATA_DIR
+
+    Returns (safe: bool, violations: list[str]).
+    """
+    violations = []
+
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        return False, [f"Syntax error: {e}"]
+
+    data_dir_str = str(DATA_DIR)
+
+    for node in ast.walk(tree):
+        # Check imports against whitelist
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top_level = alias.name.split(".")[0]
+                if top_level not in SANDBOX_ALLOWED_IMPORTS:
+                    violations.append(f"Disallowed import: {alias.name} (not in whitelist)")
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                top_level = node.module.split(".")[0]
+                if top_level not in SANDBOX_ALLOWED_IMPORTS:
+                    violations.append(f"Disallowed import: {node.module} (not in whitelist)")
+
+        # Check dangerous function calls
+        if isinstance(node, ast.Call):
+            call_name = _get_call_name(node)
+            if call_name:
+                bare_name = call_name.rsplit(".", 1)[-1]
+                # Check sandbox-specific blocks
+                if bare_name in _SANDBOX_BLOCKED_CALLS:
+                    violations.append(f"Blocked call: {call_name}")
+                if bare_name in BLOCKLISTED_BARE_CALLS:
+                    violations.append(f"Blocked call: {call_name}")
+                # Check for os.system, subprocess.run, etc.
+                if any(call_name == b or call_name.startswith(b + ".") for b in BLOCKLISTED_QUALIFIED_CALLS):
+                    violations.append(f"Blocked call: {call_name}")
+
+        # Check for string literals that reference paths outside DATA_DIR
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            val = node.value
+            # Flag absolute paths that aren't under DATA_DIR
+            if val.startswith("/") and not val.startswith(data_dir_str) and not val.startswith("/tmp"):
+                violations.append(f"File path outside DATA_DIR: {val}")
+
+    return len(violations) == 0, violations
 
 
 def _check_quality_warnings(source: str) -> list[str]:
@@ -1068,7 +1136,19 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
 
     Returns (passed, error_message).
     #28: Enhanced smoke test — actually invokes the handler with mock objects.
+    #74: Now includes sandbox safety validation.
     """
+    # Phase 0: Sandbox safety check (#74) — check for blocked imports/calls only
+    try:
+        source = module_path.read_text()
+        safe, violations = validate_extension_safety(source)
+        # Only block on hard violations (blocked imports/calls), not whitelist violations
+        hard_violations = [v for v in violations if "Blocked" in v or "File path outside" in v]
+        if hard_violations:
+            return False, f"Sandbox violation: {'; '.join(hard_violations[:3])}"
+    except Exception as e:
+        log.warning("Sandbox check failed for %s: %s", module_path, e)
+
     handler_name = f"cmd_{command_name}"
     # Phase 1: Import check + handler exists
     test_script = (

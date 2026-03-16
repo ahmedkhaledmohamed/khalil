@@ -637,6 +637,20 @@ _ACTION_PATTERNS = [
     (r"\b(?:pause|stop)\s+music\b", "shell"),
     (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
     (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "shell"),
+    # #37: Screenshot and OCR
+    (r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", "screenshot"),
+    (r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", "screenshot"),
+    (r"\bcapture\s+(?:the\s+)?screen\b", "screenshot"),
+    (r"\bscreenshot\b", "screenshot"),
+    # #54: Google Drive file creation
+    (r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:doc|document)\b", "drive_create"),
+    (r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:spreadsheet|sheet)\b", "drive_create"),
+    (r"\bsave\s+to\s+(?:google\s+)?drive\b", "drive_create"),
+    # #55: Multi-account Gmail
+    (r"\bsearch\s+(?:my\s+)?work\s+email\b", "email_work"),
+    (r"\bsearch\s+(?:my\s+)?personal\s+email\b", "email_personal"),
+    (r"\bcheck\s+(?:my\s+)?work\s+(?:inbox|email|mail)\b", "email_work"),
+    (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
 ]
 
 
@@ -663,6 +677,33 @@ _TOPIC_KEYWORDS = {
     "family": {"kids", "wife", "husband", "family", "school", "daycare", "children", "parent",
                "birthday", "vacation", "home", "weekend", "dinner", "park"},
 }
+
+
+def _ocr_screenshot(image_path: str = "/tmp/khalil_screenshot.png") -> str:
+    """#37: OCR stub — extract text from a screenshot image.
+
+    Full OCR requires macOS Vision framework via pyobjc or Shortcuts.
+    This stub captures the intent and returns guidance.
+    """
+    import os
+    if not os.path.exists(image_path):
+        return f"No screenshot found at {image_path}. Take a screenshot first."
+    # Attempt via macOS Shortcuts if available
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["shortcuts", "run", "Extract Text from Image", "--input-path", image_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+    return (
+        f"Screenshot saved to {image_path}. "
+        "OCR text extraction requires macOS Vision framework (pyobjc-framework-Vision) "
+        "or a configured Shortcuts automation. Install pyobjc-framework-Vision for full OCR support."
+    )
 
 
 def classify_message_topic(text: str) -> str:
@@ -939,6 +980,37 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     # Slack without parsed channel/message — return generic intent
     if re.search(r"\b(?:send\s+(?:a\s+)?slack\s+message|post\s+to\s+slack|message\s+on\s+slack)\b", text_lower):
         return {"action": "slack_send", "channel": None, "text": None, "description": "Send a Slack message"}
+
+    # #37: Screenshot capture (READ — just capturing, not modifying)
+    if re.search(r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", text_lower):
+        return {"action": "shell", "command": "screencapture -w /tmp/khalil_screenshot.png", "description": "Capture window screenshot"}
+
+    if re.search(r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", text_lower) or \
+       re.search(r"\bcapture\s+(?:the\s+)?screen\b", text_lower) or \
+       text_lower.strip() == "screenshot":
+        return {"action": "shell", "command": "screencapture -x /tmp/khalil_screenshot.png", "description": "Take screenshot (silent)"}
+
+    # #54: Google Drive file creation
+    m = re.search(r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:doc|document)\s+(?:called|named|titled?)?\s*['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "drive_create_doc", "title": title, "description": f"Create Google Doc: {title}"}
+
+    m = re.search(r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:spreadsheet|sheet)\s+(?:called|named|titled?)?\s*['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "drive_create_sheet", "title": title, "description": f"Create Google Sheet: {title}"}
+
+    # #55: Multi-account Gmail
+    if re.search(r"\bsearch\s+(?:my\s+)?work\s+(?:email|inbox|mail)\b", text_lower) or \
+       re.search(r"\bcheck\s+(?:my\s+)?work\s+(?:email|inbox|mail)\b", text_lower):
+        return {"action": "email_search", "account": "work", "description": "Search work email"}
+
+    if re.search(r"\bsearch\s+(?:my\s+)?personal\s+(?:email|inbox|mail)\b", text_lower) or \
+       re.search(r"\bcheck\s+(?:my\s+)?personal\s+(?:email|inbox|mail)\b", text_lower):
+        return {"action": "email_search", "account": "personal", "description": "Search personal email"}
 
     return None
 
