@@ -8,6 +8,7 @@ from actions.terminal import (
     format_terminal_status,
     diff_dev_state,
     format_state_changes,
+    _escape_applescript,
 )
 
 # --- Fixtures: real output from cursor --status ---
@@ -262,3 +263,138 @@ class TestFormatStateChanges:
 
     def test_empty_changes(self):
         assert format_state_changes([]) == ""
+
+
+# --- Milestone 4+5: Terminal & Cursor Control ---
+
+class TestEscapeApplescript:
+    def test_escapes_quotes(self):
+        assert _escape_applescript('say "hello"') == 'say \\"hello\\"'
+
+    def test_escapes_backslash(self):
+        assert _escape_applescript("path\\to") == "path\\\\to"
+
+    def test_plain_string(self):
+        assert _escape_applescript("ls -la") == "ls -la"
+
+    def test_combined(self):
+        assert _escape_applescript('echo "test\\n"') == 'echo \\"test\\\\n\\"'
+
+
+class TestIntentPatterns:
+    """Test that _ACTION_PATTERNS and _try_direct_shell_intent catch terminal/cursor intents."""
+
+    def _action_hint(self, text):
+        """Return the _ACTION_PATTERNS hint for text."""
+        import re
+        # Import at test time to get the latest patterns
+        import importlib
+        import server
+        importlib.reload(server)
+        for pattern, hint in server._ACTION_PATTERNS:
+            if re.search(pattern, text.lower()):
+                return hint
+        return None
+
+    def _direct_intent(self, text):
+        """Return direct intent dict."""
+        import importlib
+        import server
+        importlib.reload(server)
+        return server._try_direct_shell_intent(text)
+
+    def test_cursor_status_pattern(self):
+        assert self._action_hint("cursor status") == "cursor_status"
+        assert self._action_hint("what's open in cursor") == "cursor_status"
+
+    def test_terminal_status_pattern(self):
+        assert self._action_hint("terminal sessions") == "terminal_status"
+        assert self._action_hint("what's running in my terminal") == "terminal_status"
+
+    def test_terminal_exec_pattern(self):
+        assert self._action_hint("run npm test in terminal") == "terminal_exec"
+
+    def test_terminal_new_tab_pattern(self):
+        assert self._action_hint("new terminal tab") == "terminal_new_tab"
+        assert self._action_hint("open a new terminal") == "terminal_new_tab"
+
+    def test_cursor_open_pattern(self):
+        assert self._action_hint("open server.py in cursor") == "cursor_open"
+        assert self._action_hint("cursor open config.py") == "cursor_open"
+
+    def test_cursor_diff_pattern(self):
+        assert self._action_hint("cursor diff") == "cursor_diff"
+
+    # Direct intent tests
+    def test_direct_cursor_status(self):
+        intent = self._direct_intent("cursor status")
+        assert intent["action"] == "cursor_status"
+
+    def test_direct_terminal_status(self):
+        intent = self._direct_intent("terminal sessions")
+        assert intent["action"] == "terminal_status"
+
+    def test_direct_run_in_terminal(self):
+        intent = self._direct_intent("run npm test in terminal")
+        assert intent["action"] == "terminal_exec"
+        assert intent["command"] == "npm test"
+
+    def test_direct_send_to_terminal(self):
+        intent = self._direct_intent("send ls -la to terminal")
+        assert intent["action"] == "terminal_exec"
+        assert intent["command"] == "ls -la"
+
+    def test_direct_new_tab(self):
+        intent = self._direct_intent("new terminal tab")
+        assert intent["action"] == "terminal_new_tab"
+
+    def test_direct_open_in_cursor(self):
+        intent = self._direct_intent("open server.py in cursor")
+        assert intent["action"] == "cursor_open"
+        assert intent["path"] == "server.py"
+
+    def test_direct_cursor_open(self):
+        intent = self._direct_intent("cursor open config.py")
+        assert intent["action"] == "cursor_open"
+        assert intent["path"] == "config.py"
+
+    def test_direct_jump_to_line(self):
+        intent = self._direct_intent("jump to line 42 in server.py")
+        assert intent["action"] == "cursor_open"
+        assert intent["line"] == 42
+        assert intent["path"] == "server.py"
+
+    def test_direct_cursor_diff(self):
+        intent = self._direct_intent("cursor diff file1.py file2.py")
+        assert intent["action"] == "cursor_diff"
+        assert intent["file1"] == "file1.py"
+        assert intent["file2"] == "file2.py"
+
+
+class TestAutonomyRules:
+    """Test that terminal/cursor actions have correct autonomy classification."""
+
+    def test_terminal_exec_is_write(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["terminal_exec"] == ActionType.WRITE
+
+    def test_cursor_open_is_read(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_open"] == ActionType.READ
+
+    def test_cursor_open_project_is_write(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_open_project"] == ActionType.WRITE
+
+    def test_terminal_new_tab_is_write(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["terminal_new_tab"] == ActionType.WRITE
+
+    def test_cursor_diff_is_read(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_diff"] == ActionType.READ

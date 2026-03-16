@@ -403,3 +403,166 @@ async def poll_and_diff() -> list[str]:
     changes = diff_dev_state(old_state, new_state)
     _save_state(new_state)
     return changes
+
+
+# --- Terminal Control (M4) ---
+
+_ITERM_WRITE_SCRIPT = '''
+tell application "iTerm2"
+    tell current session of current tab of current window
+        write text "{command}"
+    end tell
+end tell
+'''
+
+_ITERM_WRITE_TO_SESSION_SCRIPT = '''
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if tty of s is "{tty}" then
+                    tell s to write text "{command}"
+                    return "ok"
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "session_not_found"
+end tell
+'''
+
+_ITERM_NEW_TAB_SCRIPT = '''
+tell application "iTerm2"
+    tell current window
+        create tab with default profile
+        {write_cmd}
+    end tell
+end tell
+'''
+
+
+def _escape_applescript(text: str) -> str:
+    """Escape a string for embedding in AppleScript."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
+async def send_to_iterm(command: str, session_tty: str = "current") -> dict:
+    """Send a command to a specific iTerm2 session.
+
+    Args:
+        command: The command text to send.
+        session_tty: TTY path like "/dev/ttys003", or "current" for current session.
+
+    Returns: {success: bool, error: str | None}
+    """
+    # Sanitize command using shell.py's sanitizer
+    from actions.shell import sanitize_command
+    sanitized, reason = sanitize_command(command)
+    if sanitized is None:
+        return {"success": False, "error": f"Command rejected: {reason}"}
+
+    escaped_cmd = _escape_applescript(sanitized)
+
+    if session_tty == "current":
+        script = _ITERM_WRITE_SCRIPT.format(command=escaped_cmd)
+    else:
+        escaped_tty = _escape_applescript(session_tty)
+        script = _ITERM_WRITE_TO_SESSION_SCRIPT.format(command=escaped_cmd, tty=escaped_tty)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            return {"success": False, "error": stderr.decode()[:200]}
+        output = stdout.decode().strip()
+        if output == "session_not_found":
+            return {"success": False, "error": f"Session with tty {session_tty} not found"}
+        return {"success": True, "error": None}
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Timed out sending command to iTerm"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+async def create_iterm_tab(command: str = None) -> dict:
+    """Create a new iTerm2 tab, optionally run a command.
+
+    Returns: {success: bool, error: str | None}
+    """
+    write_cmd = ""
+    if command:
+        from actions.shell import sanitize_command
+        sanitized, reason = sanitize_command(command)
+        if sanitized is None:
+            return {"success": False, "error": f"Command rejected: {reason}"}
+        escaped = _escape_applescript(sanitized)
+        write_cmd = f'tell current session of current tab to write text "{escaped}"'
+
+    script = _ITERM_NEW_TAB_SCRIPT.format(write_cmd=write_cmd)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            return {"success": False, "error": stderr.decode()[:200]}
+        return {"success": True, "error": None}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# --- Cursor Control (M5) ---
+
+async def cursor_open(path: str, line: int = None) -> dict:
+    """Open a file or folder in Cursor, optionally at a specific line.
+
+    Returns: {success: bool, path: str, error: str | None}
+    """
+    cmd = ["cursor"]
+    if line:
+        cmd.extend(["-g", f"{path}:{line}"])
+    else:
+        cmd.append(path)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            return {"success": False, "path": path, "error": stderr.decode()[:200]}
+        return {"success": True, "path": path, "error": None}
+    except FileNotFoundError:
+        return {"success": False, "path": path, "error": "Cursor CLI not found"}
+    except Exception as e:
+        return {"success": False, "path": path, "error": str(e)}
+
+
+async def cursor_diff(file1: str, file2: str) -> dict:
+    """Open a diff view in Cursor comparing two files.
+
+    Returns: {success: bool, error: str | None}
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "cursor", "--diff", file1, file2,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            return {"success": False, "error": stderr.decode()[:200]}
+        return {"success": True, "error": None}
+    except FileNotFoundError:
+        return {"success": False, "error": "Cursor CLI not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}

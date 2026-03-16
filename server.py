@@ -686,14 +686,24 @@ _ACTION_PATTERNS = [
     (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
     # Cursor IDE awareness
     (r"\bcursor\s+(?:status|windows?|projects?|info)\b", "cursor_status"),
-    (r"\b(?:what.s|which)\s+(?:files?|projects?)\s+(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
+    (r"\b(?:what.s|which)\s+(?:(?:files?|projects?)\s+)?(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
     (r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", "cursor_status"),
     (r"\bcursor\s+extensions?\b", "cursor_extensions"),
     # iTerm2 / terminal awareness
     (r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", "terminal_status"),
-    (r"\bterminal\s+(?:status|sessions?|tabs?)\b", "terminal_status"),
+    (r"\bterminal\s+(?:status|sessions?)\b", "terminal_status"),
     (r"\biterm\s+(?:status|sessions?)\b", "terminal_status"),
     (r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", "terminal_status"),
+    # Terminal control (must come after terminal_status to not shadow)
+    (r"\brun\s+.+\s+in\s+(?:the\s+)?(?:terminal|iterm|tab|session)\b", "terminal_exec"),
+    (r"\bsend\s+.+\s+to\s+(?:the\s+)?(?:terminal|iterm)\b", "terminal_exec"),
+    (r"\bnew\s+(?:terminal\s+)?tab\b", "terminal_new_tab"),
+    (r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", "terminal_new_tab"),
+    # Cursor control
+    (r"\bopen\s+.+\s+in\s+cursor\b", "cursor_open"),
+    (r"\bcursor\s+open\s+", "cursor_open"),
+    (r"\bjump\s+to\s+(?:line\s+)?\d+", "cursor_goto"),
+    (r"\bcursor\s+diff\b", "cursor_diff"),
 ]
 
 
@@ -893,12 +903,53 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\bcursor\s+extensions?\b", text_lower):
         return {"action": "cursor_extensions", "description": "List Cursor extensions"}
 
+    # New terminal tab (must come before terminal_status to avoid "tab" matching "status")
+    if re.search(r"\bnew\s+(?:terminal\s+)?tab\b", text_lower) or \
+       re.search(r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", text_lower):
+        return {"action": "terminal_new_tab", "description": "Open new terminal tab"}
+
     # iTerm2 / terminal awareness — direct handlers
     if re.search(r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", text_lower) or \
-       re.search(r"\bterminal\s+(?:status|sessions?|tabs?)\b", text_lower) or \
+       re.search(r"\bterminal\s+(?:status|sessions?)\b", text_lower) or \
        re.search(r"\biterm\s+(?:status|sessions?)\b", text_lower) or \
        re.search(r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", text_lower):
         return {"action": "terminal_status", "description": "Check terminal sessions"}
+
+    # Terminal control — "run X in terminal", "send X to terminal"
+    m = re.search(r"\brun\s+(.+?)\s+in\s+(?:the\s+)?(?:terminal|iterm|tab|session)\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "terminal_exec", "command": cmd, "session": "current", "description": f"Run in terminal: {cmd}"}
+
+    m = re.search(r"\bsend\s+(.+?)\s+to\s+(?:the\s+)?(?:terminal|iterm)\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "terminal_exec", "command": cmd, "session": "current", "description": f"Send to terminal: {cmd}"}
+
+    # Cursor control — "open X in cursor", "cursor open X"
+    m = re.search(r"\bopen\s+(.+?)\s+in\s+cursor\b", text_lower)
+    if m:
+        path = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_open", "path": path, "description": f"Open in Cursor: {path}"}
+
+    m = re.search(r"\bcursor\s+open\s+(.+)$", text_lower)
+    if m:
+        path = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_open", "path": path, "description": f"Open in Cursor: {path}"}
+
+    # "jump to line N in file" / "cursor goto file:line"
+    m = re.search(r"\bjump\s+to\s+(?:line\s+)?(\d+)\s+in\s+(.+?)$", text_lower)
+    if m:
+        line = int(m.group(1))
+        path = text_stripped[m.start(2):m.end(2)].strip()
+        return {"action": "cursor_open", "path": path, "line": line, "description": f"Jump to {path}:{line}"}
+
+    # "cursor diff file1 file2"
+    m = re.search(r"\bcursor\s+diff\s+(\S+)\s+(\S+)", text_lower)
+    if m:
+        f1 = text_stripped[m.start(1):m.end(1)]
+        f2 = text_stripped[m.start(2):m.end(2)]
+        return {"action": "cursor_diff", "file1": f1, "file2": f2, "description": f"Diff: {f1} vs {f2}"}
 
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
@@ -1326,6 +1377,90 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         await update.message.reply_text(format_terminal_status(status))
         return True
 
+    elif action == "terminal_exec":
+        from actions.terminal import send_to_iterm
+        cmd = intent.get("command", "")
+        session = intent.get("session", "current")
+        if not cmd:
+            return False
+        # Always requires approval — injecting into live terminal
+        action_id = autonomy.create_pending_action(
+            "terminal_exec",
+            f"Run in terminal: {cmd}",
+            {"command": cmd, "session": session},
+        )
+        await update.message.reply_text(
+            f"📟 Send to iTerm ({session}):\n\n`{cmd}`\n\n{autonomy.format_level()}",
+            reply_markup=approve_deny_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    elif action == "terminal_new_tab":
+        from actions.terminal import create_iterm_tab
+        cmd = intent.get("command")
+        if autonomy.needs_approval("terminal_new_tab"):
+            desc = f"New terminal tab" + (f" running: {cmd}" if cmd else "")
+            action_id = autonomy.create_pending_action(
+                "terminal_new_tab", desc, {"command": cmd},
+            )
+            await update.message.reply_text(
+                f"📟 {desc}\n\n{autonomy.format_level()}",
+                reply_markup=approve_deny_keyboard(),
+                parse_mode="Markdown",
+            )
+        else:
+            result = await create_iterm_tab(cmd)
+            if result["success"]:
+                autonomy.log_audit("terminal_new_tab", "Created new terminal tab", result="ok")
+                await update.message.reply_text("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+            else:
+                await update.message.reply_text(f"⚠️ Failed to create tab: {result['error']}")
+        return True
+
+    elif action == "cursor_open":
+        from actions.terminal import cursor_open
+        path = intent.get("path", "")
+        line = intent.get("line")
+        if not path:
+            return False
+        # cursor -g is READ (navigates), cursor <folder> could open new window
+        import os
+        is_dir = os.path.isdir(os.path.expanduser(path))
+        action_name = "cursor_open_project" if is_dir else "cursor_open"
+        if autonomy.needs_approval(action_name):
+            desc = f"Open in Cursor: {path}" + (f":{line}" if line else "")
+            action_id = autonomy.create_pending_action(
+                action_name, desc, {"path": path, "line": line},
+            )
+            await update.message.reply_text(
+                f"🖥 {desc}\n\n{autonomy.format_level()}",
+                reply_markup=approve_deny_keyboard(),
+                parse_mode="Markdown",
+            )
+        else:
+            result = await cursor_open(path, line)
+            if result["success"]:
+                autonomy.log_audit(action_name, f"Opened {path}" + (f":{line}" if line else ""), result="ok")
+                await update.message.reply_text(f"🖥 Opened in Cursor: {path}" + (f":{line}" if line else ""))
+            else:
+                await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+        return True
+
+    elif action == "cursor_diff":
+        from actions.terminal import cursor_diff
+        f1 = intent.get("file1", "")
+        f2 = intent.get("file2", "")
+        if not f1 or not f2:
+            return False
+        result = await cursor_diff(f1, f2)
+        if result["success"]:
+            autonomy.log_audit("cursor_diff", f"Diff: {f1} vs {f2}", result="ok")
+            await update.message.reply_text(f"🖥 Diff opened in Cursor: {f1} vs {f2}")
+        else:
+            await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+        return True
+
     elif action == "shell":
         from actions.shell import classify_command, execute_shell, format_output
         cmd = intent.get("command", "")
@@ -1606,6 +1741,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
                 else:
                     await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+            elif result["action_type"] == "terminal_exec":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import send_to_iterm
+                iterm_result = await send_to_iterm(payload["command"], payload.get("session", "current"))
+                autonomy.log_audit("terminal_exec", f"Sent: {payload['command']}", payload,
+                                   "ok" if iterm_result["success"] else iterm_result["error"])
+                if iterm_result["success"]:
+                    await query.message.reply_text(f"📟 Sent to terminal: `{payload['command']}`", parse_mode="Markdown")
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {iterm_result['error']}")
+
+            elif result["action_type"] == "terminal_new_tab":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import create_iterm_tab
+                tab_result = await create_iterm_tab(payload.get("command"))
+                autonomy.log_audit("terminal_new_tab", "Created tab", payload,
+                                   "ok" if tab_result["success"] else tab_result["error"])
+                if tab_result["success"]:
+                    cmd = payload.get("command")
+                    await query.message.reply_text("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {tab_result['error']}")
+
+            elif result["action_type"] in ("cursor_open", "cursor_open_project"):
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import cursor_open
+                open_result = await cursor_open(payload["path"], payload.get("line"))
+                autonomy.log_audit(result["action_type"], f"Opened {payload['path']}", payload,
+                                   "ok" if open_result["success"] else open_result["error"])
+                if open_result["success"]:
+                    line_str = f":{payload['line']}" if payload.get("line") else ""
+                    await query.message.reply_text(f"🖥 Opened in Cursor: {payload['path']}{line_str}")
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {open_result['error']}")
+
             else:
                 status_msg = await autonomy.execute_action(result)
                 await query.message.reply_text(status_msg)
