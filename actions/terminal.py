@@ -67,8 +67,22 @@ def parse_cursor_status(raw: str) -> dict:
     return result
 
 
+def _is_cursor_running() -> bool:
+    """Check if Cursor is already running via pgrep (doesn't launch it)."""
+    import subprocess
+    try:
+        return subprocess.run(
+            ["pgrep", "-xq", "Cursor"],
+            capture_output=True, timeout=3,
+        ).returncode == 0
+    except Exception:
+        return False
+
+
 async def get_cursor_status() -> dict:
-    """Run `cursor --status` and return parsed dict."""
+    """Run `cursor --status` and return parsed dict. Skips if Cursor isn't running."""
+    if not _is_cursor_running():
+        return {"error": None, "windows": []}
     try:
         proc = await asyncio.create_subprocess_exec(
             "cursor", "--status",
@@ -92,7 +106,9 @@ async def get_cursor_windows() -> list[dict]:
 
 
 async def get_cursor_extensions() -> list[str]:
-    """Run `cursor --list-extensions` and return list of extension IDs."""
+    """Run `cursor --list-extensions` and return list of extension IDs. Skips if Cursor isn't running."""
+    if not _is_cursor_running():
+        return []
     try:
         proc = await asyncio.create_subprocess_exec(
             "cursor", "--list-extensions",
