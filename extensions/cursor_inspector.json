@@ -1,0 +1,9 @@
+{
+    "name": "cursor_inspector",
+    "command": "cursor",
+    "description": "Retrieve terminal tab metadata (titles, directories)",
+    "action_module": "actions.cursor_inspector",
+    "handler_function": "handle_cursor",
+    "generated_at": "2026-03-16T12:00:00",
+    "generated_for": "Do have the title of each instance? Or the directory they run in?"
+}
