@@ -35,13 +35,14 @@ FAILURE_CODE_MAP = {
     "action_execution_failure:calendar": [("actions/calendar.py", "get_today_events")],
     "action_execution_failure:email": [("actions/gmail.py", "draft_email"), ("actions/gmail.py", "send_draft")],
     "response_suggests_manual_action": [("server.py", "_try_direct_shell_intent"), ("server.py", "detect_intent")],
+    "intent_pattern_miss": [("server.py", "_try_direct_shell_intent")],
 }
 
 # Errors that are deterministic — trigger healing after just 1 occurrence
 CRITICAL_ERROR_PATTERNS = ["ImportError", "ModuleNotFoundError", "AttributeError", "SyntaxError"]
 
 # Signal types that are inherently deterministic — always threshold 1
-DETERMINISTIC_SIGNAL_TYPES = {"response_suggests_manual_action", "capability_gap_detected"}
+DETERMINISTIC_SIGNAL_TYPES = {"response_suggests_manual_action", "capability_gap_detected", "intent_pattern_miss"}
 
 
 # --- Failure Detection ---
@@ -388,6 +389,73 @@ async def generate_healing_patch(diagnosis: dict) -> tuple[str, str] | None:
     sample_failures = "\n".join(
         f"- Query: \"{q}\"" for q in diagnosis["sample_queries"]
     )
+
+    # Specialized prompt for intent pattern misses — ask for regex additions
+    if diagnosis["fingerprint"].startswith("intent_pattern_miss"):
+        matched_action = None
+        for s in diagnosis["signals"]:
+            ctx = s.get("context", {})
+            if isinstance(ctx, str):
+                import json as _json
+                try:
+                    ctx = _json.loads(ctx)
+                except Exception:
+                    ctx = {}
+            matched_action = ctx.get("matched_action")
+            if matched_action:
+                break
+
+        prompt = f"""You are adding regex patterns to Khalil's intent detection function.
+
+## Problem
+These queries should route to action "{matched_action}" but the existing regex patterns don't match them:
+{sample_failures}
+
+## Current Function (in {primary['file']})
+```python
+{primary_source['source']}
+```
+
+## Requirements
+1. Add NEW regex pattern(s) to handle the failing queries
+2. Insert them near the existing patterns for "{matched_action}" action
+3. Keep patterns simple — use \\b word boundaries and common word order variations
+4. Do NOT remove or change existing patterns
+5. Do NOT change the function signature
+6. Do NOT add new imports
+
+Respond in this format:
+EXPLANATION: <one sentence>
+IMPORTS: none
+```python
+<complete function with new patterns added>
+```"""
+
+        try:
+            client = anthropic.Anthropic()
+            response = client.messages.create(
+                model=CLAUDE_MODEL_COMPLEX,
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+                system="You are a Python expert adding regex patterns to an intent detection function. Output ONLY the format requested.",
+            )
+            text = response.content[0].text.strip()
+        except Exception as e:
+            log.error("Claude API failed for pattern miss healing: %s", e)
+            return None
+
+        explanation = ""
+        if text.startswith("EXPLANATION:"):
+            lines = text.split("\n", 1)
+            explanation = lines[0].replace("EXPLANATION:", "").strip()
+            text = lines[1] if len(lines) > 1 else ""
+
+        code_match = re.search(r"```python\s*\n(.+?)```", text, re.DOTALL)
+        if not code_match:
+            log.warning("No code block found in healing response for pattern miss")
+            return None
+
+        return code_match.group(1).strip(), explanation
 
     if multi_function:
         all_funcs = "\n\n".join(

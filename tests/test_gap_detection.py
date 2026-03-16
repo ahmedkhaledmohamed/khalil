@@ -1,10 +1,24 @@
-"""Tests for capability gap detection — phrase matching and structured tags."""
+"""Tests for capability gap detection — phrase matching, structured tags, and pattern miss interception."""
 
+import json
+import os
 import re
+import sqlite3
+import sys
+from datetime import datetime, timedelta
+from unittest.mock import MagicMock
 
 import pytest
 
+# Stub heavy imports before loading healing.py
+for mod_name in ["anthropic", "httpx", "keyring"]:
+    if mod_name not in sys.modules:
+        sys.modules[mod_name] = MagicMock()
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from actions.extend import detect_capability_gap, CAPABILITY_GAP_PHRASES
+from healing import FAILURE_CODE_MAP, DETERMINISTIC_SIGNAL_TYPES, build_diagnosis
 
 # The regex used in server.py for structured gap tags
 GAP_TAG_PATTERN = r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]'
@@ -74,3 +88,37 @@ class TestStructuredTagParsing:
 
     def test_command_must_start_with_slash(self):
         assert re.search(GAP_TAG_PATTERN, "[CAPABILITY_GAP: timer | timer | desc]") is None
+
+
+class TestIntentPatternMissHealing:
+    """Tests for intent_pattern_miss support in the healing pipeline."""
+
+    def test_failure_code_map_has_entry(self):
+        assert "intent_pattern_miss" in FAILURE_CODE_MAP
+        targets = FAILURE_CODE_MAP["intent_pattern_miss"]
+        assert ("server.py", "_try_direct_shell_intent") in targets
+
+    def test_deterministic_signal_type(self):
+        assert "intent_pattern_miss" in DETERMINISTIC_SIGNAL_TYPES
+
+    def test_build_diagnosis_for_pattern_miss(self):
+        """build_diagnosis should resolve intent_pattern_miss via partial match."""
+        trigger = {
+            "fingerprint": "intent_pattern_miss:cursor_terminal_status",
+            "signal_type": "intent_pattern_miss",
+            "failure_count": 1,
+            "sample_signals": [
+                {
+                    "context": {
+                        "query": "list terminals in cursor",
+                        "matched_action": "cursor_terminal_status",
+                        "llm_response_snippet": "I don't have real-time visibility...",
+                    }
+                }
+            ],
+        }
+        diagnosis = build_diagnosis(trigger)
+        # Should find _try_direct_shell_intent via FAILURE_CODE_MAP partial match
+        if diagnosis:
+            assert diagnosis["primary_target"]["function"] == "_try_direct_shell_intent"
+            assert "list terminals in cursor" in diagnosis["sample_queries"]

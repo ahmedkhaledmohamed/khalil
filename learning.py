@@ -598,6 +598,25 @@ async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
         )
         insights.append({"id": insight_id, "category": "response_quality", "summary": f"{len(corrections)} user corrections"})
 
+    # 5. Intent pattern misses — queries that could be handled but regex didn't match
+    pattern_misses = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'intent_pattern_miss' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if pattern_misses:
+        miss_details = []
+        for row in pattern_misses:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            miss_details.append(f"{ctx.get('query', '?')} → {ctx.get('matched_action', '?')}")
+        insight_id = store_insight(
+            "intent_detection",
+            f"{len(pattern_misses)} intent pattern miss(es) today",
+            f"Missed: {'; '.join(miss_details[:5])}",
+            "The self-healing engine should generate regex fixes. If PRs are not appearing, check healing.py.",
+        )
+        insights.append({"id": insight_id, "category": "intent_detection", "summary": f"{len(pattern_misses)} intent pattern misses"})
+
     if not insights:
         log.info("Daily micro-reflection: no quality issues detected")
 

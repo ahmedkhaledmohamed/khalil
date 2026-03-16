@@ -115,6 +115,14 @@ EXISTING_CAPABILITIES = [
     "backup — export/import backups",
     "health — system health status",
     "stats — knowledge base statistics",
+    # Granular shell/system actions (handled by _try_direct_shell_intent)
+    "cursor_terminal — list/run/create Cursor IDE terminal sessions",
+    "terminal — check terminal/iTerm sessions, run commands in terminal",
+    "cursor — check Cursor IDE status, open files, diff, extensions",
+    "contacts — search Google Contacts for people and email addresses",
+    "tasks — list/create Google Tasks",
+    "shell — run macOS shell commands (battery, IP, uptime, disk, network, brew, clipboard, etc.)",
+    "screenshot — capture screenshots of screen or windows",
 ]
 
 
