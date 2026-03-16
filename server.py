@@ -684,6 +684,16 @@ _ACTION_PATTERNS = [
     (r"\bsearch\s+(?:my\s+)?personal\s+email\b", "email_personal"),
     (r"\bcheck\s+(?:my\s+)?work\s+(?:inbox|email|mail)\b", "email_work"),
     (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
+    # Cursor IDE awareness
+    (r"\bcursor\s+(?:status|windows?|projects?|info)\b", "cursor_status"),
+    (r"\b(?:what.s|which)\s+(?:files?|projects?)\s+(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
+    (r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", "cursor_status"),
+    (r"\bcursor\s+extensions?\b", "cursor_extensions"),
+    # iTerm2 / terminal awareness
+    (r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", "terminal_status"),
+    (r"\bterminal\s+(?:status|sessions?|tabs?)\b", "terminal_status"),
+    (r"\biterm\s+(?:status|sessions?)\b", "terminal_status"),
+    (r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", "terminal_status"),
 ]
 
 
@@ -873,6 +883,22 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     if re.search(r"\b(?:show|list)\s+launch\s+agents?\b", text_lower):
         return {"action": "shell", "command": "ls ~/Library/LaunchAgents/", "description": "Show launch agents"}
+
+    # Cursor IDE awareness — direct handlers (no LLM needed)
+    if re.search(r"\bcursor\s+(?:status|windows?|projects?|info)\b", text_lower) or \
+       re.search(r"\b(?:what.s|which)\s+(?:files?|projects?)\s+(?:are\s+)?open\s+in\s+cursor\b", text_lower) or \
+       re.search(r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", text_lower):
+        return {"action": "cursor_status", "description": "Check Cursor IDE status"}
+
+    if re.search(r"\bcursor\s+extensions?\b", text_lower):
+        return {"action": "cursor_extensions", "description": "List Cursor extensions"}
+
+    # iTerm2 / terminal awareness — direct handlers
+    if re.search(r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", text_lower) or \
+       re.search(r"\bterminal\s+(?:status|sessions?|tabs?)\b", text_lower) or \
+       re.search(r"\biterm\s+(?:status|sessions?)\b", text_lower) or \
+       re.search(r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", text_lower):
+        return {"action": "terminal_status", "description": "Check terminal sessions"}
 
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
@@ -1275,6 +1301,31 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             await update.message.reply_text(f"❌ Calendar fetch failed: {e}")
         return True
 
+    elif action == "cursor_status":
+        from actions.terminal import get_cursor_status, format_cursor_status
+        status = await get_cursor_status()
+        autonomy.log_audit("cursor_status", "Checked Cursor IDE status", result="ok")
+        await update.message.reply_text(format_cursor_status(status))
+        return True
+
+    elif action == "cursor_extensions":
+        from actions.terminal import get_cursor_extensions
+        extensions = await get_cursor_extensions()
+        autonomy.log_audit("cursor_extensions", "Listed Cursor extensions", result="ok")
+        if extensions:
+            text = f"🧩 Cursor Extensions ({len(extensions)}):\n" + "\n".join(f"  • {e}" for e in extensions)
+        else:
+            text = "🧩 No Cursor extensions found (or Cursor not running)"
+        await update.message.reply_text(text)
+        return True
+
+    elif action == "terminal_status":
+        from actions.terminal import get_terminal_status, format_terminal_status
+        status = await get_terminal_status()
+        autonomy.log_audit("terminal_status", "Checked terminal sessions", result="ok")
+        await update.message.reply_text(format_terminal_status(status))
+        return True
+
     elif action == "shell":
         from actions.shell import classify_command, execute_shell, format_output
         cmd = intent.get("command", "")
@@ -1361,6 +1412,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nudge — What needs attention right now\n"
         "/audit — View recent actions\n"
         "/health — System health status\n"
+        "/dev — Dev environment (Cursor + terminal)\n"
         "/run — Run a shell command\n"
         "/backup — Export backup\n"
         "/clear — Clear conversation history\n"
@@ -2313,6 +2365,30 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show dev environment status — Cursor windows + terminal sessions."""
+    from actions.terminal import (
+        get_cursor_status, format_cursor_status,
+        get_terminal_status, format_terminal_status,
+        get_frontmost_app,
+    )
+
+    cursor_status, terminal_status, frontmost = await asyncio.gather(
+        get_cursor_status(),
+        get_terminal_status(),
+        get_frontmost_app(),
+    )
+
+    lines = ["🖥 Dev Environment\n"]
+    lines.append(format_cursor_status(cursor_status))
+    lines.append("")
+    lines.append(format_terminal_status(terminal_status))
+    if frontmost:
+        lines.append(f"\n🔍 Frontmost: {frontmost}")
+
+    await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /backup command: export or list backups."""
     from actions.backup import export_backup, list_backups, format_backup_summary
@@ -2857,6 +2933,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("goals", cmd_goals))
     application.add_handler(CommandHandler("nudge", cmd_nudge))
     application.add_handler(CommandHandler("health", cmd_health))
+    application.add_handler(CommandHandler("dev", cmd_dev))
     application.add_handler(CommandHandler("backup", cmd_backup))
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
