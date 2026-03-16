@@ -116,6 +116,81 @@ def get_capability_heatmap(days: int = 7) -> list[dict]:
     return [{"action": r[0], "count": r[1]} for r in rows]
 
 
+# --- Intent Detection Accuracy (#3) ---
+
+def get_intent_accuracy(days: int = 7) -> dict:
+    """Compute intent detection accuracy over the last N days.
+
+    Returns {total, matches, accuracy_pct, mismatches: [{pattern_hint, llm_action, count}]}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'intent_accuracy' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    total = len(rows)
+    matches = 0
+    mismatch_counts: dict[tuple, int] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        if ctx.get("match"):
+            matches += 1
+        else:
+            key = (ctx.get("pattern_hint", "?"), ctx.get("llm_action", "?"))
+            mismatch_counts[key] = mismatch_counts.get(key, 0) + 1
+
+    mismatches = [
+        {"pattern_hint": k[0], "llm_action": k[1], "count": v}
+        for k, v in sorted(mismatch_counts.items(), key=lambda x: -x[1])
+    ]
+
+    return {
+        "total": total,
+        "matches": matches,
+        "accuracy_pct": round(matches / total * 100, 1) if total else 0.0,
+        "mismatches": mismatches,
+    }
+
+
+# --- Extension Usage Monitoring (#31) ---
+
+def get_extension_health(days: int = 7) -> list[dict]:
+    """Return per-extension usage stats: invocations, successes, errors, error_rate."""
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'extension_usage' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    stats: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        ext = ctx.get("extension", "unknown")
+        status = ctx.get("status", "unknown")
+        if ext not in stats:
+            stats[ext] = {"invoked": 0, "success": 0, "error": 0}
+        if status in stats[ext]:
+            stats[ext][status] += 1
+
+    result = []
+    for ext, s in sorted(stats.items()):
+        total = s["invoked"]
+        error_rate = round(s["error"] / total * 100, 1) if total else 0.0
+        result.append({
+            "extension": ext,
+            "invocations": total,
+            "successes": s["success"],
+            "errors": s["error"],
+            "error_rate_pct": error_rate,
+        })
+    return result
+
+
 # --- Insight Management ---
 
 def store_insight(category: str, summary: str, evidence: str, recommendation: str) -> int:
@@ -306,6 +381,56 @@ Rules:
 Respond with ONLY a JSON array. No markdown, no explanation."""
 
     return prompt
+
+
+def generate_reflection_diff() -> str:
+    """#5: Generate a diff report showing what changed since last reflection.
+
+    Returns a human-readable summary of new/decayed preferences and new insights.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    lines = []
+
+    # New or updated preferences
+    new_prefs = conn.execute(
+        "SELECT key, value, confidence FROM learned_preferences WHERE updated_at > ?",
+        (cutoff,),
+    ).fetchall()
+    if new_prefs:
+        lines.append("📊 Preferences changed this week:")
+        for p in new_prefs:
+            lines.append(f"  • {p[0]}: {p[1]} (confidence={p[2]})")
+
+    # Decayed preferences (low confidence)
+    decayed = conn.execute(
+        "SELECT key, value, confidence FROM learned_preferences WHERE confidence < 0.3"
+    ).fetchall()
+    if decayed:
+        lines.append("📉 Decaying preferences (low confidence):")
+        for p in decayed:
+            lines.append(f"  • {p[0]}: {p[1]} (confidence={p[2]})")
+
+    # New insights this week
+    new_insights = conn.execute(
+        "SELECT category, summary, status FROM insights WHERE created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+    if new_insights:
+        lines.append(f"💡 {len(new_insights)} new insight(s) this week:")
+        for i in new_insights[:5]:
+            status_icon = "✅" if i[2] == "applied" else "⏳"
+            lines.append(f"  {status_icon} [{i[0]}] {i[1]}")
+
+    # Capability heatmap summary
+    heatmap = get_capability_heatmap(days=7)
+    if heatmap:
+        top3 = heatmap[:3]
+        lines.append("🔥 Most used capabilities:")
+        for h in top3:
+            lines.append(f"  • {h['action']}: {h['count']}x")
+
+    return "\n".join(lines) if lines else "No significant changes since last reflection."
 
 
 async def run_weekly_reflection(ask_llm_fn) -> list[dict]:

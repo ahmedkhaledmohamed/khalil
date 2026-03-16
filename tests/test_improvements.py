@@ -623,3 +623,206 @@ class TestSmokeTestExpansion:
         )
         passed, error = smoke_test_module(mod, "greet")
         assert passed, f"Should pass: {error}"
+
+
+# ============================================================
+# Batch 4: Items #3, #5, #29, #31, #36, #40, #61
+# ============================================================
+
+
+# --- #3: Intent Detection Accuracy Tracker ---
+
+class TestIntentAccuracy:
+    def test_accuracy_empty(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import get_intent_accuracy
+        result = get_intent_accuracy()
+        assert result["total"] == 0
+        assert result["accuracy_pct"] == 0.0
+        learning._db_conn = original
+
+    def test_accuracy_tracking(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal, get_intent_accuracy
+        record_signal("intent_accuracy", {"pattern_hint": "shell", "llm_action": "shell", "match": True})
+        record_signal("intent_accuracy", {"pattern_hint": "shell", "llm_action": "reminder", "match": False})
+        record_signal("intent_accuracy", {"pattern_hint": "email", "llm_action": "email", "match": True})
+        result = get_intent_accuracy()
+        assert result["total"] == 3
+        assert result["matches"] == 2
+        assert result["accuracy_pct"] == pytest.approx(66.7, abs=0.1)
+        assert len(result["mismatches"]) == 1
+        assert result["mismatches"][0]["pattern_hint"] == "shell"
+        assert result["mismatches"][0]["llm_action"] == "reminder"
+        learning._db_conn = original
+
+
+# --- #5: Reflection Diff Report ---
+
+class TestReflectionDiff:
+    def test_diff_no_data(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import generate_reflection_diff
+        result = generate_reflection_diff()
+        assert "No significant changes" in result
+        learning._db_conn = original
+
+    def test_diff_with_preferences(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        # Insert a recently updated preference
+        tmp_db.execute(
+            "INSERT INTO learned_preferences (key, value, confidence, updated_at) "
+            "VALUES ('response_style', 'concise', 0.8, datetime('now'))"
+        )
+        tmp_db.commit()
+        from learning import generate_reflection_diff
+        result = generate_reflection_diff()
+        assert "response_style" in result
+        assert "Preferences changed" in result
+        learning._db_conn = original
+
+    def test_diff_with_insights(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import store_insight, generate_reflection_diff
+        store_insight("preference", "User prefers bullet points", "3 messages", "Set format=bullets")
+        result = generate_reflection_diff()
+        assert "insight" in result.lower()
+        learning._db_conn = original
+
+
+# --- #29: Extension Capability Dedup ---
+
+class TestExtensionDedup:
+    def test_no_overlap_novel_extension(self):
+        from actions.extend import check_extension_overlap
+        result = check_extension_overlap({
+            "name": "weather_tracker",
+            "command": "weather",
+            "description": "Check current weather conditions",
+        })
+        assert result is None  # no overlap
+
+    def test_overlap_with_builtin(self):
+        from actions.extend import check_extension_overlap
+        result = check_extension_overlap({
+            "name": "email_sender",
+            "command": "email",
+            "description": "Send emails",
+        })
+        assert result is not None
+        assert "email" in result.lower()
+
+    def test_overlap_with_builtin_calendar(self):
+        from actions.extend import check_extension_overlap
+        result = check_extension_overlap({
+            "name": "calendar_viewer",
+            "command": "cal",
+            "description": "View calendar events",
+        })
+        assert result is not None
+
+
+# --- #31: Extension Usage Monitoring ---
+
+class TestExtensionUsageMonitoring:
+    def test_extension_health_empty(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import get_extension_health
+        result = get_extension_health()
+        assert result == []
+        learning._db_conn = original
+
+    def test_extension_health_tracking(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal, get_extension_health
+        record_signal("extension_usage", {"extension": "label", "status": "invoked"})
+        record_signal("extension_usage", {"extension": "label", "status": "success"})
+        record_signal("extension_usage", {"extension": "label", "status": "invoked"})
+        record_signal("extension_usage", {"extension": "label", "status": "error", "error": "API failed"})
+        result = get_extension_health()
+        assert len(result) == 1
+        assert result[0]["extension"] == "label"
+        assert result[0]["invocations"] == 2
+        assert result[0]["errors"] == 1
+        assert result[0]["error_rate_pct"] == 50.0
+        learning._db_conn = original
+
+
+# --- #36: Clipboard Integration ---
+
+class TestClipboardIntegration:
+    def test_clipboard_read_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("what's on my clipboard") == "clipboard_read"
+        assert _looks_like_action("show clipboard") == "clipboard_read"
+        assert _looks_like_action("read my clipboard") == "clipboard_read"
+
+    def test_clipboard_process_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("summarize my clipboard") == "clipboard_process"
+
+    def test_clipboard_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("what's on my clipboard")
+        assert intent is not None
+        assert intent["command"] == "pbpaste"
+
+
+# --- #40: Spotlight File Search ---
+
+class TestSpotlightSearch:
+    def test_spotlight_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("find file report.pdf") == "spotlight"
+        assert _looks_like_action("find all my python files") == "spotlight"
+
+    def test_spotlight_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("find file report.pdf")
+        assert intent is not None
+        assert "mdfind" in intent["command"]
+        assert "report.pdf" in intent["command"]
+
+
+# --- #61: Implicit Preference Detection ---
+
+class TestImplicitPreference:
+    def test_preference_patterns(self):
+        """Preference patterns should match common preference expressions."""
+        import re
+        patterns = [
+            (r"\bi\s+prefer\s+(.+?)(?:\.|$)", "I prefer bullet points"),
+            (r"\b(?:always|never)\s+(.+?)(?:\.|$)", "always use short answers"),
+            (r"\buse\s+(?:bullet\s+points?|lists?|markdown|short\s+(?:answers?|responses?))\b", "use bullet points"),
+        ]
+        for pattern, text in patterns:
+            assert re.search(pattern, text.lower()), f"Pattern should match: {text}"
+
+    def test_preference_signal_recorded(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal
+        record_signal("implicit_preference", {"type": "style_preference", "text": "I like short answers", "match": "i like short answers"})
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'implicit_preference'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["type"] == "style_preference"
+        learning._db_conn = original
