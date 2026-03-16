@@ -31,7 +31,7 @@ for mod_name in _STUBS:
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from server import _try_direct_shell_intent, _extract_shell_from_response
+from server import _try_direct_shell_intent, _extract_shell_from_response, find_matching_action
 
 
 class TestOpenApp:
@@ -181,3 +181,41 @@ class TestExtractShellFromResponse:
     def test_extracts_from_bash_block(self):
         response = "```bash\npmset -g batt\n```"
         assert _extract_shell_from_response(response) == "pmset -g batt"
+
+
+class TestFindMatchingAction:
+    """Tests for intent pattern miss detection via ACTION_REGISTRY."""
+
+    @pytest.mark.parametrize("query,expected", [
+        ("list terminals in cursor", "cursor_terminal_status"),
+        ("show cursor terminal sessions", "cursor_terminal_status"),
+        ("cursor terminal list", "cursor_terminal_status"),
+        ("what are the cursor extensions", "cursor_extensions"),
+        ("open file in cursor", "cursor_open"),
+        ("check iterm sessions running", "terminal_status"),
+        ("take a screenshot of the window", "screenshot"),
+    ])
+    def test_matches_existing_action(self, query, expected):
+        assert find_matching_action(query) == expected
+
+    @pytest.mark.parametrize("query", [
+        "what's the weather today",
+        "tell me a joke",
+        "hello",
+        "what did I have for lunch",
+        "summarize my emails",
+        "",
+    ])
+    def test_no_false_positives(self, query):
+        assert find_matching_action(query) is None
+
+    def test_requires_two_keyword_matches(self):
+        # Single keyword overlap should not match
+        assert find_matching_action("cursor") is None
+        assert find_matching_action("terminal") is None
+
+    def test_best_match_wins(self):
+        # "cursor terminal status" has 3 keyword hits for cursor_terminal_status
+        # vs 1 for cursor_status
+        result = find_matching_action("cursor terminal status")
+        assert result == "cursor_terminal_status"

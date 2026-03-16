@@ -724,6 +724,48 @@ def _looks_like_action(text: str) -> str | None:
     return None
 
 
+# --- Intent Pattern Miss Detection ---
+# Maps granular action types to keyword descriptions.
+# Used to detect when a query COULD have been handled by an existing action
+# but fell through intent detection due to a regex gap.
+ACTION_REGISTRY = {
+    "cursor_terminal_status": "cursor terminal sessions status list terminals",
+    "cursor_terminal_exec": "run send command cursor terminal",
+    "cursor_terminal_new": "create new cursor terminal",
+    "cursor_status": "cursor ide status windows projects info",
+    "cursor_extensions": "cursor extensions list",
+    "cursor_open": "open file cursor jump goto line",
+    "cursor_diff": "cursor diff files compare",
+    "terminal_status": "terminal iterm sessions running status",
+    "terminal_exec": "run send command terminal iterm",
+    "terminal_new_tab": "new terminal tab",
+    "contacts_search": "find contact email address search contacts people",
+    "icloud_reminder_list": "apple icloud reminders list show",
+    "icloud_reminder_create": "add create apple icloud reminder",
+    "tasks_list": "tasks todo list show google",
+    "tasks_create": "add create task todo",
+    "screenshot": "screenshot capture screen window",
+}
+
+
+def find_matching_action(query: str) -> str | None:
+    """Check if a query matches an existing granular action by keyword overlap.
+
+    Returns action type string or None. Used to detect intent pattern misses
+    when a query falls through to the LLM but could have been handled directly.
+    """
+    query_words = set(re.findall(r'\b\w+\b', query.lower()))
+    best_action = None
+    best_score = 0
+    for action, keywords in ACTION_REGISTRY.items():
+        keyword_set = set(keywords.split())
+        score = len(query_words & keyword_set)
+        if score > best_score and score >= 2:
+            best_score = score
+            best_action = action
+    return best_action
+
+
 # --- #65: Conversation Topic Detection ---
 
 _TOPIC_KEYWORDS = {
@@ -3005,9 +3047,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from actions.extend import detect_capability_gap, handle_self_extend
         if detect_capability_gap(display_response):
-            record_signal("capability_gap_detected", {"query": query[:200]})
-            await _try_inline_healing(update)
-            await handle_self_extend(query, update, ask_claude)
+            # Cross-check: is this a pattern miss for an existing action?
+            matched_action = find_matching_action(query)
+            if matched_action:
+                record_signal("intent_pattern_miss", {
+                    "query": query[:200],
+                    "matched_action": matched_action,
+                    "llm_response_snippet": display_response[:200],
+                })
+                log.info("Intent pattern miss: query=%r matched=%s", query[:80], matched_action)
+                await _try_inline_healing(update)
+                # Skip self-extension — this is a pattern miss, not a capability gap
+            else:
+                record_signal("capability_gap_detected", {"query": query[:200]})
+                await _try_inline_healing(update)
+                await handle_self_extend(query, update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)
 
