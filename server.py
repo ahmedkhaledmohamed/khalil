@@ -195,6 +195,12 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         "Answer based on the provided context from his personal archives. "
         "Be direct, specific, and personal — you know him. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
+        "IMPORTANT: If the user asks you to DO something that you cannot execute "
+        "(e.g., read Slack messages, post to Twitter, create a Jira ticket, book a flight), "
+        "include this exact tag in your response:\n"
+        "[CAPABILITY_GAP: short_name | /command_name | one-line description]\n"
+        "Example: [CAPABILITY_GAP: slack_reader | /slack | Read and search Slack messages]\n"
+        "Still respond naturally to the user — the tag is for internal processing.\n\n"
         f"{style_hint}"
         f"{system_extra}"
     )
@@ -597,6 +603,43 @@ async def cmd_deny(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Failed to deny action.")
 
 
+async def _handle_self_extend_with_spec(spec: dict, update):
+    """Offer to build a capability from a structured gap spec."""
+    from actions.extend import classify_complexity, _pending_extensions
+
+    complexity = classify_complexity(spec)
+    label = "complex (Claude Code)" if complexity == "complex" else "simple"
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                f"⚡ Generate ({label})",
+                callback_data=f"extend_generate:{spec['name']}",
+            ),
+            InlineKeyboardButton("Skip", callback_data="extend_skip"),
+        ]
+    ])
+    _pending_extensions[spec["name"]] = spec
+    await update.message.reply_text(
+        f"I detected a capability gap: **{spec['description']}**\n"
+        f"I can build a `/{spec.get('command', spec['name'])}` command for this.",
+        reply_markup=keyboard,
+        parse_mode="Markdown",
+    )
+
+
+async def _run_extension_build(spec: dict, bot, chat_id: int):
+    """Run extension build in background, notify on completion."""
+    try:
+        await bot.send_message(chat_id, f"🔧 Building `{spec['name']}` capability...")
+        from actions.extend import generate_and_pr
+        result = await generate_and_pr({"spec": spec})
+        await bot.send_message(chat_id, f"✅ {result}")
+    except Exception as e:
+        log.error("Extension build failed for %s: %s", spec["name"], e)
+        await bot.send_message(chat_id, f"❌ Failed to build `{spec['name']}`: {e}")
+
+
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline keyboard button presses."""
     query = update.callback_query
@@ -640,28 +683,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("Extension request expired. Try again.")
             return
 
-        # Create pending action through autonomy controller
-        action_id = autonomy.create_pending_action(
-            "generate_capability",
-            f"Generate {spec['name']} capability (/{spec['command']})",
-            {"spec": spec},
-        )
         await query.edit_message_text(
-            f"⚡ Generating **{spec['description']}**...\n"
-            f"Action #{action_id} queued. This requires approval.",
+            f"⚡ Building **{spec['description']}** in background...",
             parse_mode="Markdown",
         )
 
-        # Since this is a HARD_GUARDRAIL, it always needs approval
-        # Auto-approve if in AUTONOMOUS mode won't work — show approve/deny
-        action = autonomy.approve_action(action_id)
-        if action:
-            try:
-                status_msg = await autonomy.execute_action(action)
-                await query.message.reply_text(status_msg)
-            except Exception as e:
-                log.error("Extension generation failed: %s", e)
-                await query.message.reply_text(f"❌ Generation failed: {e}")
+        # Run build in background — non-blocking
+        bot = telegram_app.bot if telegram_app else None
+        chat_id = query.message.chat_id
+        if bot and chat_id:
+            asyncio.create_task(_run_extension_build(spec, bot, chat_id))
 
     elif query.data == "extend_skip":
         await query.edit_message_text("Skipped. Let me know if you change your mind.")
@@ -1589,6 +1620,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass  # Non-critical
 
     # Detect capability gaps — offer to self-extend
+    # 1. Check for structured [CAPABILITY_GAP: ...] tag first
+    gap_match = re.search(
+        r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]',
+        response,
+    )
+    if gap_match:
+        spec = {
+            "name": gap_match.group(1),
+            "command": gap_match.group(2).lstrip("/"),
+            "description": gap_match.group(3).strip(),
+            "original_query": query,
+        }
+        # Strip the tag from the displayed response
+        clean_response = response.replace(gap_match.group(0), "").strip()
+        try:
+            await progress_msg.edit_text(clean_response)
+        except Exception:
+            await progress_msg.delete()
+            await update.message.reply_text(clean_response)
+        await _handle_self_extend_with_spec(spec, update)
+        return
+    # 2. Fallback: phrase-based detection
     try:
         from actions.extend import detect_capability_gap, handle_self_extend
         if detect_capability_gap(response):
