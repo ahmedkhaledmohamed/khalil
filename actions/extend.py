@@ -439,9 +439,15 @@ async def _commit_and_pr_from_worktree(
 
 # --- Validation ---
 
-BLOCKLISTED_CALLS = {
+# Exact function names that are always dangerous (matched against the bare function name)
+BLOCKLISTED_BARE_CALLS = {
+    "eval", "exec", "compile", "__import__",
+}
+
+# Qualified calls (matched as exact prefix of the call chain)
+BLOCKLISTED_QUALIFIED_CALLS = {
     "subprocess", "os.system", "os.popen", "os.exec", "os.execv",
-    "eval", "exec", "compile", "__import__", "importlib",
+    "os.execvp", "os.execve", "importlib.import_module",
     "shutil.rmtree", "shutil.move", "ctypes",
     "socket.socket", "http.server",
 }
@@ -476,8 +482,14 @@ def validate_generated_code(source: str) -> tuple[bool, str]:
         # Check function calls
         if isinstance(node, ast.Call):
             call_name = _get_call_name(node)
-            if call_name and any(b in call_name for b in BLOCKLISTED_CALLS):
-                return False, f"Blocked call: {call_name}"
+            if call_name:
+                # Check bare function name (e.g., "eval", "exec")
+                bare_name = call_name.rsplit(".", 1)[-1]
+                if bare_name in BLOCKLISTED_BARE_CALLS:
+                    return False, f"Blocked call: {call_name}"
+                # Check qualified calls (e.g., "os.system", "subprocess.run")
+                if any(call_name == b or call_name.startswith(b + ".") for b in BLOCKLISTED_QUALIFIED_CALLS):
+                    return False, f"Blocked call: {call_name}"
 
     # 3. Verify module has at least one async function (the command handler)
     has_async = any(
