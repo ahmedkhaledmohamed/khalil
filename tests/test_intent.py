@@ -106,3 +106,42 @@ class TestNoMatch:
     ])
     def test_returns_none(self, text):
         assert _try_direct_shell_intent(text) is None
+
+
+class TestDirectShellTemplates:
+    """Direct intent templates bypass the LLM for common system queries."""
+
+    @pytest.mark.parametrize("text,expected_fragment", [
+        ("how many cursor windows open on my machine", 'count windows of process "Cursor"'),
+        ("how many Safari windows are open", 'count windows of process "Safari"'),
+        ("How many Chrome windows open", 'count windows of process "Chrome"'),
+    ])
+    def test_window_count(self, text, expected_fragment):
+        result = _try_direct_shell_intent(text)
+        assert result is not None
+        assert expected_fragment in result["command"]
+
+    def test_running_processes(self):
+        result = _try_direct_shell_intent("what apps are running")
+        assert result is not None
+        assert "ps" in result["command"]
+
+    def test_battery(self):
+        result = _try_direct_shell_intent("what's my battery")
+        assert result is not None
+        assert "pmset" in result["command"]
+
+    def test_battery_status(self):
+        result = _try_direct_shell_intent("battery status level")
+        assert result is not None
+        assert "pmset" in result["command"]
+
+    def test_ip_address(self):
+        result = _try_direct_shell_intent("what's my ip")
+        assert result is not None
+        assert "ipconfig" in result["command"]
+
+    def test_uptime(self):
+        result = _try_direct_shell_intent("how long has my mac been running")
+        assert result is not None
+        assert "uptime" in result["command"]
