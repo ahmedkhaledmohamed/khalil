@@ -504,5 +504,75 @@ async def cursor_diff_files(file1: str, file2: str) -> str:
     return f"Failed: {result['error']}"
 
 
+@mcp.tool()
+async def cursor_terminal_status() -> str:
+    """List all terminals in Cursor's integrated terminal panel.
+
+    Requires the khalil-terminal-bridge extension to be installed in Cursor.
+    Returns terminal names, PIDs, active status, and workspace info.
+    """
+    from actions.terminal import get_cursor_terminal_status, format_cursor_terminal_status
+    status = await get_cursor_terminal_status()
+    return format_cursor_terminal_status(status)
+
+
+@mcp.tool()
+async def cursor_terminal_send(command: str, target: str = "0") -> str:
+    """Send a command to a terminal in Cursor's integrated terminal.
+
+    Requires the khalil-terminal-bridge extension.
+
+    Args:
+        command: The command to send (e.g., "npm test", "python server.py")
+        target: Terminal name or index (default "0" for first terminal)
+    """
+    from actions.terminal import bridge_send_command
+    result = await bridge_send_command(target, command)
+    if result.get("error"):
+        return f"Failed: {result['error']}"
+    return f"Sent to Cursor terminal [{result.get('terminal', target)}]: {command}"
+
+
+@mcp.tool()
+async def cursor_terminal_create(name: str = "Khalil", command: str = None, cwd: str = None) -> str:
+    """Create a new terminal in Cursor's integrated terminal panel.
+
+    Requires the khalil-terminal-bridge extension.
+
+    Args:
+        name: Display name for the terminal
+        command: Optional command to run after creation
+        cwd: Optional working directory for the terminal
+    """
+    from actions.terminal import bridge_create_terminal
+    result = await bridge_create_terminal(name=name, cwd=cwd, command=command)
+    if result.get("error"):
+        return f"Failed: {result['error']}"
+    msg = f"Created Cursor terminal: {result.get('name', name)}"
+    if command:
+        msg += f"\nRunning: {command}"
+    return msg
+
+
+@mcp.tool()
+async def cursor_terminal_output(target: str, lines: int = 50) -> str:
+    """Read recent output from a Cursor terminal.
+
+    Requires the khalil-terminal-bridge extension with output capture enabled.
+
+    Args:
+        target: Terminal name to read output from
+        lines: Number of recent lines to return (default 50)
+    """
+    from actions.terminal import bridge_get_output
+    result = await bridge_get_output(target, lines)
+    if result.get("error"):
+        return f"Failed: {result['error']}"
+    output = result.get("output", [])
+    if not output:
+        return f"No output captured for terminal '{target}'. Note: output capture requires the proposed VS Code API."
+    return f"Terminal '{target}' output ({len(output)} lines):\n" + "\n".join(output)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")

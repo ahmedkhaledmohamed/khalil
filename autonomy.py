@@ -44,6 +44,10 @@ ACTION_RULES = {
     "cursor_open_project": ActionType.WRITE,  # opens new window
     "terminal_exec": ActionType.WRITE,   # injects command into live session
     "terminal_new_tab": ActionType.WRITE,
+    # Cursor integrated terminal (via bridge extension)
+    "cursor_terminal_status": ActionType.READ,
+    "cursor_terminal_exec": ActionType.WRITE,   # injects command into Cursor terminal
+    "cursor_terminal_new": ActionType.WRITE,
 }
 
 # Safe writes: auto-approved in GUIDED mode (low risk, easily reversible)
