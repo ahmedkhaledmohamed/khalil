@@ -164,7 +164,7 @@ When Khalil's existing functionality fails repeatedly:
 6. **Verify** — after a heal is merged, monitors for recurrence. If the same failure reappears, marks the heal as `failed_heal` and re-triggers with enriched context (previous patch + new error signals)
 7. **PR** — creates branch, commits patch, opens PR, notifies via Telegram
 
-Rate limited to 1 healing PR per hour. Never auto-applies — always goes through PR review.
+Never auto-applies — always goes through PR review. Dedup and verification prevent runaway loops.
 
 ## Self-Extension
 
