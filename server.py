@@ -601,6 +601,20 @@ _ACTION_PATTERNS = [
     (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),
     (r"\breminders?\s+app\b", "icloud_reminder"),
     (r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
+    # #42: Network diagnostics
+    (r"\b(?:check|test)\s+(?:my\s+)?(?:network|internet|connection)\b", "shell"),
+    (r"\bnetwork\s+status\b", "shell"),
+    (r"\bping\s+\w+", "shell"),
+    (r"\b(?:check|test)\s+(?:internet|connectivity)\b", "shell"),
+    (r"\bdns\s+lookup\b", "shell"),
+    (r"\bnslookup\b", "shell"),
+    (r"\bcheck\s+wifi\b", "shell"),
+    (r"\bwifi\s+status\b", "shell"),
+    # #50: Google Tasks
+    (r"\b(?:my|show|list)\s+tasks?\b", "tasks"),
+    (r"\btodo\s+list\b", "tasks"),
+    (r"\badd\s+(?:a\s+)?task\b", "tasks"),
+    (r"\bcreate\s+(?:a\s+)?task\b", "tasks"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
 ]
@@ -733,6 +747,31 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:uptime|how\s+long.*(?:running|been\s+on|up))\b", text_lower):
         return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
 
+    # #42: Network diagnostics
+    if re.search(r"\b(?:check|test)\s+(?:my\s+)?(?:network|connection)\b", text_lower) or \
+       re.search(r"\bnetwork\s+status\b", text_lower):
+        return {"action": "shell", "command": "networksetup -getinfo Wi-Fi", "description": "Check network info"}
+
+    if re.search(r"\bping\s+(\S+)", text_lower):
+        m = re.search(r"\bping\s+(\S+)", text_lower)
+        target = m.group(1) if m else "google.com"
+        return {"action": "shell", "command": f"ping -c 3 {target}", "description": f"Ping {target}"}
+
+    if re.search(r"\b(?:check|test)\s+internet\b", text_lower) or \
+       re.search(r"\bcheck\s+connectivity\b", text_lower):
+        return {"action": "shell", "command": "ping -c 3 google.com", "description": "Check internet connectivity"}
+
+    if re.search(r"\bdns\s+lookup\b", text_lower) or re.search(r"\bnslookup\s+(\S+)", text_lower):
+        m = re.search(r"\bnslookup\s+(\S+)", text_lower)
+        target = m.group(1) if m else "google.com"
+        return {"action": "shell", "command": f"nslookup {target}", "description": f"DNS lookup for {target}"}
+
+    if re.search(r"\bcheck\s+wifi\b", text_lower) or re.search(r"\bwifi\s+status\b", text_lower):
+        return {"action": "shell", "command": "networksetup -getairportnetwork en0", "description": "Check Wi-Fi status"}
+
+    if re.search(r"\bpublic\s+ip\b", text_lower) or re.search(r"\bexternal\s+ip\b", text_lower):
+        return {"action": "shell", "command": "curl -s ifconfig.me", "description": "Get public IP address"}
+
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
        re.search(r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", text_lower):
@@ -825,6 +864,16 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
         if title:
             return {"action": "shell", "command": f"gh issue create --title '{title}'", "description": f"Create GitHub issue: {title}"}
+
+    # #50: Google Tasks — "my tasks", "todo list", "add task <title>"
+    if re.search(r"\b(?:my|show|list)\s+tasks?\b", text_lower) or re.search(r"\btodo\s+list\b", text_lower):
+        return {"action": "tasks_list", "description": "List Google Tasks"}
+
+    m = re.search(r"\b(?:add|create)\s+(?:a\s+)?task\s+(.+?)$", text_lower)
+    if m:
+        task_title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if task_title:
+            return {"action": "tasks_create", "title": task_title, "description": f"Create task: {task_title}"}
 
     return None
 

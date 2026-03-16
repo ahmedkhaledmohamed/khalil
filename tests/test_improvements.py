@@ -3366,3 +3366,473 @@ class TestCoherenceAnalysis:
             assert issue["chat_id"] == 42
         finally:
             learning._db_conn = original
+
+
+# ============================================================
+# Batch 11: Items #13, #14, #58, #64, #91, #42, #50
+# ============================================================
+
+
+# --- #13: Multi-function Healing ---
+
+class TestMultiFunctionHealing:
+    def test_build_diagnosis_single_function_no_multi_flag(self, tmp_db, monkeypatch):
+        """Single-target diagnosis should have multi_function=False."""
+        from healing import build_diagnosis
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        trigger = {
+            "fingerprint": "intent_detection_failure:reminder",
+            "signal_type": "intent_detection_failure",
+            "failure_count": 3,
+            "sample_signals": [{"context": {"query": "remind me"}, "signal_type": "intent_detection_failure", "created_at": "2026-01-01"}],
+        }
+        # Monkeypatch extract_function_source to return a fake result
+        monkeypatch.setattr("healing.extract_function_source", lambda fp, fn: ("def detect_intent(): pass", 0, 1))
+        result = build_diagnosis(trigger)
+        assert result is not None
+        # intent_detection_failure:reminder maps to 1 code target
+        assert result["multi_function"] is False
+
+    def test_build_diagnosis_multi_function_flag(self, tmp_db, monkeypatch):
+        """Multi-target diagnosis should have multi_function=True."""
+        from healing import build_diagnosis
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        trigger = {
+            "fingerprint": "intent_detection_failure:shell",
+            "signal_type": "intent_detection_failure",
+            "failure_count": 3,
+            "sample_signals": [{"context": {"query": "open chrome"}, "signal_type": "intent_detection_failure", "created_at": "2026-01-01"}],
+        }
+        # This fingerprint maps to 2 code targets
+        monkeypatch.setattr("healing.extract_function_source", lambda fp, fn: (f"def {fn}(): pass", 0, 1))
+        result = build_diagnosis(trigger)
+        assert result is not None
+        assert result["multi_function"] is True
+
+    def test_parse_multi_function_patch_splits(self):
+        """parse_multi_function_patch should split on ---FUNCTION--- markers."""
+        from healing import parse_multi_function_patch
+        text = """EXPLANATION: Fix both functions
+IMPORTS: none
+```python
+def func_a():
+    return 1
+```
+---FUNCTION---
+```python
+def func_b():
+    return 2
+```"""
+        patches = parse_multi_function_patch(text)
+        assert len(patches) == 2
+        assert "func_a" in patches[0]
+        assert "func_b" in patches[1]
+
+    def test_parse_multi_function_patch_single(self):
+        """Single function response should return a list of 1."""
+        from healing import parse_multi_function_patch
+        text = """```python
+def func_a():
+    return 1
+```"""
+        patches = parse_multi_function_patch(text)
+        assert len(patches) == 1
+
+    def test_parse_multi_function_patch_empty(self):
+        """No code blocks should return empty list."""
+        from healing import parse_multi_function_patch
+        patches = parse_multi_function_patch("no code here")
+        assert patches == []
+
+
+# --- #14: Healing Rollback Detector ---
+
+class TestHealingRollbackDetector:
+    def test_no_regressions_when_no_heals(self, tmp_db, monkeypatch):
+        """No applied heals → no regressions."""
+        from healing import detect_healing_regressions
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        result = detect_healing_regressions(hours=24)
+        assert result == []
+
+    def test_detects_regression(self, tmp_db, monkeypatch):
+        """Should detect new failures after an applied heal."""
+        import learning
+        original_learning_conn = learning._db_conn
+        learning._db_conn = tmp_db
+        from healing import detect_healing_regressions
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        from datetime import datetime, timedelta
+
+        now = datetime.utcnow()
+        heal_time = (now - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        after_heal = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Insert an applied heal
+        tmp_db.execute(
+            "INSERT INTO insights (category, summary, evidence, status, created_at, resolved_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("self_heal", "Fix intent", "intent_detection_failure:shell", "applied", heal_time, heal_time),
+        )
+        # Insert new failure after the heal
+        tmp_db.execute(
+            "INSERT INTO interaction_signals (signal_type, context, created_at) VALUES (?, ?, ?)",
+            ("intent_detection_failure", '{"action_hint": "shell"}', after_heal),
+        )
+        tmp_db.execute(
+            "INSERT INTO interaction_signals (signal_type, context, created_at) VALUES (?, ?, ?)",
+            ("intent_detection_failure", '{"action_hint": "shell"}', after_heal),
+        )
+        tmp_db.commit()
+
+        try:
+            result = detect_healing_regressions(hours=24)
+            assert len(result) == 1
+            assert result[0]["fingerprint"] == "intent_detection_failure:shell"
+            assert result[0]["new_failures"] >= 2
+            assert result[0]["revert_recommended"] is True
+        finally:
+            learning._db_conn = original_learning_conn
+
+    def test_no_regression_without_new_failures(self, tmp_db, monkeypatch):
+        """Applied heal with no subsequent failures → no regression."""
+        from healing import detect_healing_regressions
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        from datetime import datetime, timedelta
+
+        heal_time = (datetime.utcnow() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        tmp_db.execute(
+            "INSERT INTO insights (category, summary, evidence, status, created_at, resolved_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            ("self_heal", "Fix intent", "intent_detection_failure:calendar", "applied", heal_time, heal_time),
+        )
+        tmp_db.commit()
+
+        result = detect_healing_regressions(hours=24)
+        assert result == []
+
+
+# --- #58: Semantic Memory Consolidation ---
+
+class TestSemanticMemoryConsolidation:
+    def test_empty_documents(self, tmp_db):
+        """No documents → empty results."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.consolidate_memories()
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_finds_similar_documents(self, tmp_db):
+        """Two very similar docs in the same category should be flagged."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "notes", "Python async guide", "python async await asyncio event loop tutorial guide"),
+        )
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "notes", "Python asyncio tutorial", "python async await asyncio event loop tutorial reference"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.consolidate_memories(similarity_threshold=0.3)
+            assert len(result) == 1
+            assert result[0]["category"] == "notes"
+            assert result[0]["similarity"] > 0.3
+            assert "doc_id_a" in result[0]
+            assert "doc_id_b" in result[0]
+        finally:
+            learning._db_conn = original
+
+    def test_does_not_merge_different_categories(self, tmp_db):
+        """Docs in different categories should not be compared."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "work", "Sprint planning", "sprint planning meeting standup jira"),
+        )
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "personal", "Sprint planning", "sprint planning meeting standup jira"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.consolidate_memories(similarity_threshold=0.3)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_respects_threshold(self, tmp_db):
+        """High threshold should filter out loosely related docs."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "notes", "Doc A", "python programming language code"),
+        )
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("test", "notes", "Doc B", "java programming language code"),
+        )
+        tmp_db.commit()
+        try:
+            # These share some words but not all — high threshold should exclude
+            result = learning.consolidate_memories(similarity_threshold=0.9)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+
+# --- #64: Structured Data Extraction from Emails ---
+
+class TestStructuredDataExtraction:
+    def test_flight_extraction(self):
+        from learning import extract_structured_data
+        email = """Your flight confirmation
+Flight: AC1234
+Departure: Toronto YYZ
+Arrival: Vancouver YVR
+Date: 2026-04-15
+Boarding pass attached."""
+        result = extract_structured_data(email)
+        assert result["type"] == "flight"
+        assert result["fields"]["flight_number"] is not None
+        assert result["fields"]["date"] == "2026-04-15"
+        assert "Toronto" in (result["fields"]["departure"] or "")
+
+    def test_receipt_extraction(self):
+        from learning import extract_structured_data
+        email = """Payment Receipt
+From: Amazon Store
+Total: $42.99 USD
+Date: 2026-03-10
+Thank you for your purchase."""
+        result = extract_structured_data(email)
+        assert result["type"] == "receipt"
+        assert result["fields"]["amount"] == "42.99"
+        assert result["fields"]["currency"] == "USD"
+
+    def test_meeting_extraction(self):
+        from learning import extract_structured_data
+        email = """Meeting Invite: Q1 Review
+Organizer: John Smith
+Date: 2026-03-20
+Time: 2:00 PM
+Location: Room 401
+Please RSVP."""
+        result = extract_structured_data(email)
+        assert result["type"] == "meeting"
+        assert result["fields"]["subject"] is not None
+        assert result["fields"]["location"] == "Room 401"
+
+    def test_unknown_email(self):
+        from learning import extract_structured_data
+        result = extract_structured_data("Hey, how are you doing?")
+        assert result["type"] == "unknown"
+        assert result["fields"] == {}
+
+    def test_receipt_without_currency(self):
+        from learning import extract_structured_data
+        email = """Invoice
+Amount charged: $15.00
+Date: 2026-01-01"""
+        result = extract_structured_data(email)
+        assert result["type"] == "receipt"
+        assert result["fields"]["amount"] == "15.00"
+
+
+# --- #91: Meeting Prep Brief ---
+
+class TestMeetingPrepBrief:
+    def test_generates_prep_brief(self, mock_ask_llm):
+        import asyncio
+        from scheduler.digests import generate_meeting_prep
+
+        ask = mock_ask_llm("Here is your prep brief.")
+        event = {
+            "summary": "Q1 Review",
+            "start": "2026-03-20T14:00:00",
+            "end": "2026-03-20T15:00:00",
+            "attendees": [{"displayName": "John Smith", "email": "john@test.com"}],
+            "description": "Quarterly review meeting",
+        }
+
+        # Mock hybrid_search to avoid real DB
+        from unittest.mock import patch, AsyncMock
+        mock_search = AsyncMock(return_value=[])
+        with patch("knowledge.search.hybrid_search", mock_search):
+            result = asyncio.run(generate_meeting_prep(ask, event))
+
+        assert "Meeting Prep: Q1 Review" in result
+        assert "Here is your prep brief." in result
+
+    def test_handles_empty_attendees(self, mock_ask_llm):
+        import asyncio
+        from scheduler.digests import generate_meeting_prep
+
+        ask = mock_ask_llm("Brief with no attendees.")
+        event = {"summary": "Solo Work", "start": "2026-03-20T10:00:00", "attendees": []}
+
+        from unittest.mock import patch, AsyncMock
+        mock_search = AsyncMock(return_value=[])
+        with patch("knowledge.search.hybrid_search", mock_search):
+            result = asyncio.run(generate_meeting_prep(ask, event))
+
+        assert "Meeting Prep: Solo Work" in result
+
+
+# --- #42: Network Diagnostics ---
+
+class TestNetworkDiagnostics:
+    def test_check_network_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check my network")
+        assert result is not None
+        assert result["action"] == "shell"
+        assert "networksetup" in result["command"]
+
+    def test_network_status_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("network status")
+        assert result is not None
+        assert "networksetup" in result["command"]
+
+    def test_ping_google(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("ping google.com")
+        assert result is not None
+        assert "ping -c 3 google.com" in result["command"]
+
+    def test_ping_custom_target(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("ping example.com")
+        assert result is not None
+        assert "example.com" in result["command"]
+
+    def test_check_internet(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check internet")
+        assert result is not None
+        assert "ping" in result["command"]
+
+    def test_dns_lookup(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("dns lookup")
+        assert result is not None
+        assert "nslookup" in result["command"]
+
+    def test_nslookup_target(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("nslookup example.com")
+        assert result is not None
+        assert "nslookup example.com" in result["command"]
+
+    def test_check_wifi(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check wifi")
+        assert result is not None
+        assert "networksetup" in result["command"]
+        assert "en0" in result["command"]
+
+    def test_public_ip(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("public ip")
+        assert result is not None
+        assert "ifconfig.me" in result["command"]
+
+    def test_action_patterns_include_network(self):
+        from server import _looks_like_action
+        assert _looks_like_action("check my network") == "shell"
+        assert _looks_like_action("ping google") == "shell"
+        assert _looks_like_action("check wifi") == "shell"
+        assert _looks_like_action("dns lookup") == "shell"
+
+
+# --- #50: Google Tasks Integration ---
+
+class TestGoogleTasksIntegration:
+    def test_tasks_scope_defined(self):
+        from actions.gmail import SCOPES_TASKS, SCOPES_TASKS_WRITE
+        assert "https://www.googleapis.com/auth/tasks.readonly" in SCOPES_TASKS
+        assert "https://www.googleapis.com/auth/tasks" in SCOPES_TASKS_WRITE
+
+    def test_token_file_tasks_in_config(self):
+        from config import TOKEN_FILE_TASKS
+        assert "token_tasks" in str(TOKEN_FILE_TASKS)
+
+    def test_list_tasks_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("my tasks")
+        assert result is not None
+        assert result["action"] == "tasks_list"
+
+    def test_todo_list_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("todo list")
+        assert result is not None
+        assert result["action"] == "tasks_list"
+
+    def test_show_tasks_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("show tasks")
+        assert result is not None
+        assert result["action"] == "tasks_list"
+
+    def test_add_task_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("add task buy groceries")
+        assert result is not None
+        assert result["action"] == "tasks_create"
+        assert result["title"] == "buy groceries"
+
+    def test_create_task_pattern(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("create task review PR")
+        assert result is not None
+        assert result["action"] == "tasks_create"
+        assert "review PR" in result["title"]
+
+    def test_action_patterns_include_tasks(self):
+        from server import _looks_like_action
+        assert _looks_like_action("my tasks") == "tasks"
+        assert _looks_like_action("todo list") == "tasks"
+        assert _looks_like_action("add task something") == "tasks"
+
+    def test_list_tasks_sync_with_mock(self):
+        """Test _list_tasks_sync with mocked service."""
+        from unittest.mock import patch, MagicMock
+        mock_service = MagicMock()
+        mock_service.tasks().list().execute.return_value = {
+            "items": [
+                {"id": "1", "title": "Buy milk", "notes": "", "due": "", "status": "needsAction"},
+                {"id": "2", "title": "Review PR", "notes": "urgent", "due": "2026-03-20T00:00:00.000Z", "status": "needsAction"},
+            ]
+        }
+        with patch("actions.gmail._get_tasks_service", return_value=mock_service):
+            from actions.gmail import _list_tasks_sync
+            result = _list_tasks_sync()
+            assert len(result) == 2
+            assert result[0]["title"] == "Buy milk"
+            assert result[1]["notes"] == "urgent"
+
+    def test_create_task_sync_with_mock(self):
+        """Test _create_task_sync with mocked service."""
+        from unittest.mock import patch, MagicMock
+        mock_service = MagicMock()
+        mock_service.tasks().insert().execute.return_value = {
+            "id": "new-1", "title": "Test task", "notes": "", "due": "", "status": "needsAction"
+        }
+        with patch("actions.gmail._get_tasks_service", return_value=mock_service):
+            from actions.gmail import _create_task_sync
+            result = _create_task_sync("Test task", notes="some notes")
+            assert result["id"] == "new-1"
+            assert result["title"] == "Test task"
