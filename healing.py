@@ -12,23 +12,18 @@ import ast
 import asyncio
 import json
 import logging
-import time
 from pathlib import Path
 
 import anthropic
 
 from config import (
     CLAUDE_MODEL_COMPLEX,
-    HEALING_COOLDOWN_SECONDS,
     HEALING_FAILURE_THRESHOLD,
     KHALIL_DIR,
 )
 from learning import _get_conn, store_insight, get_insights
 
 log = logging.getLogger("khalil.healing")
-
-# Rate limiting
-_last_heal_time: float = 0
 
 # Maps failure fingerprints to relevant source files + functions
 FAILURE_CODE_MAP = {
@@ -525,13 +520,7 @@ def _build_pr_body(diagnosis: dict) -> str:
 
 async def run_self_healing(triggers: list[dict], bot, chat_id: int):
     """Main orchestrator — diagnose, patch, validate, PR, notify."""
-    global _last_heal_time
-
-    if time.time() - _last_heal_time < HEALING_COOLDOWN_SECONDS:
-        log.info("Self-healing on cooldown, skipping")
-        return
-
-    for trigger in triggers[:1]:  # Process at most 1 per run
+    for trigger in triggers:
         fingerprint = trigger["fingerprint"]
         log.info("Self-healing: processing %s", fingerprint)
 
@@ -586,8 +575,6 @@ async def run_self_healing(triggers: list[dict], bot, chat_id: int):
                      f"Fix generated and validated, but PR creation failed: {e}",
             )
             continue
-
-        _last_heal_time = time.time()
 
         # 5. Notify
         await bot.send_message(

@@ -435,6 +435,32 @@ async def _execute_with_retry(cmd: str, description: str, update, max_retries: i
     return result, cmd
 
 
+async def _interpret_shell_output(user_query: str, cmd: str, result: dict) -> str | None:
+    """Ask LLM to interpret shell output as a natural language answer to the user's question.
+
+    Returns interpreted text, or None if interpretation fails or isn't applicable.
+    """
+    stdout = result.get("stdout", "").strip()
+    if not stdout or not user_query:
+        return None
+    try:
+        interpretation = await ask_llm(
+            f"The user asked: \"{user_query}\"\n"
+            f"I ran this command: {cmd}\n"
+            f"Output: {stdout[:500]}\n\n"
+            "Give a brief, direct answer to the user's question based on the output. "
+            "One or two sentences max. No preamble.",
+            "",
+            system_extra="Answer the user's question directly based on the command output. Be concise.",
+        )
+        interpretation = interpretation.strip()
+        if interpretation and not interpretation.startswith("⚠️"):
+            return interpretation
+    except Exception as e:
+        log.debug("Shell output interpretation failed: %s", e)
+    return None
+
+
 async def handle_action_intent(intent: dict, update: Update) -> bool:
     """Handle a detected action intent. Returns True if handled."""
     action = intent.get("action")
@@ -516,6 +542,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         from actions.shell import classify_command, execute_shell, format_output
         cmd = intent.get("command", "")
         description = intent.get("description", "")
+        user_query = intent.get("user_query", "")
         llm_generated = intent.get("llm_generated", True)  # default True for safety
         if not cmd:
             return False
@@ -541,6 +568,12 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                         "stderr": result["stderr"][:200],
                     })
                     await _try_inline_healing(update)
+                # Interpret output as natural language answer when triggered by a user question
+                if result["returncode"] == 0 and user_query:
+                    interpretation = await _interpret_shell_output(user_query, final_cmd, result)
+                    if interpretation:
+                        await update.message.reply_text(interpretation)
+                        return True
                 await update.message.reply_text(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
                 return True
 
@@ -548,7 +581,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         action_id = autonomy.create_pending_action(
             "shell_write",
             f"Run: {cmd}",
-            {"command": cmd, "llm_generated": llm_generated},
+            {"command": cmd, "llm_generated": llm_generated, "user_query": user_query},
         )
         await update.message.reply_text(
             f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}\n\n"
@@ -662,6 +695,7 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             import json as _json
             payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
             cmd = payload["command"]
+            user_query = payload.get("user_query", "")
             from actions.shell import format_output
             shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
             autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
@@ -672,7 +706,14 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "exit_code": shell_result["returncode"],
                     "stderr": shell_result["stderr"][:200],
                 })
-            await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+            if shell_result["returncode"] == 0 and user_query:
+                interpretation = await _interpret_shell_output(user_query, final_cmd, shell_result)
+                if interpretation:
+                    await update.message.reply_text(interpretation)
+                else:
+                    await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+            else:
+                await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
         else:
             status_msg = await autonomy.execute_action(result)
             await update.message.reply_text(status_msg)
@@ -757,6 +798,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 import json as _json
                 payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
                 cmd = payload["command"]
+                user_query = payload.get("user_query", "")
                 from actions.shell import format_output
                 shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
                 autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
@@ -767,7 +809,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "exit_code": shell_result["returncode"],
                         "stderr": shell_result["stderr"][:200],
                     })
-                await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+                if shell_result["returncode"] == 0 and user_query:
+                    interpretation = await _interpret_shell_output(user_query, final_cmd, shell_result)
+                    if interpretation:
+                        await query.message.reply_text(interpretation)
+                    else:
+                        await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+                else:
+                    await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
             else:
                 status_msg = await autonomy.execute_action(result)
                 await query.message.reply_text(status_msg)
@@ -1672,6 +1721,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     direct_intent = _try_direct_shell_intent(query)
     if direct_intent:
         direct_intent["llm_generated"] = False  # safe — pattern-matched, not LLM
+        direct_intent["user_query"] = query
         handled = await handle_action_intent(direct_intent, update)
         if handled:
             return
@@ -1680,6 +1730,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action_hint:
         intent = await detect_intent(query)
         if intent:
+            intent["user_query"] = query
             handled = await handle_action_intent(intent, update)
             if handled:
                 return

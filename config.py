@@ -62,7 +62,6 @@ KEYRING_SERVICE = "khalil-assistant"
 
 # Self-healing
 HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
-HEALING_COOLDOWN_SECONDS = 3600  # max 1 healing PR per hour
 
 # Claude Code CLI (for complex code generation)
 CLAUDE_CODE_BIN = "/opt/homebrew/bin/claude"
