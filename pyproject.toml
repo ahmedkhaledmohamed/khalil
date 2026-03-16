@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", ".venv/*", "data/*", "extensions/*", ".worktrees/*"]
+
+[tool.coverage.report]
+fail_under = 30
+show_missing = true
+skip_empty = true

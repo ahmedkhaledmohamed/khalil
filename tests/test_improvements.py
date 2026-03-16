@@ -1355,3 +1355,304 @@ class TestSchedulerTasks:
             pass  # The function itself catches exceptions
         finally:
             learning._db_conn = original
+
+
+# --- #77: Immutable Audit Trail ---
+
+class TestImmutableAuditTrail:
+    def test_log_audit_writes_jsonl(self, tmp_db, tmp_path, monkeypatch):
+        """log_audit should append to audit_trail.jsonl alongside SQLite."""
+        import json
+        monkeypatch.setattr("autonomy.DATA_DIR", tmp_path)
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        ctrl.log_audit("test_action", "Test description", {"key": "val"}, "ok")
+
+        trail_path = tmp_path / "audit_trail.jsonl"
+        assert trail_path.exists()
+        lines = trail_path.read_text().strip().split("\n")
+        assert len(lines) == 1
+        entry = json.loads(lines[0])
+        assert entry["action_type"] == "test_action"
+        assert entry["description"] == "Test description"
+        assert entry["payload"] == {"key": "val"}
+        assert entry["result"] == "ok"
+
+    def test_log_audit_appends_multiple(self, tmp_db, tmp_path, monkeypatch):
+        """Multiple log_audit calls should append, not overwrite."""
+        monkeypatch.setattr("autonomy.DATA_DIR", tmp_path)
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        ctrl.log_audit("action1", "First")
+        ctrl.log_audit("action2", "Second")
+
+        trail_path = tmp_path / "audit_trail.jsonl"
+        lines = trail_path.read_text().strip().split("\n")
+        assert len(lines) == 2
+
+    def test_log_audit_still_writes_sqlite(self, tmp_db, tmp_path, monkeypatch):
+        """JSONL writing should not break SQLite writes."""
+        monkeypatch.setattr("autonomy.DATA_DIR", tmp_path)
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        ctrl.log_audit("test", "test desc")
+
+        row = tmp_db.execute("SELECT * FROM audit_log WHERE action_type = 'test'").fetchone()
+        assert row is not None
+
+
+# --- #68: Embedding Provider Abstraction ---
+
+class TestEmbeddingProviderAbstraction:
+    def test_embed_provider_config_exists(self):
+        """EMBED_PROVIDER should be defined in config."""
+        from config import EMBED_PROVIDER
+        assert EMBED_PROVIDER == "ollama"
+
+    def test_provider_registry_has_ollama(self):
+        """The provider registry should include ollama."""
+        from knowledge.embedder import _PROVIDERS
+        assert "ollama" in _PROVIDERS
+        assert "embed_text" in _PROVIDERS["ollama"]
+        assert "embed_batch" in _PROVIDERS["ollama"]
+        assert "check" in _PROVIDERS["ollama"]
+
+    def test_get_provider_returns_ollama(self):
+        """_get_provider should return the ollama provider by default."""
+        from knowledge.embedder import _get_provider
+        provider = _get_provider()
+        assert callable(provider["embed_text"])
+
+    def test_get_provider_raises_for_unknown(self, monkeypatch):
+        """_get_provider should raise ValueError for unknown providers."""
+        import knowledge.embedder as embedder
+        monkeypatch.setattr(embedder, "EMBED_PROVIDER", "nonexistent")
+        with pytest.raises(ValueError, match="Unknown EMBED_PROVIDER"):
+            embedder._get_provider()
+
+    def test_public_api_delegates_to_provider(self):
+        """embed_text and embed_batch should be async callables."""
+        import asyncio
+        from knowledge.embedder import embed_text, embed_batch
+        assert asyncio.iscoroutinefunction(embed_text)
+        assert asyncio.iscoroutinefunction(embed_batch)
+
+
+# --- #96: Sleep Schedule Inference ---
+
+class TestSleepScheduleInference:
+    def test_infer_sleep_schedule_no_data(self, tmp_db):
+        """With no conversations, should return null times and zero confidence."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.infer_sleep_schedule(days=7)
+            assert result["wake_time"] is None
+            assert result["sleep_time"] is None
+            assert result["confidence"] == 0.0
+            assert result["days_with_data"] == 0
+        finally:
+            learning._db_conn = original
+
+    def test_infer_sleep_schedule_with_data(self, tmp_db):
+        """With conversation data, should return reasonable times."""
+        import learning
+        from datetime import datetime, timedelta
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            # Insert conversations for 3 days
+            now = datetime.utcnow()
+            for i in range(3):
+                day = now - timedelta(days=i)
+                morning = day.replace(hour=8, minute=30, second=0).strftime("%Y-%m-%d %H:%M:%S")
+                evening = day.replace(hour=22, minute=15, second=0).strftime("%Y-%m-%d %H:%M:%S")
+                tmp_db.execute(
+                    "INSERT INTO conversations (chat_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (1, "user", "morning msg", morning),
+                )
+                tmp_db.execute(
+                    "INSERT INTO conversations (chat_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (1, "user", "evening msg", evening),
+                )
+            tmp_db.commit()
+
+            result = learning.infer_sleep_schedule(days=14)
+            assert result["wake_time"] is not None
+            assert result["sleep_time"] is not None
+            assert result["days_with_data"] == 3
+            assert result["confidence"] > 0
+            # Wake time should be around 08:30
+            assert result["wake_time"].startswith("08")
+            # Sleep time should be around 22:15
+            assert result["sleep_time"].startswith("22")
+        finally:
+            learning._db_conn = original
+
+    def test_infer_sleep_schedule_confidence_increases_with_data(self, tmp_db):
+        """More days of data should yield higher confidence."""
+        import learning
+        from datetime import datetime, timedelta
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            now = datetime.utcnow()
+            for i in range(10):
+                day = now - timedelta(days=i)
+                ts = day.replace(hour=9, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+                tmp_db.execute(
+                    "INSERT INTO conversations (chat_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
+                    (1, "user", "msg", ts),
+                )
+            tmp_db.commit()
+
+            result = learning.infer_sleep_schedule(days=14)
+            assert result["confidence"] > 0.5
+        finally:
+            learning._db_conn = original
+
+
+# --- #86: Coverage Gate for CI ---
+
+class TestCoverageGate:
+    def test_pyproject_toml_exists(self):
+        """pyproject.toml should exist with coverage config."""
+        from pathlib import Path
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        assert pyproject.exists()
+
+    def test_pyproject_has_coverage_config(self):
+        """pyproject.toml should have fail_under = 30."""
+        from pathlib import Path
+        pyproject = Path(__file__).parent.parent / "pyproject.toml"
+        content = pyproject.read_text()
+        assert "fail_under = 30" in content
+        assert "[tool.coverage.run]" in content
+        assert "[tool.coverage.report]" in content
+
+
+# --- #46: Gmail Label Management ---
+
+class TestGmailLabelManagement:
+    def test_scopes_modify_defined(self):
+        """SCOPES_MODIFY should be defined with gmail.modify scope."""
+        from actions.gmail import SCOPES_MODIFY
+        assert any("gmail.modify" in s for s in SCOPES_MODIFY)
+
+    def test_token_file_modify_in_config(self):
+        """TOKEN_FILE_MODIFY should be defined in config."""
+        from config import TOKEN_FILE_MODIFY
+        assert "token_modify" in str(TOKEN_FILE_MODIFY)
+
+    def test_list_labels_is_async(self):
+        """list_labels should be an async function."""
+        import asyncio
+        from actions.gmail import list_labels
+        assert asyncio.iscoroutinefunction(list_labels)
+
+    def test_apply_label_is_async(self):
+        """apply_label should be an async function."""
+        import asyncio
+        from actions.gmail import apply_label
+        assert asyncio.iscoroutinefunction(apply_label)
+
+    def test_remove_label_is_async(self):
+        """remove_label should be an async function."""
+        import asyncio
+        from actions.gmail import remove_label
+        assert asyncio.iscoroutinefunction(remove_label)
+
+    def test_get_gmail_service_modify_param(self):
+        """_get_gmail_service should accept modify parameter."""
+        import inspect
+        from actions.gmail import _get_gmail_service
+        sig = inspect.signature(_get_gmail_service)
+        assert "modify" in sig.parameters
+
+    def test_action_patterns_include_label(self):
+        """_ACTION_PATTERNS should include label/categorize patterns."""
+        from server import _ACTION_PATTERNS
+        label_patterns = [h for _, h in _ACTION_PATTERNS if h == "label"]
+        assert len(label_patterns) >= 1
+
+
+# --- #67: Cross-Source Context Fusion ---
+
+class TestCrossSourceContextFusion:
+    def test_truncate_context_adds_source_tags(self):
+        """truncate_context should tag each result with [Source: ...]."""
+        from server import truncate_context
+        results = [
+            {"category": "email", "title": "Meeting notes 2024-01-15", "content": "Some content"},
+            {"category": "drive", "title": "Project plan", "content": "Other content"},
+        ]
+        output = truncate_context(results)
+        assert "[Source: email" in output
+        assert "[Source: drive" in output
+
+    def test_truncate_context_empty_category(self):
+        """truncate_context should handle empty category gracefully."""
+        from server import truncate_context
+        results = [{"category": "", "title": "Untitled", "content": "Content"}]
+        output = truncate_context(results)
+        assert "[Source: Untitled]" in output
+
+    def test_truncate_context_preserves_content(self):
+        """Content should still be present after adding source tags."""
+        from server import truncate_context
+        results = [{"category": "test", "title": "Doc", "content": "Important data here"}]
+        output = truncate_context(results)
+        assert "Important data here" in output
+
+
+# --- #76: Two-Factor for Dangerous Actions ---
+
+class TestTwoFactorConfirmation:
+    def test_generate_confirmation_code_format(self):
+        """Confirmation code should be a 4-digit string."""
+        from autonomy import generate_confirmation_code
+        code = generate_confirmation_code()
+        assert len(code) == 4
+        assert code.isdigit()
+        assert 1000 <= int(code) <= 9999
+
+    def test_hard_guardrail_action_gets_code(self, tmp_db):
+        """Creating a hard guardrail action should generate a confirmation code."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        action_id = ctrl.create_pending_action("delete_data", "Delete everything")
+        code = ctrl.get_confirmation_code(action_id)
+        assert code is not None
+        assert len(code) == 4
+
+    def test_non_guardrail_action_no_code(self, tmp_db):
+        """Non-guardrail actions should NOT get confirmation codes."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        action_id = ctrl.create_pending_action("search_knowledge", "Search something")
+        code = ctrl.get_confirmation_code(action_id)
+        assert code is None
+
+    def test_verify_correct_code(self, tmp_db):
+        """Correct code should verify successfully and be consumed."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        action_id = ctrl.create_pending_action("send_money", "Send $100")
+        code = ctrl.get_confirmation_code(action_id)
+        assert ctrl.verify_confirmation_code(action_id, code) is True
+        # Code should be consumed
+        assert ctrl.get_confirmation_code(action_id) is None
+
+    def test_verify_wrong_code(self, tmp_db):
+        """Wrong code should fail verification."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        action_id = ctrl.create_pending_action("delete_data", "Delete all")
+        assert ctrl.verify_confirmation_code(action_id, "0000") is False
+
+    def test_verify_nonexistent_action(self, tmp_db):
+        """Verifying a code for an action without one should return False."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        assert ctrl.verify_confirmation_code(9999, "1234") is False

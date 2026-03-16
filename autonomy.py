@@ -2,10 +2,11 @@
 
 import json
 import logging
+import random
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from config import AutonomyLevel, ActionType, HARD_GUARDRAILS
+from config import AutonomyLevel, ActionType, HARD_GUARDRAILS, DATA_DIR
 
 log = logging.getLogger("khalil.autonomy")
 
@@ -55,6 +56,7 @@ class AutonomyController:
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self._level = self._load_level()
+        self._confirmation_codes: dict[int, str] = {}  # #76: action_id -> 4-digit code
 
     def _load_level(self) -> AutonomyLevel:
         row = self.conn.execute(
@@ -83,12 +85,29 @@ class AutonomyController:
         self.conn.commit()
 
     def log_audit(self, action_type: str, description: str, payload: dict | None = None, result: str | None = None):
-        """Write an entry to the audit log."""
+        """Write an entry to the audit log and append to immutable JSONL trail (#77)."""
         self.conn.execute(
             "INSERT INTO audit_log (action_type, description, payload, result, autonomy_level) VALUES (?, ?, ?, ?, ?)",
             (action_type, description, json.dumps(payload) if payload else None, result, self._level.name),
         )
         self.conn.commit()
+
+        # #77: Append to immutable JSONL audit trail (tamper-resistant)
+        try:
+            trail_path = DATA_DIR / "audit_trail.jsonl"
+            trail_path.parent.mkdir(parents=True, exist_ok=True)
+            entry = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "action_type": action_type,
+                "description": description,
+                "payload": payload,
+                "result": result,
+                "autonomy_level": self._level.name,
+            }
+            with open(trail_path, "a") as f:
+                f.write(json.dumps(entry) + "\n")
+        except Exception as e:
+            log.warning("Failed to write audit trail JSONL: %s", e)
 
     def get_audit_log(self, limit: int = 10) -> list[dict]:
         """Get recent audit log entries."""
@@ -224,13 +243,25 @@ class AutonomyController:
         return needs
 
     def create_pending_action(self, action_name: str, description: str, payload: dict | None = None) -> int:
-        """Queue an action for approval. Returns the action ID."""
+        """Queue an action for approval. Returns the action ID.
+
+        For hard guardrail actions (#76), a confirmation code is generated
+        that must be verified before approval.
+        """
         cursor = self.conn.execute(
             "INSERT INTO pending_actions (action_type, description, payload, status) VALUES (?, ?, ?, 'pending')",
             (action_name, description, json.dumps(payload) if payload else None),
         )
         self.conn.commit()
-        return cursor.lastrowid
+        action_id = cursor.lastrowid
+
+        # #76: Generate confirmation code for hard guardrail actions
+        if action_name in HARD_GUARDRAILS:
+            code = generate_confirmation_code()
+            self._confirmation_codes[action_id] = code
+            log.info("Confirmation code generated for hard guardrail action #%d", action_id)
+
+        return action_id
 
     def approve_action(self, action_id: int) -> dict | None:
         """Approve a pending action. Returns the action details."""
@@ -374,6 +405,23 @@ class AutonomyController:
         else:
             return f"Unknown action type: {action_type}. No executor available."
 
+    def get_confirmation_code(self, action_id: int) -> str | None:
+        """Get the confirmation code for a pending action, if one exists."""
+        return self._confirmation_codes.get(action_id)
+
+    def verify_confirmation_code(self, action_id: int, code: str) -> bool:
+        """Verify a confirmation code for a hard guardrail action (#76).
+
+        Returns True if the code matches. Removes the code on success.
+        """
+        expected = self._confirmation_codes.get(action_id)
+        if expected is None:
+            return False
+        if code == expected:
+            del self._confirmation_codes[action_id]
+            return True
+        return False
+
     def format_level(self) -> str:
         """Format current autonomy level for display."""
         icons = {
@@ -382,3 +430,8 @@ class AutonomyController:
             AutonomyLevel.AUTONOMOUS: "⚡",
         }
         return f"{icons[self._level]} {self._level.name.title()} (Level {self._level.value})"
+
+
+def generate_confirmation_code() -> str:
+    """Generate a random 4-digit confirmation code (#76)."""
+    return f"{random.randint(1000, 9999)}"

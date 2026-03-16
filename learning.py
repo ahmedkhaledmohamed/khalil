@@ -825,6 +825,70 @@ Maximum 3 meta-insights."""
     return stored
 
 
+def infer_sleep_schedule(days: int = 14) -> dict:
+    """#96: Infer sleep schedule from conversation timestamps.
+
+    Queries the last N days of conversations, groups by date,
+    finds first and last message per day.
+
+    Returns {wake_time, sleep_time, confidence, days_analyzed, days_with_data}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT timestamp FROM conversations WHERE role = 'user' AND timestamp > ? ORDER BY timestamp",
+        (cutoff,),
+    ).fetchall()
+
+    if not rows:
+        return {"wake_time": None, "sleep_time": None, "confidence": 0.0, "days_analyzed": days, "days_with_data": 0}
+
+    # Group timestamps by date
+    by_date: dict[str, list[str]] = {}
+    for r in rows:
+        ts = r[0] if isinstance(r, tuple) else r["timestamp"]
+        date_str = ts[:10]  # "YYYY-MM-DD"
+        by_date.setdefault(date_str, []).append(ts)
+
+    wake_hours = []
+    sleep_hours = []
+    for date_str, timestamps in by_date.items():
+        timestamps.sort()
+        first = timestamps[0]
+        last = timestamps[-1]
+        try:
+            first_dt = datetime.strptime(first, "%Y-%m-%d %H:%M:%S")
+            last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            wake_hours.append(first_dt.hour + first_dt.minute / 60.0)
+            sleep_hours.append(last_dt.hour + last_dt.minute / 60.0)
+        except (ValueError, IndexError):
+            continue
+
+    if not wake_hours:
+        return {"wake_time": None, "sleep_time": None, "confidence": 0.0, "days_analyzed": days, "days_with_data": 0}
+
+    avg_wake = sum(wake_hours) / len(wake_hours)
+    avg_sleep = sum(sleep_hours) / len(sleep_hours)
+
+    # Confidence based on data coverage
+    coverage = len(wake_hours) / days
+    confidence = min(1.0, coverage * 1.5)  # 67%+ coverage -> full confidence
+
+    def _fmt_time(h: float) -> str:
+        hours = int(h)
+        minutes = int((h - hours) * 60)
+        return f"{hours:02d}:{minutes:02d}"
+
+    return {
+        "wake_time": _fmt_time(avg_wake),
+        "sleep_time": _fmt_time(avg_sleep),
+        "confidence": round(confidence, 2),
+        "days_analyzed": days,
+        "days_with_data": len(wake_hours),
+    }
+
+
 def decay_preferences():
     """Monthly confidence decay — preferences not re-confirmed lose confidence."""
     conn = _get_conn()
