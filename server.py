@@ -1667,6 +1667,25 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- Startup ---
 
 
+def _wrap_extension_handler(handler_fn, extension_name: str):
+    """Wrap extension handler to record failures for self-healing."""
+    async def wrapper(update, context):
+        try:
+            return await handler_fn(update, context)
+        except Exception as e:
+            log.error("Extension %s failed: %s", extension_name, e)
+            try:
+                from learning import record_signal
+                record_signal("extension_runtime_failure", {
+                    "extension": extension_name,
+                    "error": str(e)[:500],
+                })
+            except Exception:
+                pass
+            await update.message.reply_text(f"Extension error: {e}")
+    return wrapper
+
+
 def _load_extensions(application):
     """Dynamically register command handlers from extension manifests."""
     import importlib
@@ -1690,7 +1709,9 @@ def _load_extensions(application):
             if hasattr(mod, "ensure_tables") and db_conn:
                 mod.ensure_tables(db_conn)
 
-            application.add_handler(CommandHandler(command, handler_fn))
+            # Wrap handler to record runtime failures for healing
+            wrapped = _wrap_extension_handler(handler_fn, manifest.get("name", command))
+            application.add_handler(CommandHandler(command, wrapped))
             log.info("Extension loaded: /%s from %s", command, module_name)
         except Exception as e:
             log.error("Failed to load extension %s: %s", manifest_path.name, e)
