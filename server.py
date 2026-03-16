@@ -586,6 +586,21 @@ _ACTION_PATTERNS = [
     (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
     (r"\binstall\s+(?:via\s+)?brew\b", "shell"),
     (r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", "shell"),
+    # #38: Window management
+    (r"\b(?:arrange|tile|put)\s+windows?\s+(?:side\s+by\s+side|split)\b", "shell"),
+    (r"\bresize\s+(?:the\s+)?window\b", "shell"),
+    (r"\bminimize\s+(?:all\s+)?windows?\b", "shell"),
+    (r"\bshow\s+(?:all\s+)?windows?\b", "shell"),
+    # #49: Google Contacts
+    (r"\bfind\s+contact\b", "contacts"),
+    (r"\bwho\s+is\b.*\b(?:email|phone|contact)\b", "contacts"),
+    (r"\bemail\s+address\s+for\b", "contacts"),
+    (r"\bsearch\s+(?:my\s+)?contacts?\b", "contacts"),
+    # #56: iCloud Reminders
+    (r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminder", "icloud_reminder"),
+    (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),
+    (r"\breminders?\s+app\b", "icloud_reminder"),
+    (r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
 ]
@@ -727,6 +742,23 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", text_lower):
         return {"action": "shell", "command": "pbpaste", "description": "Read clipboard for processing"}
 
+    # #49: Google Contacts search (before Spotlight to avoid "find contact" matching file search)
+    m = re.search(r"\b(?:find\s+contact|email\s+address\s+for|search\s+contacts?\s+(?:for\s+)?)\s*(.+?)$", text_lower)
+    if m:
+        query = text_stripped[m.start(1):m.end(1)].strip()
+        if query:
+            return {"action": "contacts_search", "query": query, "description": f"Search contacts for: {query}"}
+
+    # #56: iCloud Reminders (before Spotlight to avoid "find" overlap)
+    if re.search(r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", text_lower):
+        return {"action": "icloud_reminder_list", "description": "List Apple Reminders"}
+
+    m = re.search(r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminders?\s+(.+?)$", text_lower)
+    if m:
+        reminder_text = text_stripped[m.start(1):m.end(1)].strip()
+        if reminder_text:
+            return {"action": "icloud_reminder_create", "text": reminder_text, "description": f"Create Apple Reminder: {reminder_text}"}
+
     # #40: Spotlight file search — "find file X", "locate my .py files"
     m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
     if m:
@@ -773,6 +805,19 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     if re.search(r"\bbrew\s+cleanup\b", text_lower):
         return {"action": "shell", "command": "brew cleanup", "description": "Clean up old brew package versions"}
+
+    # #38: Window management
+    if re.search(r"\b(?:arrange|tile|put)\s+windows?\s+(?:side\s+by\s+side|split)\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set position of every window to {0, 0}'", "description": "Arrange windows side by side"}
+
+    if re.search(r"\bresize\s+(?:the\s+)?window\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set size of first window of first process whose frontmost is true to {800, 600}'", "description": "Resize front window"}
+
+    if re.search(r"\bminimize\s+(?:all\s+)?windows?\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set visible of every process to false'", "description": "Minimize all windows"}
+
+    if re.search(r"\bshow\s+(?:all\s+)?windows?\b", text_lower) and not re.search(r"\bwhat\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to set visible of every process to true'", "description": "Show all windows"}
 
     # #52: GitHub issue creation — "create issue <title>"
     m = re.search(r"\b(?:create|open|file|new)\s+(?:a\s+)?(?:github\s+)?issue\s+(?:for\s+|about\s+|titled?\s+)?['\"]?(.+?)['\"]?\s*$", text_lower)

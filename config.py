@@ -37,6 +37,7 @@ TOKEN_FILE = SCRIPTS_DIR / "token.json"  # gmail.readonly + drive.readonly
 TOKEN_FILE_COMPOSE = SCRIPTS_DIR / "token_khalil.json"  # gmail.compose for send
 TOKEN_FILE_CALENDAR = SCRIPTS_DIR / "token_calendar.json"  # calendar.readonly
 TOKEN_FILE_MODIFY = SCRIPTS_DIR / "token_modify.json"  # gmail.modify for label management (#46)
+TOKEN_FILE_CONTACTS = SCRIPTS_DIR / "token_contacts.json"  # contacts.readonly for People API (#49)
 
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"

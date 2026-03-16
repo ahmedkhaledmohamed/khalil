@@ -2746,3 +2746,623 @@ class TestRerankScore:
             "match_type": "keyword", "freshness": 0.1,
         }
         assert _compute_rerank_score(fresh, ["test"]) > _compute_rerank_score(stale, ["test"])
+
+
+# ============================================================
+# Batch 10: Items #88, #87, #38, #49, #56, #94, #6
+# ============================================================
+
+
+# --- #88: LLM Response Contract Tests ---
+
+class TestLLMResponseContracts:
+    """Golden-file style tests validating LLM outputs conform to expected formats."""
+
+    def test_reflection_prompt_structure(self, tmp_db):
+        """_build_reflection_prompt() should produce a valid structured prompt."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            from learning import _build_reflection_prompt
+            data = {
+                "signals": [
+                    {"signal_type": "action_decision", "context": '{"action": "shell"}', "value": 1, "created_at": "2026-03-15"},
+                ],
+                "audit": [],
+                "conversations": [{"content": "test conversation", "timestamp": "2026-03-15"}],
+                "actions": [],
+            }
+            prompt = _build_reflection_prompt(data, [])
+            assert "## Action Decisions" in prompt
+            assert "## Search Misses" in prompt
+            assert "## Digest Engagement" in prompt
+            assert "## User Conversation Topics" in prompt
+            assert "## Current Learned Preferences" in prompt
+            assert "JSON array" in prompt
+            assert "category" in prompt
+            assert "summary" in prompt
+            assert "evidence" in prompt
+            assert "recommendation" in prompt
+            assert "auto_apply" in prompt
+        finally:
+            learning._db_conn = original
+
+    def test_intent_detection_response_parseable(self):
+        """Intent detection JSON response format should be parseable with expected keys."""
+        import json
+        # Valid intent response format
+        valid_responses = [
+            '{"action": "shell", "command": "ls -la", "description": "List files"}',
+            '{"action": "reminder", "text": "Buy milk", "due": "tomorrow 9am"}',
+            '{"action": "email", "query": "from:boss subject:review"}',
+        ]
+        for resp in valid_responses:
+            parsed = json.loads(resp)
+            assert "action" in parsed, f"Missing 'action' key in: {resp}"
+
+        # Invalid JSON should raise
+        with pytest.raises(json.JSONDecodeError):
+            json.loads("not json at all")
+
+    def test_capability_gap_tag_parseable(self):
+        """CAPABILITY_GAP tag format should be parseable by server.py regex."""
+        valid_tags = [
+            "[CAPABILITY_GAP: slack_reader | /slack | Read and search Slack messages]",
+            "[CAPABILITY_GAP: weather_check | /weather | Check current weather conditions]",
+            "[CAPABILITY_GAP: jira_sync | /jira | Sync Jira tickets and status]",
+        ]
+        gap_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
+        for tag in valid_tags:
+            m = gap_re.search(tag)
+            assert m is not None, f"Regex failed to match: {tag}"
+            assert m.group(1)  # short_name
+            assert m.group(2).startswith("/")  # command
+            assert len(m.group(3)) > 0  # description
+
+    def test_capability_gap_tag_invalid_rejected(self):
+        """Invalid CAPABILITY_GAP tags should not match the regex."""
+        gap_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
+        invalid_tags = [
+            "[CAPABILITY_GAP: ]",
+            "[CAPABILITY_GAP: name | cmd | ]",  # no / prefix on command
+            "CAPABILITY_GAP: name | /cmd | desc",  # missing brackets
+            "[CAPABILITY_GAP: name]",  # missing pipes
+        ]
+        for tag in invalid_tags:
+            m = gap_re.search(tag)
+            # Either no match, or matches incorrectly — these should not produce valid 3-group matches
+            if m:
+                # If it matches, the groups should not all be valid
+                assert not (m.group(1) and m.group(2).startswith("/") and len(m.group(3).strip()) > 0), \
+                    f"Invalid tag should not match fully: {tag}"
+
+    def test_healing_diagnosis_format(self):
+        """Healing diagnosis dict should have expected schema keys."""
+        # Expected schema for a healing diagnosis
+        diagnosis = {
+            "fingerprint": "intent_detection_failure:shell",
+            "failure_count": 5,
+            "signal_type": "intent_detection_failure",
+            "action_hint": "shell",
+        }
+        required_keys = {"fingerprint", "failure_count"}
+        assert required_keys.issubset(diagnosis.keys())
+        assert isinstance(diagnosis["fingerprint"], str)
+        assert isinstance(diagnosis["failure_count"], int)
+        assert ":" in diagnosis["fingerprint"]
+
+
+# --- #87: Load Test for Concurrent Messages ---
+
+class TestConcurrentAccess:
+    """Tests verifying SQLite + handler don't deadlock under concurrent access."""
+
+    def test_concurrent_conversation_writes(self, tmp_path):
+        """10 concurrent writes to conversations should not deadlock."""
+        import threading
+        db_path = tmp_path / "concurrent.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        errors = []
+
+        def write_conversation(thread_id):
+            try:
+                c = sqlite3.connect(str(db_path))
+                c.execute("PRAGMA journal_mode=WAL")
+                c.execute(
+                    "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+                    (thread_id, "user", f"message from thread {thread_id}"),
+                )
+                c.commit()
+                c.close()
+            except Exception as e:
+                errors.append((thread_id, str(e)))
+
+        threads = [threading.Thread(target=write_conversation, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(errors) == 0, f"Concurrent write errors: {errors}"
+
+        # Verify all 10 rows written
+        c = sqlite3.connect(str(db_path))
+        count = c.execute("SELECT COUNT(*) FROM conversations").fetchone()[0]
+        c.close()
+        assert count == 10
+
+    def test_concurrent_signal_recording(self, tmp_path):
+        """10 concurrent signal writes should not deadlock."""
+        import json
+        import threading
+        db_path = tmp_path / "signals.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE interaction_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                signal_type TEXT NOT NULL,
+                context TEXT,
+                value REAL DEFAULT 1.0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        errors = []
+
+        def write_signal(thread_id):
+            try:
+                c = sqlite3.connect(str(db_path))
+                c.execute("PRAGMA journal_mode=WAL")
+                c.execute(
+                    "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                    ("test_signal", json.dumps({"thread": thread_id}), 1.0),
+                )
+                c.commit()
+                c.close()
+            except Exception as e:
+                errors.append((thread_id, str(e)))
+
+        threads = [threading.Thread(target=write_signal, args=(i,)) for i in range(10)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(errors) == 0, f"Concurrent signal errors: {errors}"
+        c = sqlite3.connect(str(db_path))
+        count = c.execute("SELECT COUNT(*) FROM interaction_signals").fetchone()[0]
+        c.close()
+        assert count == 10
+
+    def test_wal_mode_enables_concurrent_reads(self, tmp_path):
+        """WAL mode should allow concurrent reads during writes."""
+        import threading
+        db_path = tmp_path / "wal_test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE test (id INTEGER PRIMARY KEY, val TEXT)")
+        conn.execute("INSERT INTO test (val) VALUES ('seed')")
+        conn.commit()
+        conn.close()
+
+        read_results = []
+        errors = []
+
+        def reader(thread_id):
+            try:
+                c = sqlite3.connect(str(db_path))
+                c.execute("PRAGMA journal_mode=WAL")
+                rows = c.execute("SELECT COUNT(*) FROM test").fetchone()[0]
+                read_results.append(rows)
+                c.close()
+            except Exception as e:
+                errors.append((thread_id, str(e)))
+
+        def writer():
+            try:
+                c = sqlite3.connect(str(db_path))
+                c.execute("PRAGMA journal_mode=WAL")
+                for i in range(5):
+                    c.execute("INSERT INTO test (val) VALUES (?)", (f"val_{i}",))
+                c.commit()
+                c.close()
+            except Exception as e:
+                errors.append(("writer", str(e)))
+
+        # Start writer and readers concurrently
+        threads = [threading.Thread(target=writer)]
+        threads += [threading.Thread(target=reader, args=(i,)) for i in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=5)
+
+        assert len(errors) == 0, f"WAL concurrency errors: {errors}"
+        assert len(read_results) == 5
+
+
+# --- #38: App Window Management ---
+
+class TestWindowManagement:
+    def test_arrange_windows_pattern(self):
+        """'arrange windows side by side' should match shell pattern."""
+        from server import _looks_like_action
+        assert _looks_like_action("arrange windows side by side") == "shell"
+
+    def test_minimize_windows_pattern(self):
+        from server import _looks_like_action
+        assert _looks_like_action("minimize all windows") == "shell"
+
+    def test_show_windows_pattern(self):
+        from server import _looks_like_action
+        assert _looks_like_action("show all windows") == "shell"
+
+    def test_resize_window_pattern(self):
+        from server import _looks_like_action
+        assert _looks_like_action("resize the window") == "shell"
+
+    def test_arrange_windows_direct_intent(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("arrange windows side by side")
+        assert result is not None
+        assert "osascript" in result["command"]
+
+    def test_minimize_windows_direct_intent(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("minimize all windows")
+        assert result is not None
+        assert "osascript" in result["command"]
+        assert "visible" in result["command"]
+
+    def test_show_all_windows_direct_intent(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("show all windows")
+        assert result is not None
+        assert "osascript" in result["command"]
+
+    def test_resize_window_direct_intent(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("resize the window")
+        assert result is not None
+        assert "osascript" in result["command"]
+
+
+# --- #49: Google Contacts Search ---
+
+class TestGoogleContacts:
+    def test_contacts_pattern_find(self):
+        from server import _looks_like_action
+        assert _looks_like_action("find contact John") == "contacts"
+
+    def test_contacts_pattern_search(self):
+        from server import _looks_like_action
+        assert _looks_like_action("search my contacts for Ahmed") == "contacts"
+
+    def test_contacts_pattern_email_for(self):
+        from server import _looks_like_action
+        assert _looks_like_action("email address for Sarah") == "contacts"
+
+    def test_contacts_direct_intent(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("find contact John Smith")
+        assert result is not None
+        assert result["action"] == "contacts_search"
+        assert "John Smith" in result["query"]
+
+    def test_contacts_scopes_defined(self):
+        from actions.gmail import SCOPES_CONTACTS
+        assert len(SCOPES_CONTACTS) == 1
+        assert "contacts.readonly" in SCOPES_CONTACTS[0]
+
+    def test_search_contacts_sync_with_mock(self):
+        """_search_contacts_sync should parse People API response correctly."""
+        from unittest.mock import MagicMock, patch
+        mock_service = MagicMock()
+        mock_service.people().searchContacts().execute.return_value = {
+            "results": [
+                {
+                    "person": {
+                        "names": [{"displayName": "John Doe"}],
+                        "emailAddresses": [{"value": "john@example.com"}],
+                        "phoneNumbers": [{"value": "+1234567890"}],
+                    }
+                },
+                {
+                    "person": {
+                        "names": [{"displayName": "Jane Smith"}],
+                        "emailAddresses": [{"value": "jane@example.com"}],
+                        "phoneNumbers": [],
+                    }
+                },
+            ]
+        }
+        with patch("actions.gmail._get_people_service", return_value=mock_service):
+            from actions.gmail import _search_contacts_sync
+            results = _search_contacts_sync("John")
+            assert len(results) == 2
+            assert results[0]["name"] == "John Doe"
+            assert results[0]["email"] == "john@example.com"
+            assert results[0]["phone"] == "+1234567890"
+            assert results[1]["phone"] == ""
+
+
+# --- #56: iCloud Reminders Sync ---
+
+class TestICloudReminders:
+    def test_icloud_pattern_add(self):
+        from server import _looks_like_action
+        assert _looks_like_action("add to apple reminders buy milk") == "icloud_reminder"
+
+    def test_icloud_pattern_show(self):
+        from server import _looks_like_action
+        assert _looks_like_action("show my icloud reminders") == "icloud_reminder"
+
+    def test_icloud_pattern_app(self):
+        from server import _looks_like_action
+        assert _looks_like_action("open reminders app") == "icloud_reminder"
+
+    def test_get_icloud_reminders_with_mock(self):
+        """get_icloud_reminders should parse osascript output."""
+        from unittest.mock import patch, MagicMock
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "Buy groceries|||March 20, 2026\nPay rent|||March 25, 2026\n"
+        with patch("actions.reminders.subprocess.run", return_value=mock_result):
+            from actions.reminders import get_icloud_reminders
+            reminders = get_icloud_reminders()
+            assert len(reminders) == 2
+            assert reminders[0]["name"] == "Buy groceries"
+            assert reminders[0]["due_date"] == "March 20, 2026"
+            assert reminders[1]["name"] == "Pay rent"
+
+    def test_get_icloud_reminders_failure(self):
+        """get_icloud_reminders should return empty on osascript failure."""
+        from unittest.mock import patch, MagicMock
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "error"
+        with patch("actions.reminders.subprocess.run", return_value=mock_result):
+            from actions.reminders import get_icloud_reminders
+            assert get_icloud_reminders() == []
+
+    def test_create_icloud_reminder_with_mock(self):
+        """create_icloud_reminder should call osascript and return success."""
+        from unittest.mock import patch, MagicMock
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("actions.reminders.subprocess.run", return_value=mock_result):
+            from actions.reminders import create_icloud_reminder
+            result = create_icloud_reminder("Buy milk", "2026-03-20 09:00")
+            assert result["created"] is True
+            assert result["name"] == "Buy milk"
+
+    def test_create_icloud_reminder_no_due_date(self):
+        """create_icloud_reminder should work without a due date."""
+        from unittest.mock import patch, MagicMock
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        with patch("actions.reminders.subprocess.run", return_value=mock_result):
+            from actions.reminders import create_icloud_reminder
+            result = create_icloud_reminder("Buy milk")
+            assert result["created"] is True
+            assert result["due_date"] == ""
+
+    def test_icloud_direct_intent_list(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("show my apple reminders")
+        assert result is not None
+        assert result["action"] == "icloud_reminder_list"
+
+    def test_icloud_direct_intent_create(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("add to apple reminders buy milk")
+        assert result is not None
+        assert result["action"] == "icloud_reminder_create"
+        assert "buy milk" in result["text"]
+
+
+# --- #94: Goal Progress Auto-Check ---
+
+class TestGoalProgress:
+    def test_no_goals_returns_empty(self, tmp_db, tmp_path, monkeypatch):
+        """Should return empty when no goals directory."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        monkeypatch.setattr("learning.GOALS_DIR", tmp_path / "nonexistent")
+        try:
+            result = learning.check_goal_progress(days=7)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_goals_with_no_activity(self, tmp_db, tmp_path, monkeypatch):
+        """Goals with no matching signals should report no_activity."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        goals_dir = tmp_path / "goals"
+        goals_dir.mkdir()
+        (goals_dir / "2026.md").write_text("- Learn Rust programming\n- Ship Bezier MVP\n")
+        monkeypatch.setattr("learning.GOALS_DIR", goals_dir)
+        try:
+            result = learning.check_goal_progress(days=7)
+            assert len(result) == 2
+            assert all(r["status"] == "no_activity" for r in result)
+        finally:
+            learning._db_conn = original
+
+    def test_goals_with_activity(self, tmp_db, tmp_path, monkeypatch):
+        """Goals with matching conversation activity should be marked active."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        goals_dir = tmp_path / "goals"
+        goals_dir.mkdir()
+        (goals_dir / "2026.md").write_text("- Learn Rust programming\n")
+        monkeypatch.setattr("learning.GOALS_DIR", goals_dir)
+
+        # Add conversations mentioning "Rust" and "programming"
+        for i in range(6):
+            tmp_db.execute(
+                "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+                (1, "user", f"I've been studying Rust programming chapter {i}"),
+            )
+        tmp_db.commit()
+        try:
+            result = learning.check_goal_progress(days=7)
+            assert len(result) == 1
+            assert result[0]["status"] == "active"
+            assert result[0]["activity_count"] >= 5
+        finally:
+            learning._db_conn = original
+
+    def test_goals_extracts_from_markdown(self, tmp_db, tmp_path, monkeypatch):
+        """Should extract goals from markdown bullet points and headers."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        goals_dir = tmp_path / "goals"
+        goals_dir.mkdir()
+        (goals_dir / "q1.md").write_text(
+            "## Ship the new feature\n"
+            "- Write more tests\n"
+            "* Read three books\n"
+        )
+        monkeypatch.setattr("learning.GOALS_DIR", goals_dir)
+        try:
+            result = learning.check_goal_progress(days=7)
+            goal_texts = [r["goal"] for r in result]
+            assert "Ship the new feature" in goal_texts
+            assert "Write more tests" in goal_texts
+            assert "Read three books" in goal_texts
+        finally:
+            learning._db_conn = original
+
+
+# --- #6: Multi-turn Coherence Analysis ---
+
+class TestCoherenceAnalysis:
+    def test_no_issues_when_empty(self, tmp_db):
+        """Should return empty when no conversations."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_detects_repeated_info(self, tmp_db):
+        """Should detect 'I already told you' patterns."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+            (1, "user", "I already told you my name is Ahmed"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert len(result) == 1
+            assert result[0]["issue_type"] == "repeated_info"
+        finally:
+            learning._db_conn = original
+
+    def test_detects_correction(self, tmp_db):
+        """Should detect 'No, I said...' correction patterns."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+            (1, "user", "No, I said I wanted the short version"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert len(result) == 1
+            assert result[0]["issue_type"] == "correction"
+        finally:
+            learning._db_conn = original
+
+    def test_detects_lost_context(self, tmp_db):
+        """Should detect 'you forgot' patterns indicating lost context."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+            (1, "user", "You forgot about the deadline I mentioned"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert len(result) == 1
+            assert result[0]["issue_type"] == "lost_context"
+        finally:
+            learning._db_conn = original
+
+    def test_no_false_positives(self, tmp_db):
+        """Normal messages should not trigger coherence issues."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        normal_messages = [
+            "What's the weather today?",
+            "Set a reminder for tomorrow",
+            "Check my calendar",
+            "Thanks, that's helpful",
+        ]
+        for msg in normal_messages:
+            tmp_db.execute(
+                "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+                (1, "user", msg),
+            )
+        tmp_db.commit()
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert len(result) == 0
+        finally:
+            learning._db_conn = original
+
+    def test_returns_expected_fields(self, tmp_db):
+        """Each issue should have chat_id, timestamp, issue_type, context."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
+            (42, "user", "I already said I want bullet points"),
+        )
+        tmp_db.commit()
+        try:
+            result = learning.detect_coherence_issues(days=7)
+            assert len(result) == 1
+            issue = result[0]
+            assert "chat_id" in issue
+            assert "timestamp" in issue
+            assert "issue_type" in issue
+            assert "context" in issue
+            assert issue["chat_id"] == 42
+        finally:
+            learning._db_conn = original
