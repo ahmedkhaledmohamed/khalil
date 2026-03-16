@@ -689,6 +689,14 @@ _ACTION_PATTERNS = [
     (r"\b(?:what.s|which)\s+(?:(?:files?|projects?)\s+)?(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
     (r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", "cursor_status"),
     (r"\bcursor\s+extensions?\b", "cursor_extensions"),
+    # Cursor integrated terminal (via bridge extension) — must come before generic terminal patterns
+    (r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", "cursor_terminal_status"),
+    (r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", "cursor_terminal_status"),
+    (r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", "cursor_terminal_status"),
+    (r"\brun\s+.+\s+in\s+cursor\s+terminal\b", "cursor_terminal_exec"),
+    (r"\bsend\s+.+\s+to\s+cursor\s+terminal\b", "cursor_terminal_exec"),
+    (r"\bnew\s+cursor\s+terminal\b", "cursor_terminal_new"),
+    (r"\bcreate\s+(?:a\s+)?cursor\s+terminal\b", "cursor_terminal_new"),
     # iTerm2 / terminal awareness
     (r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", "terminal_status"),
     (r"\bterminal\s+(?:status|sessions?)\b", "terminal_status"),
@@ -903,6 +911,26 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\bcursor\s+extensions?\b", text_lower):
         return {"action": "cursor_extensions", "description": "List Cursor extensions"}
 
+    # Cursor integrated terminal (via bridge) — must come before generic terminal patterns
+    if re.search(r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", text_lower) or \
+       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower) or \
+       re.search(r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", text_lower):
+        return {"action": "cursor_terminal_status", "description": "Check Cursor terminal sessions"}
+
+    m = re.search(r"\brun\s+(.+?)\s+in\s+cursor\s+terminal\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_terminal_exec", "command": cmd, "description": f"Run in Cursor terminal: {cmd}"}
+
+    m = re.search(r"\bsend\s+(.+?)\s+to\s+cursor\s+terminal\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_terminal_exec", "command": cmd, "description": f"Send to Cursor terminal: {cmd}"}
+
+    if re.search(r"\bnew\s+cursor\s+terminal\b", text_lower) or \
+       re.search(r"\bcreate\s+(?:a\s+)?cursor\s+terminal\b", text_lower):
+        return {"action": "cursor_terminal_new", "description": "Create new Cursor terminal"}
+
     # New terminal tab (must come before terminal_status to avoid "tab" matching "status")
     if re.search(r"\bnew\s+(?:terminal\s+)?tab\b", text_lower) or \
        re.search(r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", text_lower):
@@ -950,6 +978,30 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         f1 = text_stripped[m.start(1):m.end(1)]
         f2 = text_stripped[m.start(2):m.end(2)]
         return {"action": "cursor_diff", "file1": f1, "file2": f2, "description": f"Diff: {f1} vs {f2}"}
+
+    # Cursor integrated terminal (via bridge extension)
+    if re.search(r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", text_lower) or \
+       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower) or \
+       re.search(r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", text_lower):
+        return {"action": "cursor_terminal_status", "description": "Check Cursor terminal sessions"}
+
+    m = re.search(r"\brun\s+(.+?)\s+in\s+cursor\s+terminal\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_terminal_exec", "command": cmd, "description": f"Run in Cursor terminal: {cmd}"}
+
+    m = re.search(r"\bsend\s+(.+?)\s+to\s+cursor\s+terminal\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_terminal_exec", "command": cmd, "description": f"Send to Cursor terminal: {cmd}"}
+
+    if re.search(r"\bnew\s+cursor\s+terminal\b", text_lower) or \
+       re.search(r"\bcreate\s+(?:a\s+)?cursor\s+terminal\b", text_lower):
+        cmd = None
+        m = re.search(r"\b(?:new|create\s+(?:a\s+)?)cursor\s+terminal\s+(?:and\s+)?(?:run\s+)?(.+?)$", text_lower)
+        if m:
+            cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_terminal_new", "command": cmd, "description": "Create new Cursor terminal"}
 
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
@@ -1461,6 +1513,56 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             await update.message.reply_text(f"⚠️ Failed: {result['error']}")
         return True
 
+    elif action == "cursor_terminal_status":
+        from actions.terminal import get_cursor_terminal_status, format_cursor_terminal_status
+        status = await get_cursor_terminal_status()
+        autonomy.log_audit("cursor_terminal_status", "Checked Cursor terminals", result="ok")
+        await update.message.reply_text(format_cursor_terminal_status(status))
+        return True
+
+    elif action == "cursor_terminal_exec":
+        cmd = intent.get("command", "")
+        if not cmd:
+            return False
+        target = intent.get("target", "0")  # default to first terminal
+        # Always requires approval — injecting into Cursor terminal
+        action_id = autonomy.create_pending_action(
+            "cursor_terminal_exec",
+            f"Run in Cursor terminal: {cmd}",
+            {"command": cmd, "target": target},
+        )
+        await update.message.reply_text(
+            f"🖥 Send to Cursor terminal:\n\n`{cmd}`\n\n{autonomy.format_level()}",
+            reply_markup=approve_deny_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    elif action == "cursor_terminal_new":
+        from actions.terminal import bridge_create_terminal
+        cmd = intent.get("command")
+        if autonomy.needs_approval("cursor_terminal_new"):
+            desc = f"New Cursor terminal" + (f" running: {cmd}" if cmd else "")
+            action_id = autonomy.create_pending_action(
+                "cursor_terminal_new", desc, {"command": cmd},
+            )
+            await update.message.reply_text(
+                f"🖥 {desc}\n\n{autonomy.format_level()}",
+                reply_markup=approve_deny_keyboard(),
+                parse_mode="Markdown",
+            )
+        else:
+            result = await bridge_create_terminal(command=cmd)
+            if result.get("error"):
+                await update.message.reply_text(f"⚠️ {result['error']}")
+            else:
+                autonomy.log_audit("cursor_terminal_new", "Created Cursor terminal", result="ok")
+                msg = "🖥 New Cursor terminal created"
+                if cmd:
+                    msg += f"\nRunning: `{cmd}`"
+                await update.message.reply_text(msg, parse_mode="Markdown")
+        return True
+
     elif action == "shell":
         from actions.shell import classify_command, execute_shell, format_output
         cmd = intent.get("command", "")
@@ -1778,6 +1880,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await query.message.reply_text(f"🖥 Opened in Cursor: {payload['path']}{line_str}")
                 else:
                     await query.message.reply_text(f"⚠️ Failed: {open_result['error']}")
+
+            elif result["action_type"] == "cursor_terminal_exec":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import bridge_send_command
+                bridge_result = await bridge_send_command(payload.get("target", "0"), payload["command"])
+                autonomy.log_audit("cursor_terminal_exec", f"Sent: {payload['command']}", payload,
+                                   "ok" if not bridge_result.get("error") else bridge_result["error"])
+                if bridge_result.get("error"):
+                    await query.message.reply_text(f"⚠️ {bridge_result['error']}")
+                else:
+                    await query.message.reply_text(f"🖥 Sent to Cursor terminal: `{payload['command']}`", parse_mode="Markdown")
+
+            elif result["action_type"] == "cursor_terminal_new":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import bridge_create_terminal
+                bridge_result = await bridge_create_terminal(command=payload.get("command"))
+                autonomy.log_audit("cursor_terminal_new", "Created Cursor terminal", payload,
+                                   "ok" if not bridge_result.get("error") else bridge_result.get("error"))
+                if bridge_result.get("error"):
+                    await query.message.reply_text(f"⚠️ {bridge_result['error']}")
+                else:
+                    cmd = payload.get("command")
+                    await query.message.reply_text("🖥 New Cursor terminal created" + (f"\nRunning: `{cmd}`" if cmd else ""), parse_mode="Markdown")
 
             else:
                 status_msg = await autonomy.execute_action(result)
@@ -2539,23 +2666,29 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show dev environment status — Cursor windows + terminal sessions."""
+    """Show dev environment status — Cursor windows + terminal sessions + bridge."""
     from actions.terminal import (
         get_cursor_status, format_cursor_status,
         get_terminal_status, format_terminal_status,
         get_frontmost_app,
+        get_cursor_terminal_status, format_cursor_terminal_status,
     )
 
-    cursor_status, terminal_status, frontmost = await asyncio.gather(
+    cursor_status, terminal_status, frontmost, bridge_status = await asyncio.gather(
         get_cursor_status(),
         get_terminal_status(),
         get_frontmost_app(),
+        get_cursor_terminal_status(),
     )
 
     lines = ["🖥 Dev Environment\n"]
     lines.append(format_cursor_status(cursor_status))
     lines.append("")
     lines.append(format_terminal_status(terminal_status))
+    # Show Cursor integrated terminal if bridge is running
+    if not bridge_status.get("error"):
+        lines.append("")
+        lines.append(format_cursor_terminal_status(bridge_status))
     if frontmost:
         lines.append(f"\n🔍 Frontmost: {frontmost}")
 
