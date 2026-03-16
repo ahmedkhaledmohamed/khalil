@@ -182,7 +182,8 @@ def approve_deny_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-CONVERSATION_CONTEXT_WINDOW = 10  # messages sent to LLM for context
+CONVERSATION_CONTEXT_WINDOW = 10  # max messages sent to LLM for context
+CONVERSATION_MIN_WINDOW = 4      # minimum messages to include
 
 
 def save_message(chat_id: int, role: str, content: str):
@@ -194,16 +195,51 @@ def save_message(chat_id: int, role: str, content: str):
     db_conn.commit()
 
 
+def _compute_topic_similarity(text_a: str, text_b: str) -> float:
+    """#66: Simple word-overlap similarity between two texts. Returns 0.0-1.0."""
+    words_a = set(text_a.lower().split())
+    words_b = set(text_b.lower().split())
+    # Remove common stopwords
+    stopwords = {"the", "a", "an", "is", "are", "was", "were", "i", "you", "my", "your",
+                 "it", "this", "that", "to", "of", "in", "for", "on", "with", "and", "or"}
+    words_a -= stopwords
+    words_b -= stopwords
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union) if union else 0.0
+
+
 def get_conversation_history(chat_id: int) -> str:
-    """Get recent conversation history formatted for LLM context (windowed)."""
+    """Get recent conversation history formatted for LLM context.
+
+    #66: Dynamic context window — includes more messages when topic is coherent,
+    fewer when the topic has shifted.
+    """
     rows = db_conn.execute(
         "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
         (chat_id, CONVERSATION_CONTEXT_WINDOW),
     ).fetchall()
     if not rows:
         return ""
+
     # Reverse to chronological order
     rows = list(reversed(rows))
+
+    # Dynamic windowing: walk backward from newest, stop when topic diverges
+    if len(rows) > CONVERSATION_MIN_WINDOW:
+        latest_text = rows[-1][1]
+        window_size = CONVERSATION_MIN_WINDOW
+        for i in range(len(rows) - CONVERSATION_MIN_WINDOW - 1, -1, -1):
+            sim = _compute_topic_similarity(latest_text, rows[i][1])
+            if sim >= 0.1:  # Even slight topical overlap = include
+                window_size = len(rows) - i
+            else:
+                break
+        window_size = max(CONVERSATION_MIN_WINDOW, min(window_size, len(rows)))
+        rows = rows[-window_size:]
+
     lines = [f"{r[0].title()}: {r[1]}" for r in rows]
     return "Recent conversation:\n" + "\n".join(lines)
 

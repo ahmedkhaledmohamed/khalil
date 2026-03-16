@@ -613,6 +613,58 @@ def detect_recurring_failures() -> list[dict]:
         return []
 
 
+# --- #57: Conversation Summarization ---
+
+async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[dict]:
+    """Summarize long conversation threads into knowledge base entries.
+
+    Finds conversation threads with >= min_messages and compresses them
+    into document entries for the knowledge base.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Find chat_ids with enough messages
+    chats = conn.execute(
+        "SELECT chat_id, COUNT(*) as cnt FROM conversations "
+        "WHERE timestamp > ? GROUP BY chat_id HAVING cnt >= ?",
+        (cutoff, min_messages),
+    ).fetchall()
+
+    summaries = []
+    for chat in chats:
+        chat_id = chat[0]
+        messages = conn.execute(
+            "SELECT role, content, timestamp FROM conversations "
+            "WHERE chat_id = ? AND timestamp > ? ORDER BY timestamp",
+            (chat_id, cutoff),
+        ).fetchall()
+
+        # Build conversation text for summarization
+        conv_text = "\n".join(f"{m[0]}: {m[1][:200]}" for m in messages[:50])
+
+        try:
+            summary = await ask_llm_fn(
+                f"Summarize this conversation into key topics, decisions, and action items:\n\n{conv_text}",
+                "",
+                system_extra="Create a concise summary with bullet points. Focus on decisions made, tasks assigned, and key information exchanged.",
+            )
+            if summary and not summary.startswith("⚠️"):
+                # Store in documents table for knowledge base
+                conn.execute(
+                    "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+                    ("conversation_summary", "conversation",
+                     f"Conversation summary ({messages[0][2][:10]})", summary),
+                )
+                conn.commit()
+                summaries.append({"chat_id": chat_id, "message_count": len(messages), "summary": summary[:200]})
+                log.info("Summarized conversation for chat %d (%d messages)", chat_id, len(messages))
+        except Exception as e:
+            log.warning("Conversation summarization failed for chat %d: %s", chat_id, e)
+
+    return summaries
+
+
 def decay_preferences():
     """Monthly confidence decay — preferences not re-confirmed lose confidence."""
     conn = _get_conn()

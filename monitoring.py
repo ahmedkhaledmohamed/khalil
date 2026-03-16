@@ -1,6 +1,7 @@
 """Health checks and monitoring for Khalil subsystems."""
 
 import logging
+import subprocess
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -9,6 +10,50 @@ import httpx
 from config import DB_PATH, OLLAMA_URL, TIMEZONE
 
 log = logging.getLogger("khalil.monitoring")
+
+
+# --- #39: Native macOS notifications ---
+
+def send_macos_notification(title: str, message: str, sound: str = "default") -> bool:
+    """Send a native macOS notification via osascript. Returns True on success."""
+    # Escape double quotes for AppleScript
+    title_esc = title.replace('"', '\\"')
+    msg_esc = message.replace('"', '\\"')
+    script = f'display notification "{msg_esc}" with title "{title_esc}" sound name "{sound}"'
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            return True
+        log.warning("macOS notification failed: %s", result.stderr.strip())
+        return False
+    except Exception as e:
+        log.warning("macOS notification error: %s", e)
+        return False
+
+
+def get_focus_mode_status() -> dict:
+    """#34: Read macOS Focus/DND status. Returns {active: bool, mode: str | None}."""
+    try:
+        # Check if Focus/DND is active via defaults
+        result = subprocess.run(
+            ["defaults", "read", "com.apple.controlcenter", "NSStatusItem Visible FocusModes"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Also check the assertion store for active focus
+        result2 = subprocess.run(
+            ["plutil", "-p", "/Users/" + subprocess.run(
+                ["whoami"], capture_output=True, text=True, timeout=2
+            ).stdout.strip() + "/Library/DoNotDisturb/DB/Assertions.json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        # If assertions file has active entries, DND is on
+        is_active = "storeAssertionRecords" in result2.stdout and '"lifetimeType" => 0' not in result2.stdout
+        return {"active": is_active, "raw": result2.stdout[:200] if is_active else None}
+    except Exception as e:
+        return {"active": False, "error": str(e)}
 
 
 async def check_ollama() -> dict:

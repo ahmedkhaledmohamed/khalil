@@ -14,6 +14,18 @@ def _record_digest_sent(digest_type: str):
         pass
 
 
+def _record_scheduler_failure(task_name: str, error: str):
+    """#22: Record scheduler task failures for self-healing detection."""
+    try:
+        from learning import record_signal
+        record_signal("scheduler_task_failure", {
+            "task": task_name,
+            "error": str(error)[:500],
+        })
+    except Exception:
+        pass
+
+
 async def sync_emails():
     """Pull new emails, embed, and index into knowledge base."""
     from actions.gmail_sync import sync_new_emails
@@ -23,6 +35,7 @@ async def sync_emails():
         log.info("Email sync complete: %s", result)
     except Exception as e:
         log.error("Email sync failed: %s", e)
+        _record_scheduler_failure("email_sync", e)
 
 
 async def send_morning_brief(bot, chat_id: int, ask_claude_fn):
@@ -36,6 +49,7 @@ async def send_morning_brief(bot, chat_id: int, ask_claude_fn):
         log.info("Morning brief sent successfully")
     except Exception as e:
         log.error(f"Failed to send morning brief: {e}")
+        _record_scheduler_failure("morning_brief", e)
 
 
 async def send_financial_alert(bot, chat_id: int, ask_claude_fn):
@@ -52,6 +66,7 @@ async def send_financial_alert(bot, chat_id: int, ask_claude_fn):
             log.info("Financial alert check: nothing urgent")
     except Exception as e:
         log.error(f"Failed to generate financial alert: {e}")
+        _record_scheduler_failure("financial_alert", e)
 
 
 async def send_career_alert(bot, chat_id: int):
@@ -68,6 +83,7 @@ async def send_career_alert(bot, chat_id: int):
             log.info("Career alert: nothing new")
     except Exception as e:
         log.error(f"Failed to generate career alert: {e}")
+        _record_scheduler_failure("career_alert", e)
 
 
 async def send_weekly_summary(bot, chat_id: int, ask_claude_fn):
@@ -81,6 +97,7 @@ async def send_weekly_summary(bot, chat_id: int, ask_claude_fn):
         log.info("Weekly summary sent")
     except Exception as e:
         log.error(f"Failed to send weekly summary: {e}")
+        _record_scheduler_failure("weekly_summary", e)
 
 
 async def send_friday_reflection(bot, chat_id: int, ask_claude_fn):
@@ -94,6 +111,7 @@ async def send_friday_reflection(bot, chat_id: int, ask_claude_fn):
         log.info("Friday reflection sent")
     except Exception as e:
         log.error(f"Failed to send Friday reflection: {e}")
+        _record_scheduler_failure("friday_reflection", e)
 
 
 async def run_reflection(bot, chat_id: int, ask_claude_fn):
@@ -117,6 +135,7 @@ async def run_reflection(bot, chat_id: int, ask_claude_fn):
         log.info("Weekly reflection complete: %d insights", len(insights))
     except Exception as e:
         log.error(f"Weekly reflection failed: {e}")
+        _record_scheduler_failure("weekly_reflection", e)
 
 
 async def run_micro_reflection(ask_claude_fn, bot=None, chat_id: int = None):
@@ -137,3 +156,4 @@ async def run_micro_reflection(ask_claude_fn, bot=None, chat_id: int = None):
             await run_self_healing(triggers, bot, chat_id)
     except Exception as e:
         log.error(f"Self-healing check failed: {e}")
+        _record_scheduler_failure("self_healing_check", e)

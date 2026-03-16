@@ -101,6 +101,40 @@ class AutonomyController:
             for r in rows
         ]
 
+    def archive_old_audit_logs(self, retention_days: int = 90) -> int:
+        """#71: Archive audit log entries older than retention_days. Returns count archived."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Count entries to archive
+        count = self.conn.execute(
+            "SELECT COUNT(*) FROM audit_log WHERE timestamp < ?", (cutoff,)
+        ).fetchone()[0]
+
+        if count == 0:
+            return 0
+
+        # Write to archive file before deleting
+        rows = self.conn.execute(
+            "SELECT * FROM audit_log WHERE timestamp < ? ORDER BY timestamp", (cutoff,)
+        ).fetchall()
+
+        import gzip
+        from config import DATA_DIR
+        archive_path = DATA_DIR / f"audit_archive_{datetime.now(timezone.utc).strftime('%Y%m')}.jsonl.gz"
+        with gzip.open(archive_path, "at") as f:
+            for r in rows:
+                f.write(json.dumps({
+                    "id": r[0], "timestamp": r[1], "action_type": r[2],
+                    "description": r[3], "payload": r[4], "result": r[5],
+                    "autonomy_level": r[6],
+                }) + "\n")
+
+        # Delete archived entries
+        self.conn.execute("DELETE FROM audit_log WHERE timestamp < ?", (cutoff,))
+        self.conn.commit()
+        log.info("Archived %d audit log entries to %s", count, archive_path.name)
+        return count
+
     def classify_action(self, action_name: str) -> ActionType:
         """Classify an action into read/write/dangerous."""
         return ACTION_RULES.get(action_name, ActionType.WRITE)

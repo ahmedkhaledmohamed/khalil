@@ -826,3 +826,187 @@ class TestImplicitPreference:
         ctx = json.loads(row[0])
         assert ctx["type"] == "style_preference"
         learning._db_conn = original
+
+
+# ============================================================
+# Batch 5: Items #71, #39, #19, #22, #57, #66, #34
+# ============================================================
+
+
+# --- #71: Audit Log Retention Policy ---
+
+class TestAuditLogRetention:
+    def test_archive_no_old_entries(self, tmp_db):
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        count = ctrl.archive_old_audit_logs(retention_days=90)
+        assert count == 0
+
+    def test_archive_old_entries(self, tmp_db, tmp_path, monkeypatch):
+        from autonomy import AutonomyController
+        from datetime import datetime, timedelta
+        ctrl = AutonomyController(tmp_db)
+        # Insert an entry from 100 days ago
+        old_ts = (datetime.utcnow() - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S")
+        tmp_db.execute(
+            "INSERT INTO audit_log (timestamp, action_type, description, autonomy_level) VALUES (?, 'test', 'old entry', 'SUPERVISED')",
+            (old_ts,),
+        )
+        # Insert a recent entry
+        ctrl.log_audit("test", "recent entry")
+        tmp_db.commit()
+        monkeypatch.setattr("config.DATA_DIR", tmp_path)
+        count = ctrl.archive_old_audit_logs(retention_days=90)
+        assert count == 1
+        # Recent entry still exists
+        remaining = tmp_db.execute("SELECT COUNT(*) FROM audit_log WHERE description = 'recent entry'").fetchone()[0]
+        assert remaining >= 1
+        # Archive file exists
+        import glob
+        archives = glob.glob(str(tmp_path / "audit_archive_*.jsonl.gz"))
+        assert len(archives) == 1
+
+
+# --- #39: Native macOS Notifications ---
+
+class TestMacOSNotifications:
+    def test_notification_function_exists(self):
+        from monitoring import send_macos_notification
+        assert callable(send_macos_notification)
+
+    def test_notification_escapes_quotes(self):
+        """Verify the function handles special characters."""
+        from monitoring import send_macos_notification
+        # Just test it doesn't crash — actual notification requires macOS
+        result = send_macos_notification('Test "Title"', 'Hello "World"')
+        # Result depends on macOS availability — just check no crash
+        assert isinstance(result, bool)
+
+
+# --- #19: Healing Confidence Scoring ---
+
+class TestHealingConfidence:
+    def test_base_confidence(self, tmp_db, monkeypatch):
+        from healing import score_healing_confidence
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        diagnosis = {"fingerprint": "test:test", "failure_count": 1}
+        score = score_healing_confidence(diagnosis, "def fix(): pass")
+        assert 0.0 < score <= 1.0
+
+    def test_high_confidence_small_patch(self, tmp_db, monkeypatch):
+        from healing import score_healing_confidence
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        diagnosis = {"fingerprint": "test:test", "failure_count": 5}
+        score = score_healing_confidence(diagnosis, "x = 1")
+        assert score >= 0.5  # small patch + many signals = high confidence
+
+    def test_lower_confidence_large_patch(self, tmp_db, monkeypatch):
+        from healing import score_healing_confidence
+        monkeypatch.setattr("healing._get_conn", lambda: tmp_db)
+        diagnosis = {"fingerprint": "test:test", "failure_count": 1}
+        large_patch = "\n".join(f"line_{i} = {i}" for i in range(50))
+        score = score_healing_confidence(diagnosis, large_patch)
+        # Large patch + few signals = lower confidence
+        assert score < 0.7
+
+
+# --- #22: Healing for Scheduler Jobs ---
+
+class TestSchedulerHealing:
+    def test_record_scheduler_failure(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_scheduler_failure
+        _record_scheduler_failure("morning_brief", "Connection refused")
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'scheduler_task_failure'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["task"] == "morning_brief"
+        assert "Connection" in ctx["error"]
+        learning._db_conn = original
+
+
+# --- #57: Conversation Summarization ---
+
+class TestConversationSummarization:
+    def test_no_long_conversations(self, tmp_db):
+        """No conversations with enough messages should return empty."""
+        import asyncio
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import summarize_conversations
+
+        async def mock_llm(q, c, system_extra=""):
+            return "Mock summary"
+
+        result = asyncio.run(summarize_conversations(mock_llm, min_messages=20))
+        assert result == []
+        learning._db_conn = original
+
+    def test_summarizes_long_conversation(self, tmp_db):
+        """Long conversation should be summarized."""
+        import asyncio
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import summarize_conversations
+
+        # Insert 25 messages
+        for i in range(25):
+            role = "user" if i % 2 == 0 else "assistant"
+            tmp_db.execute(
+                "INSERT INTO conversations (chat_id, role, content) VALUES (1, ?, ?)",
+                (role, f"Message {i} about project planning"),
+            )
+        tmp_db.commit()
+
+        async def mock_llm(q, c, system_extra=""):
+            return "Summary: discussed project planning across 25 messages."
+
+        result = asyncio.run(summarize_conversations(mock_llm, min_messages=20))
+        assert len(result) == 1
+        assert result[0]["message_count"] == 25
+        # Check document was created
+        doc = tmp_db.execute(
+            "SELECT content FROM documents WHERE source = 'conversation_summary'"
+        ).fetchone()
+        assert doc is not None
+        assert "project planning" in doc[0]
+        learning._db_conn = original
+
+
+# --- #66: Dynamic Context Window ---
+
+class TestDynamicContextWindow:
+    def test_topic_similarity_same(self):
+        from server import _compute_topic_similarity
+        assert _compute_topic_similarity("python code review", "python code review") > 0.5
+
+    def test_topic_similarity_different(self):
+        from server import _compute_topic_similarity
+        sim = _compute_topic_similarity("python code review", "grocery shopping list")
+        assert sim < 0.2
+
+    def test_topic_similarity_partial(self):
+        from server import _compute_topic_similarity
+        sim = _compute_topic_similarity("python code review", "review python tests")
+        assert sim > 0.3  # shared words: python, review
+
+
+# --- #34: Focus/DND Mode Awareness ---
+
+class TestFocusModeAwareness:
+    def test_focus_mode_function_exists(self):
+        from monitoring import get_focus_mode_status
+        assert callable(get_focus_mode_status)
+
+    def test_focus_mode_returns_dict(self):
+        from monitoring import get_focus_mode_status
+        result = get_focus_mode_status()
+        assert isinstance(result, dict)
+        assert "active" in result
