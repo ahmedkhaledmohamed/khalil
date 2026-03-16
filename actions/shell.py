@@ -200,7 +200,11 @@ _TRANSIENT_PATTERNS = [
 _PERMANENT_PATTERNS = [
     "permission denied", "operation not permitted", "command not found",
     "no such file or directory", "not a directory",
-    "not allowed assistive access",
+]
+
+# Errors that look permanent but often have alternative approaches
+_CORRECTABLE_OVERRIDES = [
+    "not allowed assistive access",  # osascript can often avoid accessibility
 ]
 
 # User-friendly hints for specific permanent errors
@@ -223,6 +227,9 @@ def classify_error(returncode: int, stderr: str) -> str:
     stderr_lower = stderr.lower()
     if any(p in stderr_lower for p in _TRANSIENT_PATTERNS):
         return "transient"
+    # Check correctable overrides before permanent — these errors have alternative approaches
+    if any(p in stderr_lower for p in _CORRECTABLE_OVERRIDES):
+        return "correctable"
     if any(p in stderr_lower for p in _PERMANENT_PATTERNS):
         return "permanent"
     return "correctable"
