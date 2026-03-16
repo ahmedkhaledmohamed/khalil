@@ -363,6 +363,70 @@ async def generate_friday_reflection(ask_claude_fn) -> str:
     return f"🪞 Friday Reflection — {today.isoformat()}\n\n{reflection}"
 
 
+async def generate_meeting_prep(ask_claude_fn, event: dict) -> str:
+    """#91: Generate a meeting prep brief for a calendar event.
+
+    Args:
+        ask_claude_fn: async callable(query, context, system_extra) -> str
+        event: dict with keys like 'summary', 'start', 'end', 'attendees', 'description'
+
+    Returns formatted prep brief text.
+    """
+    from knowledge.search import hybrid_search
+
+    subject = event.get("summary", "Untitled Meeting")
+    attendees = event.get("attendees", [])
+    description = event.get("description", "")
+    start = event.get("start", "")
+
+    # Search knowledge base for relevant context
+    attendee_info = ""
+    if attendees:
+        attendee_names = [a.get("displayName") or a.get("email", "") for a in attendees[:5]]
+        for name in attendee_names:
+            if name:
+                results = await hybrid_search(name, limit=2)
+                if results:
+                    attendee_info += f"\n{name}:\n" + "\n".join(
+                        f"  - {r['title']}: {r['content'][:100]}" for r in results
+                    )
+
+    # Search for related emails / notes by meeting subject
+    related = await hybrid_search(subject, limit=5)
+    related_text = "\n".join(
+        f"- [{r['category']}] {r['title']}: {r['content'][:150]}" for r in related
+    ) if related else "No related items found."
+
+    # Search for previous meeting notes
+    prev_notes = await hybrid_search(f"meeting notes {subject}", limit=3)
+    notes_text = "\n".join(
+        f"- {r['title']}: {r['content'][:150]}" for r in prev_notes
+    ) if prev_notes else ""
+
+    context = (
+        f"Meeting: {subject}\n"
+        f"Time: {start}\n"
+        f"Description: {description}\n\n"
+        f"Attendees:{attendee_info if attendee_info else ' (none listed)'}\n\n"
+        f"Related Items:\n{related_text}\n"
+        f"{f'Previous Meeting Notes:{chr(10)}{notes_text}' if notes_text else ''}"
+    )
+
+    brief = await ask_claude_fn(
+        f"Generate a concise meeting prep brief for: {subject}\n\n"
+        "Include:\n"
+        "- Key context from related items\n"
+        "- What you know about attendees (if anything)\n"
+        "- Suggested talking points or questions\n"
+        "- Any follow-ups from previous meetings\n"
+        "Keep it under 10 lines, be direct and actionable.",
+        context,
+        system_extra=f"Meeting time: {start}",
+    )
+
+    return f"Meeting Prep: {subject}\n\n{brief}"
+
+
 async def generate_career_alert() -> str | None:
     """Run job scraper and return formatted results, or None if no new matches."""
     from actions.jobs import fetch_new_jobs, format_jobs_text

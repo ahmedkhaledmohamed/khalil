@@ -185,6 +185,79 @@ def check_heal_outcomes() -> list[dict]:
     return failed
 
 
+# --- #14: Healing Rollback Detector ---
+
+def detect_healing_regressions(hours: int = 24) -> list[dict]:
+    """Detect heals that caused regressions and recommend reverts.
+
+    Finds heals merged in the last N hours (insights with category='self_heal'
+    and status='applied'), checks if NEW failure signals appeared after the heal
+    timestamp, and creates a revert recommendation insight if regressions found.
+
+    Returns list of {heal_insight_id, fingerprint, new_failures, revert_recommended}.
+    """
+    conn = _get_conn()
+    from datetime import datetime, timedelta
+    import re as _re
+
+    cutoff = (datetime.utcnow() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Find applied heals in the window
+    applied_heals = conn.execute(
+        "SELECT id, evidence, summary, created_at, resolved_at FROM insights "
+        "WHERE category = 'self_heal' AND status = 'applied' AND resolved_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    regressions = []
+    for heal in applied_heals:
+        evidence = heal["evidence"] or ""
+        fp_match = _re.search(r"([\w_]+:[\w_]+)", evidence)
+        if not fp_match:
+            continue
+        fingerprint = fp_match.group(1)
+
+        # Check for NEW failure signals after the heal was applied
+        heal_ts = heal["resolved_at"] or heal["created_at"]
+        new_failures_action = conn.execute(
+            "SELECT COUNT(*) as cnt FROM interaction_signals "
+            "WHERE signal_type || ':' || json_extract(context, '$.action') = ? "
+            "AND created_at > ?",
+            (fingerprint, heal_ts),
+        ).fetchone()
+        new_failures_hint = conn.execute(
+            "SELECT COUNT(*) as cnt FROM interaction_signals "
+            "WHERE signal_type || ':' || json_extract(context, '$.action_hint') = ? "
+            "AND created_at > ?",
+            (fingerprint, heal_ts),
+        ).fetchone()
+
+        total = (new_failures_action["cnt"] if new_failures_action else 0) + \
+                (new_failures_hint["cnt"] if new_failures_hint else 0)
+
+        if total > 0:
+            revert_recommended = total >= 2  # Recommend revert if 2+ new failures
+            regressions.append({
+                "heal_insight_id": heal["id"],
+                "fingerprint": fingerprint,
+                "new_failures": total,
+                "revert_recommended": revert_recommended,
+            })
+
+            # Create a revert recommendation insight if warranted
+            if revert_recommended:
+                store_insight(
+                    "self_heal_revert",
+                    f"Revert recommended: heal for {fingerprint} caused {total} new failures",
+                    f"heal_insight_id={heal['id']}, fingerprint={fingerprint}",
+                    f"Consider reverting the heal PR. {total} new failures detected after applying fix.",
+                )
+                log.warning("Regression detected for heal #%d (%s): %d new failures, revert recommended",
+                            heal["id"], fingerprint, total)
+
+    return regressions
+
+
 # --- Diagnosis ---
 
 def extract_function_source(file_path: Path, function_name: str) -> tuple[str, int, int] | None:
@@ -277,6 +350,9 @@ def build_diagnosis(trigger: dict) -> dict | None:
     sample_queries = [s["context"].get("query", "N/A") for s in signals[:3]]
     summary = f"{trigger['signal_type'].replace('_', ' ')} ({trigger['failure_count']}x in 48h)"
 
+    # #13: Flag multi-function when root cause likely spans multiple functions
+    multi_function = len(source_context) >= 2
+
     return {
         "fingerprint": fingerprint,
         "summary": summary,
@@ -285,13 +361,19 @@ def build_diagnosis(trigger: dict) -> dict | None:
         "signals": signals,
         "source_context": source_context,
         "primary_target": primary_target,
+        "multi_function": multi_function,
     }
 
 
 # --- Patch Generation ---
 
 async def generate_healing_patch(diagnosis: dict) -> tuple[str, str] | None:
-    """Use Claude Opus to generate a fixed function. Returns (patched_source, explanation) or None."""
+    """Use Claude Opus to generate a fixed function. Returns (patched_source, explanation) or None.
+
+    When diagnosis['multi_function'] is True, generates fixes for all related functions
+    separated by ---FUNCTION--- markers. The returned patched_source contains all fixes.
+    """
+    multi_function = diagnosis.get("multi_function", False)
     primary = diagnosis["primary_target"]
     primary_source = next(
         s for s in diagnosis["source_context"] if s["function"] == primary["function"]
@@ -307,7 +389,45 @@ async def generate_healing_patch(diagnosis: dict) -> tuple[str, str] | None:
         f"- Query: \"{q}\"" for q in diagnosis["sample_queries"]
     )
 
-    prompt = f"""You are fixing a bug in Khalil, a Python Telegram bot assistant.
+    if multi_function:
+        all_funcs = "\n\n".join(
+            f"### Function `{s['function']}` in {s['file']}\n```python\n{s['source']}\n```"
+            for s in diagnosis["source_context"]
+        )
+        prompt = f"""You are fixing a bug in Khalil, a Python Telegram bot assistant.
+
+## Problem
+{diagnosis['summary']}
+
+## Failure Examples
+{sample_failures}
+
+The root cause spans multiple related functions. Fix ALL of them.
+
+## Functions to Fix
+{all_funcs}
+
+## Fix Requirements
+1. Generate a MINIMAL fix for EACH function — change as few lines as possible
+2. The fix must handle the failure cases without breaking the normal path
+3. Prefer adding direct pattern-matching fallbacks over changing LLM prompts
+4. Do NOT change function signatures
+5. Do NOT add new imports unless absolutely necessary (list them separately if needed)
+
+Respond in this format:
+EXPLANATION: <one sentence explaining the fix>
+IMPORTS: <any new imports needed, one per line, or "none">
+
+Output each fixed function separated by a line containing only ---FUNCTION---:
+```python
+<complete fixed function 1>
+```
+---FUNCTION---
+```python
+<complete fixed function 2>
+```"""
+    else:
+        prompt = f"""You are fixing a bug in Khalil, a Python Telegram bot assistant.
 
 ## Problem
 {diagnosis['summary']}
@@ -341,7 +461,7 @@ IMPORTS: <any new imports needed, one per line, or "none">
         client = anthropic.Anthropic()
         response = client.messages.create(
             model=CLAUDE_MODEL_COMPLEX,
-            max_tokens=2000,
+            max_tokens=4000 if multi_function else 2000,
             messages=[{"role": "user", "content": prompt}],
             system="You are a Python expert fixing bugs in an existing codebase. Output ONLY the format requested.",
         )
@@ -356,15 +476,6 @@ IMPORTS: <any new imports needed, one per line, or "none">
         lines = text.split("\n")
         explanation = lines[0].replace("EXPLANATION:", "").strip()
 
-    # Extract code block
-    if "```python" in text:
-        code = text.split("```python")[1].split("```")[0].strip()
-    elif "```" in text:
-        code = text.split("```")[1].split("```")[0].strip()
-    else:
-        log.error("No code block found in healing response")
-        return None
-
     # Extract new imports if any
     new_imports = ""
     if "IMPORTS:" in text:
@@ -373,10 +484,49 @@ IMPORTS: <any new imports needed, one per line, or "none">
         if imports_text.lower() != "none":
             new_imports = imports_text
 
+    if multi_function:
+        # #13: Parse multi-function response
+        patches = parse_multi_function_patch(text)
+        if not patches:
+            log.error("No code blocks found in multi-function healing response")
+            return None
+        code = "\n---FUNCTION---\n".join(patches)
+    else:
+        # Extract single code block
+        if "```python" in text:
+            code = text.split("```python")[1].split("```")[0].strip()
+        elif "```" in text:
+            code = text.split("```")[1].split("```")[0].strip()
+        else:
+            log.error("No code block found in healing response")
+            return None
+
     if new_imports:
         code = new_imports + "\n\n" + code
 
     return code, explanation
+
+
+def parse_multi_function_patch(text: str) -> list[str]:
+    """#13: Split a multi-function healing response into individual function patches.
+
+    Expects code blocks separated by ---FUNCTION--- markers.
+    Returns list of function source strings, or empty list on parse failure.
+    """
+    # Split on the marker
+    sections = text.split("---FUNCTION---")
+    patches = []
+    for section in sections:
+        # Extract code block from each section
+        if "```python" in section:
+            code = section.split("```python")[1].split("```")[0].strip()
+            if code:
+                patches.append(code)
+        elif "```" in section:
+            code = section.split("```")[1].split("```")[0].strip()
+            if code:
+                patches.append(code)
+    return patches
 
 
 # --- #19: Healing Confidence Scoring ---

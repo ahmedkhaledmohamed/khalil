@@ -6,6 +6,7 @@ All changes are transparent (visible via /learn) and safe (hard guardrails immut
 
 import json
 import logging
+import re as _re_module
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -1370,3 +1371,156 @@ def detect_coherence_issues(days: int = 7) -> list[dict]:
                 break  # One issue per message
 
     return issues
+
+
+# --- #58: Semantic Memory Consolidation ---
+
+def consolidate_memories(similarity_threshold: float = 0.5) -> list[dict]:
+    """Identify document pairs with high word-overlap similarity within the same category.
+
+    Uses simple word-overlap (Jaccard-like) similarity, same approach as
+    _compute_topic_similarity in server.py.
+
+    Returns list of {doc_id_a, doc_id_b, title_a, title_b, similarity, category}.
+    Does NOT auto-merge — just surfaces candidates for review.
+    """
+    conn = _get_conn()
+
+    # Get all categories that have 2+ documents
+    categories = conn.execute(
+        "SELECT DISTINCT category FROM documents GROUP BY category HAVING COUNT(*) >= 2"
+    ).fetchall()
+
+    stopwords = {"the", "a", "an", "is", "are", "was", "were", "i", "you", "my", "your",
+                 "he", "she", "it", "we", "they", "in", "on", "at", "to", "for", "of",
+                 "and", "or", "but", "not", "with", "this", "that", "from", "by", "as"}
+
+    candidates = []
+    for cat_row in categories:
+        category = cat_row[0] if not isinstance(cat_row, dict) else cat_row["category"]
+        docs = conn.execute(
+            "SELECT id, title, content FROM documents WHERE category = ?",
+            (category,),
+        ).fetchall()
+
+        # Build word sets for each doc
+        doc_words = []
+        for d in docs:
+            doc_id = d["id"] if isinstance(d, dict) else d[0]
+            title = d["title"] if isinstance(d, dict) else d[1]
+            content = d["content"] if isinstance(d, dict) else d[2]
+            text = f"{title} {content}"
+            words = set(text.lower().split()) - stopwords
+            doc_words.append((doc_id, title, words))
+
+        # Compare all pairs
+        for i in range(len(doc_words)):
+            for j in range(i + 1, len(doc_words)):
+                id_a, title_a, words_a = doc_words[i]
+                id_b, title_b, words_b = doc_words[j]
+                if not words_a or not words_b:
+                    continue
+                intersection = len(words_a & words_b)
+                union = len(words_a | words_b)
+                similarity = intersection / union if union > 0 else 0.0
+                if similarity >= similarity_threshold:
+                    candidates.append({
+                        "doc_id_a": id_a,
+                        "doc_id_b": id_b,
+                        "title_a": title_a,
+                        "title_b": title_b,
+                        "similarity": round(similarity, 3),
+                        "category": category,
+                    })
+
+    return candidates
+
+
+# --- #64: Structured Data Extraction from Emails ---
+
+_FLIGHT_PATTERNS = [
+    _re_module.compile(
+        r"(?:flight|confirmation)\s*[#:]?\s*([A-Z]{2}\d{2,4})",
+        _re_module.IGNORECASE,
+    ),
+    _re_module.compile(
+        r"(?P<airline>[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:flight\s+)?(?P<flight_num>[A-Z]{2}\d{2,4})",
+        _re_module.IGNORECASE,
+    ),
+]
+
+_RECEIPT_PATTERN = _re_module.compile(
+    r"(?:total|amount|charged|paid)[:\s]*\$?\s*(?P<amount>\d+[.,]\d{2})\s*(?P<currency>[A-Z]{3})?",
+    _re_module.IGNORECASE,
+)
+
+_MEETING_PATTERN = _re_module.compile(
+    r"(?:meeting|invite|event)[:\s]*(?P<subject>.+?)(?:\n|$)",
+    _re_module.IGNORECASE,
+)
+
+_DATE_PATTERN = _re_module.compile(
+    r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{2,4}|\w+ \d{1,2},?\s*\d{4})\b"
+)
+
+_TIME_PATTERN = _re_module.compile(
+    r"\b(\d{1,2}:\d{2}\s*(?:AM|PM|am|pm)?)\b"
+)
+
+
+def extract_structured_data(email_content: str) -> dict:
+    """Extract structured fields from email content using regex patterns.
+
+    Detects flight confirmations, receipts, and meeting invites.
+    Returns {type: "flight"|"receipt"|"meeting"|"unknown", fields: {...}}.
+    """
+    content_lower = email_content.lower()
+    dates = _DATE_PATTERN.findall(email_content)
+    times = _TIME_PATTERN.findall(email_content)
+
+    # Flight detection
+    if any(kw in content_lower for kw in ("flight", "boarding", "airline", "departure", "arrival")):
+        fields = {"date": dates[0] if dates else None}
+        for pat in _FLIGHT_PATTERNS:
+            m = pat.search(email_content)
+            if m:
+                gd = m.groupdict()
+                fields["flight_number"] = gd.get("flight_num") or m.group(1)
+                fields["airline"] = gd.get("airline")
+                break
+        # Try to find departure/arrival
+        dep_match = _re_module.search(r"(?:depart\w*|from)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        arr_match = _re_module.search(r"(?:arriv\w*|to|destination)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["departure"] = dep_match.group(1).strip() if dep_match else None
+        fields["arrival"] = arr_match.group(1).strip() if arr_match else None
+        return {"type": "flight", "fields": fields}
+
+    # Receipt detection
+    if any(kw in content_lower for kw in ("receipt", "invoice", "total", "amount", "charged", "payment")):
+        fields = {"date": dates[0] if dates else None}
+        m = _RECEIPT_PATTERN.search(email_content)
+        if m:
+            fields["amount"] = m.group("amount")
+            fields["currency"] = m.group("currency") or "USD"
+        vendor_match = _re_module.search(r"(?:from|vendor|merchant|store)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["vendor"] = vendor_match.group(1).strip() if vendor_match else None
+        return {"type": "receipt", "fields": fields}
+
+    # Meeting detection
+    if any(kw in content_lower for kw in ("meeting", "invite", "calendar event", "rsvp")):
+        fields = {"datetime": None, "location": None, "subject": None, "organizer": None}
+        m = _MEETING_PATTERN.search(email_content)
+        if m:
+            fields["subject"] = m.group("subject").strip()
+        if dates:
+            dt_str = dates[0]
+            if times:
+                dt_str += " " + times[0]
+            fields["datetime"] = dt_str
+        loc_match = _re_module.search(r"(?:location|where|room|venue)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["location"] = loc_match.group(1).strip() if loc_match else None
+        org_match = _re_module.search(r"(?:organizer|host|from)[:\s]+(.+?)(?:\n|,|$)", email_content, _re_module.IGNORECASE)
+        fields["organizer"] = org_match.group(1).strip() if org_match else None
+        return {"type": "meeting", "fields": fields}
+
+    return {"type": "unknown", "fields": {}}
