@@ -462,6 +462,23 @@ async def _execute_with_retry(cmd: str, description: str, update, max_retries: i
     return result, cmd
 
 
+def _extract_shell_from_response(response: str) -> str | None:
+    """Extract a shell command from an LLM response that suggests running it manually.
+
+    Returns the command string if found, None otherwise.
+    """
+    # Match commands in code blocks (```sh, ```bash, or bare ```)
+    m = re.search(r"```(?:sh|bash|shell)?\s*\n(.+?)\n```", response, re.DOTALL)
+    if not m:
+        return None
+    candidate = m.group(1).strip()
+    # Filter out multi-line scripts or comments-only blocks
+    lines = [l for l in candidate.split("\n") if l.strip() and not l.strip().startswith("#")]
+    if len(lines) != 1:
+        return None
+    return lines[0].strip()
+
+
 async def _interpret_shell_output(user_query: str, cmd: str, result: dict) -> str | None:
     """Ask LLM to interpret shell output as a natural language answer to the user's question.
 
@@ -1813,6 +1830,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass  # Non-critical
 
+    # Detect embedded shell commands — LLM suggests running them instead of executing
+    suggested_cmd = _extract_shell_from_response(response)
+    if suggested_cmd:
+        # Record signal — healing system can learn which queries need direct intent templates
+        record_signal("response_suggests_manual_action", {
+            "query": query[:200], "suggested_cmd": suggested_cmd,
+        })
+        from actions.shell import classify_command, format_output
+        classification = classify_command(suggested_cmd)
+        if classification != ActionType.DANGEROUS:
+            intent = {
+                "action": "shell",
+                "command": suggested_cmd,
+                "description": f"Extracted from LLM response",
+                "user_query": query,
+                "llm_generated": True,
+            }
+            await progress_msg.delete()
+            handled = await handle_action_intent(intent, update)
+            if handled:
+                return
+
     # Detect capability gaps — offer to self-extend
     # 1. Check for structured [CAPABILITY_GAP: ...] tag first
     gap_match = re.search(
@@ -1820,6 +1859,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response,
     )
     if gap_match:
+        record_signal("capability_gap_detected", {"query": query[:200], "structured": True})
         spec = {
             "name": gap_match.group(1),
             "command": gap_match.group(2).lstrip("/"),
@@ -1839,6 +1879,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         from actions.extend import detect_capability_gap, handle_self_extend
         if detect_capability_gap(response):
+            record_signal("capability_gap_detected", {"query": query[:200]})
             await handle_self_extend(query, update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)

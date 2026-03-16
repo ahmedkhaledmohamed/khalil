@@ -373,34 +373,93 @@ async def run_weekly_reflection(ask_llm_fn) -> list[dict]:
 
 
 async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
-    """Lighter daily check — only search misses and approval patterns."""
+    """Daily response quality check — search misses, manual action suggestions, capability gaps."""
     conn = _get_conn()
     cutoff = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+    insights = []
 
-    # Today's search misses
+    # 1. Search misses
     misses = conn.execute(
         "SELECT context FROM interaction_signals WHERE signal_type = 'search_miss' AND created_at > ?",
         (cutoff,),
     ).fetchall()
 
-    if len(misses) < 2:
-        log.info("Daily micro-reflection: not enough data, skipping")
-        return []
+    if len(misses) >= 2:
+        miss_queries = []
+        for m in misses:
+            ctx = json.loads(m["context"]) if m["context"] else {}
+            miss_queries.append(ctx.get("query", "unknown"))
+        insight_id = store_insight(
+            "knowledge_gap",
+            f"Failed to answer {len(misses)} queries today",
+            f"Queries: {', '.join(miss_queries[:5])}",
+            "Consider indexing more content related to these topics, or running /sync",
+        )
+        insights.append({"id": insight_id, "category": "knowledge_gap", "summary": f"{len(misses)} unanswered queries today"})
 
-    miss_queries = []
-    for m in misses:
-        ctx = json.loads(m["context"]) if m["context"] else {}
-        miss_queries.append(ctx.get("query", "unknown"))
+    # 2. LLM suggested commands instead of executing (needs direct intent templates)
+    manual_actions = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'response_suggests_manual_action' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
 
-    # Generate a simple knowledge gap insight
-    insight_id = store_insight(
-        "knowledge_gap",
-        f"Failed to answer {len(misses)} queries today",
-        f"Queries: {', '.join(miss_queries[:5])}",
-        "Consider indexing more content related to these topics, or running /sync",
-    )
+    if manual_actions:
+        queries = []
+        cmds = []
+        for row in manual_actions:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            queries.append(ctx.get("query", "unknown"))
+            cmds.append(ctx.get("suggested_cmd", "unknown"))
+        insight_id = store_insight(
+            "response_quality",
+            f"LLM suggested {len(manual_actions)} command(s) instead of executing them",
+            f"Queries: {', '.join(queries[:5])}\nCommands: {', '.join(cmds[:5])}",
+            "Add direct intent templates in _try_direct_shell_intent() for these query patterns so the LLM is bypassed",
+        )
+        insights.append({"id": insight_id, "category": "response_quality", "summary": f"{len(manual_actions)} suggest-instead-of-execute"})
 
-    return [{"id": insight_id, "category": "knowledge_gap", "summary": f"{len(misses)} unanswered queries today"}]
+    # 3. Capability gaps detected
+    gaps = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'capability_gap_detected' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if len(gaps) >= 2:
+        gap_queries = []
+        for row in gaps:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            gap_queries.append(ctx.get("query", "unknown"))
+        insight_id = store_insight(
+            "capability_gap",
+            f"Detected {len(gaps)} capability gaps today",
+            f"Queries: {', '.join(gap_queries[:5])}",
+            "Check if self-extension PRs were generated. If gaps persist, review the gap detection and extension pipeline.",
+        )
+        insights.append({"id": insight_id, "category": "capability_gap", "summary": f"{len(gaps)} capability gaps"})
+
+    # 4. User corrections
+    corrections = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'user_correction' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if len(corrections) >= 2:
+        correction_queries = []
+        for row in corrections:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            correction_queries.append(ctx.get("query", "unknown"))
+        insight_id = store_insight(
+            "response_quality",
+            f"User corrected Khalil {len(corrections)} times today",
+            f"Corrections: {', '.join(correction_queries[:5])}",
+            "Review conversation history around these corrections to identify systematic issues",
+        )
+        insights.append({"id": insight_id, "category": "response_quality", "summary": f"{len(corrections)} user corrections"})
+
+    if not insights:
+        log.info("Daily micro-reflection: no quality issues detected")
+
+    return insights
 
 
 def detect_recurring_failures() -> list[dict]:

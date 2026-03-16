@@ -34,6 +34,7 @@ FAILURE_CODE_MAP = {
     "action_execution_failure:shell": [("actions/shell.py", "execute_shell"), ("actions/shell.py", "classify_command")],
     "action_execution_failure:calendar": [("actions/calendar.py", "get_today_events")],
     "action_execution_failure:email": [("actions/gmail.py", "draft_email"), ("actions/gmail.py", "send_draft")],
+    "response_suggests_manual_action": [("server.py", "_try_direct_shell_intent"), ("server.py", "detect_intent")],
 }
 
 # Errors that are deterministic — trigger healing after just 1 occurrence
@@ -51,7 +52,10 @@ def detect_recurring_failures() -> list[dict]:
     from datetime import datetime, timedelta
     cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
 
-    failure_types = ("intent_detection_failure", "action_execution_failure", "user_correction", "extension_runtime_failure")
+    failure_types = (
+        "intent_detection_failure", "action_execution_failure", "user_correction",
+        "extension_runtime_failure", "response_suggests_manual_action",
+    )
     placeholders = ",".join("?" for _ in failure_types)
     rows = conn.execute(
         f"SELECT signal_type, context, created_at FROM interaction_signals "
