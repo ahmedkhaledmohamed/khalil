@@ -22,7 +22,7 @@ class TestBlockedImports:
     ])
     def test_blocked_imports_rejected(self, imp):
         code = _wrap_async(imp)
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert not ok
         assert "Blocked import" in err
 
@@ -38,7 +38,7 @@ class TestBlockedImports:
     ])
     def test_allowed_imports_pass(self, imp):
         code = _wrap_async(imp)
-        ok, _ = validate_generated_code(code)
+        ok, _, _warnings = validate_generated_code(code)
         assert ok
 
 
@@ -51,7 +51,7 @@ class TestBlockedCalls:
     ])
     def test_blocked_bare_calls(self, call, expected_fragment):
         code = _wrap_async(call)
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert not ok
         assert expected_fragment in err
 
@@ -63,7 +63,7 @@ class TestBlockedCalls:
     ])
     def test_blocked_qualified_calls(self, call, expected_fragment):
         code = _wrap_async(call)
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert not ok
         assert expected_fragment in err
 
@@ -79,30 +79,30 @@ class TestSafeCalls:
     ])
     def test_sqlite_operations_allowed(self, code_snippet):
         code = _wrap_async(f"import sqlite3\nconn = sqlite3.connect(':memory:')\n{code_snippet}")
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert ok, f"Should pass but got: {err}"
 
     def test_httpx_allowed(self):
         code = _wrap_async("import httpx\nhttpx.get('https://api.example.com')")
-        ok, _ = validate_generated_code(code)
+        ok, _, _warnings = validate_generated_code(code)
         assert ok
 
     def test_keyring_allowed(self):
         code = _wrap_async("import keyring\nkeyring.get_password('service', 'key')")
-        ok, _ = validate_generated_code(code)
+        ok, _, _warnings = validate_generated_code(code)
         assert ok
 
 
 class TestStructureChecks:
     def test_no_async_function_rejected(self):
         code = "def sync_only(): pass"
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert not ok
         assert "async" in err.lower()
 
     def test_syntax_error_rejected(self):
         code = "def broken("
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert not ok
         assert "Syntax" in err or "syntax" in err
 
@@ -113,5 +113,5 @@ class TestStructureChecks:
             "async def cmd_test(update, context):\n"
             "    await update.message.reply_text('ok')\n"
         )
-        ok, err = validate_generated_code(code)
+        ok, err, _warnings = validate_generated_code(code)
         assert ok, f"Should pass but got: {err}"
