@@ -32,6 +32,7 @@ async def run_claude_code(
         proc = await asyncio.create_subprocess_exec(
             CLAUDE_CODE_BIN,
             "--print",
+            "--dangerously-skip-permissions",
             "--output-format", "text",
             prompt,
             cwd=str(worktree_path),
