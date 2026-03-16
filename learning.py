@@ -889,6 +889,120 @@ def infer_sleep_schedule(days: int = 14) -> dict:
     }
 
 
+# --- #95: Subscription Renewal Alerts ---
+
+_RENEWAL_KEYWORDS = ["renewal", "subscription", "recurring charge", "auto-renew", "billing cycle"]
+
+
+def detect_subscription_renewals(days_ahead: int = 7) -> list[dict]:
+    """Detect upcoming subscription renewals from indexed emails.
+
+    Searches the documents table for emails containing renewal/subscription keywords,
+    then extracts estimated dates and amounts.
+
+    Returns list of dicts with keys: source, title, snippet, estimated_date, amount.
+    """
+    conn = _get_conn()
+    now = datetime.utcnow()
+    results = []
+
+    for keyword in _RENEWAL_KEYWORDS:
+        rows = conn.execute(
+            "SELECT source, title, content FROM documents "
+            "WHERE content LIKE ? ORDER BY rowid DESC LIMIT 50",
+            (f"%{keyword}%",),
+        ).fetchall()
+        seen_titles = {r["title"] for r in results}
+        for row in rows:
+            title = row["title"] if isinstance(row, sqlite3.Row) else row[1]
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            content = row["content"] if isinstance(row, sqlite3.Row) else row[2]
+            source = row["source"] if isinstance(row, sqlite3.Row) else row[0]
+            snippet = content[:200] if content else ""
+
+            # Try to extract a dollar amount
+            import re as _re
+            amount_match = _re.search(r"\$[\d,]+\.?\d*", content or "")
+            amount = amount_match.group(0) if amount_match else None
+
+            # Try to extract a date (simple patterns)
+            date_match = _re.search(
+                r"(\d{4}-\d{2}-\d{2}|\w+ \d{1,2},? \d{4}|\d{1,2}/\d{1,2}/\d{4})",
+                content or "",
+            )
+            estimated_date = date_match.group(0) if date_match else None
+
+            results.append({
+                "source": source,
+                "title": title,
+                "snippet": snippet,
+                "estimated_date": estimated_date,
+                "amount": amount,
+            })
+
+    return results
+
+
+# --- #7: Prompt Effectiveness Scoring ---
+
+def get_prompt_effectiveness(days: int = 7) -> dict:
+    """Correlate conversation success scores with topics to identify effective prompt patterns.
+
+    Uses conversation_success and conversation_topic signals recorded by #1 and #65.
+
+    Returns {by_topic: {topic: {total, successes, success_rate_pct}}, best_topic, worst_topic}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Get conversation success signals with topic info
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'conversation_success' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    by_topic: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        topic = ctx.get("topic", "general")
+        had_correction = ctx.get("had_correction", False)
+        if topic not in by_topic:
+            by_topic[topic] = {"total": 0, "successes": 0}
+        by_topic[topic]["total"] += 1
+        if not had_correction:
+            by_topic[topic]["successes"] += 1
+
+    # Calculate success rates
+    for topic, stats in by_topic.items():
+        stats["success_rate_pct"] = (
+            round(stats["successes"] / stats["total"] * 100, 1) if stats["total"] else 0.0
+        )
+
+    # Identify best and worst topics
+    best_topic = None
+    worst_topic = None
+    if by_topic:
+        sorted_topics = sorted(
+            by_topic.items(),
+            key=lambda x: x[1]["success_rate_pct"],
+            reverse=True,
+        )
+        # Only consider topics with at least 2 data points
+        qualified = [(t, s) for t, s in sorted_topics if s["total"] >= 2]
+        if qualified:
+            best_topic = qualified[0][0]
+            worst_topic = qualified[-1][0]
+
+    return {
+        "by_topic": by_topic,
+        "best_topic": best_topic,
+        "worst_topic": worst_topic,
+    }
+
+
 def decay_preferences():
     """Monthly confidence decay — preferences not re-confirmed lose confidence."""
     conn = _get_conn()

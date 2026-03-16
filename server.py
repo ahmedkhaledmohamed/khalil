@@ -581,6 +581,11 @@ _ACTION_PATTERNS = [
     (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
     (r"\b(?:pr|pull\s+request)\s+status\b", "gh_pr_status"),
     (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    # #41: Brew package management
+    (r"\bbrew\s+(?:list|info|search|install|upgrade|uninstall|cleanup)\b", "shell"),
+    (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
+    (r"\binstall\s+(?:via\s+)?brew\b", "shell"),
+    (r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", "shell"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
 ]
@@ -732,6 +737,42 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     # #53: GitHub PR status — "check my PRs", "PR status"
     if re.search(r"\b(?:check\s+(?:my\s+)?(?:pull\s+requests?|prs?)|(?:pr|pull\s+request)\s+status|list\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?))\b", text_lower):
         return {"action": "shell", "command": "gh pr list --author=@me --state=open", "description": "List your open pull requests"}
+
+    # #41: Brew package management
+    if re.search(r"\blist\s+(?:my\s+)?brew\s+packages?\b", text_lower) or \
+       re.search(r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", text_lower) or \
+       text_lower.strip() == "brew list":
+        return {"action": "shell", "command": "brew list", "description": "List installed Homebrew packages"}
+
+    m = re.search(r"\bbrew\s+info\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew info {pkg}", "description": f"Get info for brew package: {pkg}"}
+
+    m = re.search(r"\bbrew\s+search\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew search {pkg}", "description": f"Search brew for: {pkg}"}
+
+    m = re.search(r"\bbrew\s+install\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew install {pkg}", "description": f"Install brew package: {pkg}"}
+
+    m = re.search(r"\bbrew\s+upgrade(?:\s+(\S+))?", text_lower)
+    if m:
+        pkg = m.group(1)
+        cmd = f"brew upgrade {pkg}" if pkg else "brew upgrade"
+        desc = f"Upgrade brew package: {pkg}" if pkg else "Upgrade all brew packages"
+        return {"action": "shell", "command": cmd, "description": desc}
+
+    m = re.search(r"\bbrew\s+uninstall\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew uninstall {pkg}", "description": f"Uninstall brew package: {pkg}"}
+
+    if re.search(r"\bbrew\s+cleanup\b", text_lower):
+        return {"action": "shell", "command": "brew cleanup", "description": "Clean up old brew package versions"}
 
     # #52: GitHub issue creation — "create issue <title>"
     m = re.search(r"\b(?:create|open|file|new)\s+(?:a\s+)?(?:github\s+)?issue\s+(?:for\s+|about\s+|titled?\s+)?['\"]?(.+?)['\"]?\s*$", text_lower)

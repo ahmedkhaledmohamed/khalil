@@ -285,5 +285,116 @@ async def get_morning_brief_data() -> str:
     return "\n\n".join(sections)
 
 
+@mcp.tool()
+async def healing_status() -> str:
+    """Get recent self-healing activity — patches applied, failures detected."""
+    import sqlite3
+    from config import DB_PATH
+
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, summary, evidence, recommendation, status, created_at "
+        "FROM insights WHERE category = 'self_heal' ORDER BY created_at DESC LIMIT 10"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return "No self-healing activity recorded."
+
+    lines = [f"Recent self-healing activity ({len(rows)} entries):"]
+    for r in rows:
+        status_icon = {"applied": "OK", "pending": "PENDING", "dismissed": "SKIP"}.get(r["status"], r["status"])
+        lines.append(f"  [{status_icon}] #{r['id']}: {r['summary']} ({r['created_at'][:10]})")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def extension_status() -> str:
+    """Get installed extensions and their health — invocations, errors, error rates."""
+    import json
+    from config import EXTENSIONS_DIR
+    from learning import get_extension_health
+
+    extensions = []
+    if EXTENSIONS_DIR and EXTENSIONS_DIR.exists():
+        for manifest_path in sorted(EXTENSIONS_DIR.glob("*.json")):
+            try:
+                manifest = json.loads(manifest_path.read_text())
+                extensions.append({
+                    "name": manifest.get("name", manifest_path.stem),
+                    "command": manifest.get("command", ""),
+                    "description": manifest.get("description", ""),
+                })
+            except Exception:
+                extensions.append({"name": manifest_path.stem, "error": "invalid manifest"})
+
+    if not extensions:
+        lines = ["No extensions installed."]
+    else:
+        lines = [f"Installed extensions ({len(extensions)}):"]
+        for ext in extensions:
+            if "error" in ext:
+                lines.append(f"  - {ext['name']} (ERROR: {ext['error']})")
+            else:
+                lines.append(f"  - {ext['name']}: {ext['description']} (/{ext['command']})")
+
+    # Health stats
+    health = get_extension_health(days=7)
+    if health:
+        lines.append("\nHealth (last 7 days):")
+        for h in health:
+            lines.append(f"  - {h['extension']}: {h['invocations']} calls, {h['error_rate_pct']}% error rate")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def audit_log(limit: int = 10) -> str:
+    """Get recent audit log entries — actions taken, their results, and autonomy levels.
+
+    Args:
+        limit: Maximum entries to return (default 10)
+    """
+    import sqlite3
+    from config import DB_PATH
+
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT action_type, description, result, autonomy_level, timestamp "
+        "FROM audit_log ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return "No audit log entries."
+
+    lines = [f"Recent audit log ({len(rows)} entries):"]
+    for r in rows:
+        result_short = (r["result"] or "")[:60]
+        lines.append(
+            f"  [{r['timestamp'][:16]}] {r['action_type']}: {r['description'][:80]} "
+            f"(autonomy={r['autonomy_level']}, result={result_short})"
+        )
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def learned_preferences() -> str:
+    """Get current learned preferences — behavioral adaptations Khalil has made."""
+    from learning import list_preferences
+
+    prefs = list_preferences()
+    if not prefs:
+        return "No learned preferences yet."
+
+    lines = [f"Learned preferences ({len(prefs)}):"]
+    for p in prefs:
+        lines.append(f"  - {p['key']}: {p['value']} (confidence={p['confidence']}, updated={p['updated_at'][:10]})")
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
