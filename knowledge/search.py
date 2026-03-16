@@ -1,13 +1,38 @@
 """Hybrid search: vector similarity + keyword matching."""
 
 import logging
+import math
 import sqlite3
 import struct
+from datetime import datetime, timedelta
 
 from config import DB_PATH, DATA_DIR, EMBED_DIM
 from knowledge.embedder import embed_text
 
 log = logging.getLogger("khalil.search")
+
+
+# --- #63: Knowledge Freshness Scoring ---
+
+def _compute_freshness_score(created_at: str | None, half_life_days: int = 30) -> float:
+    """Compute a time-decay freshness score between 0.0 and 1.0.
+
+    Uses exponential decay with configurable half-life. Documents with no
+    timestamp get a neutral score of 0.5.
+    """
+    if not created_at:
+        return 0.5
+    try:
+        doc_time = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        try:
+            doc_time = datetime.strptime(created_at[:10], "%Y-%m-%d")
+        except (ValueError, TypeError):
+            return 0.5
+    age_days = (datetime.utcnow() - doc_time).total_seconds() / 86400
+    if age_days < 0:
+        age_days = 0
+    return math.exp(-0.693 * age_days / half_life_days)  # 0.693 = ln(2)
 
 
 def get_db() -> sqlite3.Connection:
@@ -120,6 +145,14 @@ async def hybrid_search(query: str, limit: int = 8, category: str | None = None)
             r["match_type"] = "keyword"
             merged.append(r)
             seen_ids.add(r["id"])
+
+    # #63: Apply freshness boost — recent documents rank higher
+    for r in merged:
+        created_at = r.get("created_at") or (r.get("metadata") or {}).get("created_at")
+        r["freshness"] = _compute_freshness_score(created_at)
+
+    # Re-sort: semantic results first, then by freshness within each match type
+    merged.sort(key=lambda r: (0 if r["match_type"] == "semantic" else 1, -r["freshness"]))
 
     return merged[:limit]
 

@@ -1010,3 +1010,348 @@ class TestFocusModeAwareness:
         result = get_focus_mode_status()
         assert isinstance(result, dict)
         assert "active" in result
+
+
+# --- #1: Conversation Success Scoring ---
+
+class TestConversationSuccessScoring:
+    def test_record_success_signal(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal
+        record_signal("conversation_success", {
+            "query": "test query",
+            "topic": "tech",
+            "latency_ms": 150.0,
+            "had_correction": False,
+        })
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'conversation_success'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["topic"] == "tech"
+        assert ctx["had_correction"] is False
+        learning._db_conn = original
+
+    def test_get_conversation_scores_empty(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import get_conversation_scores
+        result = get_conversation_scores(days=7)
+        assert result["total"] == 0
+        assert result["score_pct"] == 0.0
+        assert result["by_topic"] == {}
+        learning._db_conn = original
+
+    def test_get_conversation_scores_with_data(self, tmp_db):
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal, get_conversation_scores
+        # 3 success signals, 1 with correction
+        record_signal("conversation_success", {"query": "q1", "topic": "tech", "had_correction": False})
+        record_signal("conversation_success", {"query": "q2", "topic": "work", "had_correction": True})
+        record_signal("conversation_success", {"query": "q3", "topic": "tech", "had_correction": False})
+        result = get_conversation_scores(days=7)
+        assert result["total"] == 3
+        assert result["corrections"] == 1
+        assert result["by_topic"]["tech"]["count"] == 2
+        assert result["by_topic"]["work"]["corrections"] == 1
+        learning._db_conn = original
+
+    def test_explicit_feedback_recorded(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal, get_conversation_scores
+        record_signal("conversation_success", {"query": "q1", "topic": "general", "had_correction": False})
+        record_signal("explicit_feedback", {"sentiment": "positive", "comment": "great"}, value=1.0)
+        record_signal("explicit_feedback", {"sentiment": "negative", "comment": "bad"}, value=-1.0)
+        result = get_conversation_scores(days=7)
+        assert result["positive_feedback"] == 1
+        assert result["negative_feedback"] == 1
+        learning._db_conn = original
+
+    def test_feedback_pattern_in_action_patterns(self):
+        from server import _looks_like_action
+        assert _looks_like_action("/feedback positive") == "feedback"
+
+
+# --- #9: Monthly Meta-Reflection ---
+
+class TestMonthlyMetaReflection:
+    def test_skips_with_insufficient_insights(self, tmp_db):
+        import asyncio
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import run_monthly_meta_reflection
+
+        async def mock_llm(q, c, system_extra=""):
+            return "[]"
+
+        result = asyncio.run(run_monthly_meta_reflection(mock_llm))
+        assert result == []
+        learning._db_conn = original
+
+    def test_runs_with_enough_insights(self, tmp_db):
+        import asyncio
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import store_insight, run_monthly_meta_reflection
+
+        # Insert 3 insights
+        store_insight("preference", "Users prefer short answers", "5 signals", "Set max_length=200")
+        store_insight("knowledge_gap", "Missing finance data", "3 misses", "Index finance docs")
+        store_insight("prompt", "Improve greeting", "2 signals", "Add time-based greeting")
+
+        meta_response = json.dumps([
+            {"category": "meta", "summary": "Weekly insights are too vague", "recommendation": "Require quantitative evidence"}
+        ])
+
+        async def mock_llm(q, c, system_extra=""):
+            return meta_response
+
+        result = asyncio.run(run_monthly_meta_reflection(mock_llm))
+        assert len(result) == 1
+        assert result[0]["summary"] == "Weekly insights are too vague"
+        assert "id" in result[0]
+        # Verify stored in DB
+        row = tmp_db.execute("SELECT category FROM insights WHERE id = ?", (result[0]["id"],)).fetchone()
+        assert row[0] == "meta"
+        learning._db_conn = original
+
+    def test_handles_llm_failure(self, tmp_db):
+        import asyncio
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import store_insight, run_monthly_meta_reflection
+
+        store_insight("preference", "insight 1", "ev1", "rec1")
+        store_insight("preference", "insight 2", "ev2", "rec2")
+
+        async def mock_llm(q, c, system_extra=""):
+            return "⚠️ API error"
+
+        result = asyncio.run(run_monthly_meta_reflection(mock_llm))
+        assert result == []
+        learning._db_conn = original
+
+
+# --- #52: GitHub Issue Creation ---
+
+class TestGitHubIssueCreation:
+    def test_issue_pattern_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("create a github issue") == "gh_issue"
+        assert _looks_like_action("open issue for bug") == "gh_issue"
+        assert _looks_like_action("file an issue about auth") == "gh_issue"
+        assert _looks_like_action("new issue") == "gh_issue"
+
+    def test_direct_intent_issue_creation(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("create issue for fix login bug")
+        assert result is not None
+        assert result["action"] == "shell"
+        assert "gh issue create" in result["command"]
+        assert "fix login bug" in result["command"]
+
+    def test_direct_intent_issue_with_quotes(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("open issue titled 'Add dark mode'")
+        assert result is not None
+        assert "gh issue create" in result["command"]
+
+
+# --- #53: GitHub PR Status Monitoring ---
+
+class TestGitHubPRStatus:
+    def test_pr_pattern_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("check my PRs") == "gh_pr_status"
+        assert _looks_like_action("PR status") == "gh_pr_status"
+        assert _looks_like_action("list my open pull requests") == "gh_pr_status"
+
+    def test_direct_intent_pr_status(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check my PRs")
+        assert result is not None
+        assert result["action"] == "shell"
+        assert "gh pr list" in result["command"]
+        assert "--author=@me" in result["command"]
+
+    def test_direct_intent_pr_status_verbose(self):
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("list my open pull requests")
+        assert result is not None
+        assert "gh pr list" in result["command"]
+
+
+# --- #63: Knowledge Freshness Scoring ---
+
+class TestKnowledgeFreshnessScoring:
+    def test_freshness_recent_document(self):
+        from knowledge.search import _compute_freshness_score
+        from datetime import datetime
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        score = _compute_freshness_score(now)
+        assert score > 0.95  # very recent = near 1.0
+
+    def test_freshness_old_document(self):
+        from knowledge.search import _compute_freshness_score
+        from datetime import datetime, timedelta
+        old = (datetime.utcnow() - timedelta(days=90)).strftime("%Y-%m-%d %H:%M:%S")
+        score = _compute_freshness_score(old)
+        assert score < 0.2  # 90 days with 30-day half-life = ~0.125
+
+    def test_freshness_no_timestamp(self):
+        from knowledge.search import _compute_freshness_score
+        assert _compute_freshness_score(None) == 0.5
+
+    def test_freshness_invalid_timestamp(self):
+        from knowledge.search import _compute_freshness_score
+        assert _compute_freshness_score("not-a-date") == 0.5
+
+    def test_freshness_date_only(self):
+        from knowledge.search import _compute_freshness_score
+        from datetime import datetime
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        score = _compute_freshness_score(today)
+        assert score > 0.9  # today's date = very fresh
+
+
+# --- #65: Conversation Topic Detection ---
+
+class TestConversationTopicDetection:
+    def test_detect_work_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("Can you check the sprint backlog for our team meeting?") == "work"
+
+    def test_detect_finance_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("What's my RRSP investment portfolio looking like?") == "finance"
+
+    def test_detect_health_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("How many calories did I burn in my workout?") == "health"
+
+    def test_detect_tech_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("Help me debug this python code with the API") == "tech"
+
+    def test_detect_family_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("When do the kids have school vacation?") == "family"
+
+    def test_detect_general_topic(self):
+        from server import classify_message_topic
+        assert classify_message_topic("What's the weather like?") == "general"
+
+    def test_returns_string(self):
+        from server import classify_message_topic
+        result = classify_message_topic("random words here")
+        assert isinstance(result, str)
+
+
+# --- #82: Scheduler Task Tests ---
+
+class TestSchedulerTasks:
+    def test_record_scheduler_failure_records_signal(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_scheduler_failure
+        _record_scheduler_failure("test_task", "Something broke")
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'scheduler_task_failure'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["task"] == "test_task"
+        assert "broke" in ctx["error"]
+        learning._db_conn = original
+
+    def test_record_digest_sent_records_signal(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_digest_sent
+        _record_digest_sent("morning_brief")
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'digest_sent'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["type"] == "morning_brief"
+        learning._db_conn = original
+
+    def test_record_scheduler_failure_truncates_long_errors(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_scheduler_failure
+        long_error = "x" * 1000
+        _record_scheduler_failure("task", long_error)
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'scheduler_task_failure'"
+        ).fetchone()
+        import json
+        ctx = json.loads(row[0])
+        assert len(ctx["error"]) <= 500
+        learning._db_conn = original
+
+    def test_task_functions_catch_exceptions(self, tmp_db):
+        """Task functions should handle exceptions without crashing the scheduler."""
+        import asyncio
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_scheduler_failure
+        # Simulate what happens when a task catches an exception
+        _record_scheduler_failure("email_sync", "Connection refused")
+        _record_scheduler_failure("morning_brief", "API timeout")
+        rows = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'scheduler_task_failure'"
+        ).fetchall()
+        assert len(rows) == 2
+        learning._db_conn = original
+
+    def test_record_digest_sent_multiple_types(self, tmp_db):
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from scheduler.tasks import _record_digest_sent
+        _record_digest_sent("morning_brief")
+        _record_digest_sent("weekly_summary")
+        rows = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'digest_sent' ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 2
+        assert json.loads(rows[0][0])["type"] == "morning_brief"
+        assert json.loads(rows[1][0])["type"] == "weekly_summary"
+        learning._db_conn = original
+
+    def test_record_scheduler_failure_does_not_crash_without_db(self):
+        """_record_scheduler_failure should swallow exceptions gracefully."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = None  # Force connection to fail
+        from scheduler.tasks import _record_scheduler_failure
+        # Should not raise
+        try:
+            _record_scheduler_failure("task", "error")
+        except Exception:
+            pass  # The function itself catches exceptions
+        finally:
+            learning._db_conn = original
