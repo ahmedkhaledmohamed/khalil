@@ -396,5 +396,113 @@ async def learned_preferences() -> str:
     return "\n".join(lines)
 
 
+# --- Dev Environment Tools ---
+
+@mcp.tool()
+async def dev_environment_status() -> str:
+    """Get current development environment — Cursor windows, iTerm sessions, frontmost app.
+
+    Shows what projects are open in Cursor (with CPU/memory), active terminal
+    sessions with running processes, and which app is in focus.
+    """
+    from actions.terminal import (
+        get_cursor_status, format_cursor_status,
+        get_terminal_status, format_terminal_status,
+        get_frontmost_app,
+    )
+
+    cursor_status, terminal_status, frontmost = await asyncio.gather(
+        get_cursor_status(),
+        get_terminal_status(),
+        get_frontmost_app(),
+    )
+
+    lines = [format_cursor_status(cursor_status)]
+    lines.append("")
+    lines.append(format_terminal_status(terminal_status))
+    if frontmost:
+        lines.append(f"\nFrontmost: {frontmost}")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def cursor_open_file(path: str, line: int | None = None) -> str:
+    """Open a file in Cursor IDE, optionally at a specific line.
+
+    Args:
+        path: File or folder path to open (absolute or relative)
+        line: Optional line number to jump to
+    """
+    from actions.terminal import cursor_open
+    result = await cursor_open(path, line)
+    if result["success"]:
+        loc = f"{path}:{line}" if line else path
+        return f"Opened in Cursor: {loc}"
+    return f"Failed to open in Cursor: {result['error']}"
+
+
+@mcp.tool()
+async def list_terminal_sessions() -> str:
+    """List active iTerm2 terminal sessions with their running processes.
+
+    Shows each session's TTY, running command, PID, and elapsed time.
+    """
+    from actions.terminal import get_terminal_status, format_terminal_status
+    status = await get_terminal_status()
+    return format_terminal_status(status)
+
+
+@mcp.tool()
+async def run_in_terminal(command: str, session: str = "current") -> str:
+    """Send a command to an iTerm2 terminal session.
+
+    The command is sanitized before injection (no chaining operators, no subshells).
+    This action is logged to the audit trail.
+
+    Args:
+        command: Shell command to execute in the terminal
+        session: TTY path (e.g. "/dev/ttys003") or "current" for active session
+    """
+    from actions.terminal import send_to_iterm
+
+    result = await send_to_iterm(command, session)
+    if result["success"]:
+        # Log to audit
+        try:
+            import sqlite3
+            from config import DB_PATH
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+            from config import TIMEZONE
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.execute(
+                "INSERT INTO audit_log (action_type, description, result, autonomy_level, timestamp) VALUES (?, ?, ?, ?, ?)",
+                ("terminal_exec_mcp", f"Sent to terminal: {command}", "ok", "mcp",
+                 datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y-%m-%d %H:%M:%S")),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+        return f"Command sent to terminal ({session}): {command}"
+    return f"Failed: {result['error']}"
+
+
+@mcp.tool()
+async def cursor_diff_files(file1: str, file2: str) -> str:
+    """Open a diff view in Cursor comparing two files.
+
+    Args:
+        file1: Path to first file
+        file2: Path to second file
+    """
+    from actions.terminal import cursor_diff
+    result = await cursor_diff(file1, file2)
+    if result["success"]:
+        return f"Diff opened in Cursor: {file1} vs {file2}"
+    return f"Failed: {result['error']}"
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
