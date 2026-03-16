@@ -1,0 +1,9 @@
+{
+    "name": "slack_reader",
+    "command": "slack",
+    "description": "Read and search Slack messages",
+    "action_module": "actions.slack_reader",
+    "handler_function": "handle_slack",
+    "generated_at": "2026-03-15T20:32:00",
+    "generated_for": "Read slack messages"
+}
