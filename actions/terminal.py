@@ -3,11 +3,17 @@
 Provides read-only status queries and write commands for:
 - Cursor IDE: windows, projects, extensions, file opening
 - iTerm2: sessions, running processes, command injection
+- Proactive polling: detect state changes and notify
 """
 
 import asyncio
+import json
 import logging
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from config import DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.terminal")
 
@@ -282,3 +288,118 @@ async def get_frontmost_app() -> str | None:
         return stdout.decode().strip() or None
     except Exception:
         return None
+
+
+# --- Proactive State Polling ---
+
+async def snapshot_dev_state() -> dict:
+    """Capture current dev environment state for change detection."""
+    cursor_windows = await get_cursor_windows()
+    sessions = await get_iterm_sessions()
+    frontmost = await get_frontmost_app()
+
+    return {
+        "cursor_projects": sorted(set(
+            w["project"] for w in cursor_windows if w.get("project")
+        )),
+        "cursor_window_count": len(cursor_windows),
+        "cursor_high_cpu": [
+            {"project": w.get("project", w["name"]), "cpu": w["cpu_pct"]}
+            for w in cursor_windows if w["cpu_pct"] > 70
+        ],
+        "iterm_session_count": len(sessions),
+        "iterm_ttys": sorted(s["tty"] for s in sessions if s.get("tty")),
+        "frontmost_app": frontmost,
+        "timestamp": datetime.now(ZoneInfo(TIMEZONE)).isoformat(),
+    }
+
+
+def diff_dev_state(old: dict, new: dict) -> list[str]:
+    """Compare two state snapshots. Returns list of human-readable change descriptions."""
+    if not old:
+        return []  # First snapshot, nothing to compare
+
+    changes = []
+
+    # Cursor project changes
+    old_projects = set(old.get("cursor_projects", []))
+    new_projects = set(new.get("cursor_projects", []))
+    for p in new_projects - old_projects:
+        changes.append(f"🖥 Cursor: opened project {p}")
+    for p in old_projects - new_projects:
+        changes.append(f"🖥 Cursor: closed project {p}")
+
+    # Cursor window count changes
+    old_wc = old.get("cursor_window_count", 0)
+    new_wc = new.get("cursor_window_count", 0)
+    if new_wc == 0 and old_wc > 0:
+        changes.append("🖥 Cursor: all windows closed")
+    elif old_wc == 0 and new_wc > 0:
+        changes.append(f"🖥 Cursor: opened ({new_wc} windows)")
+
+    # High CPU alerts (only alert once per project per occurrence)
+    for item in new.get("cursor_high_cpu", []):
+        old_high = {h["project"] for h in old.get("cursor_high_cpu", [])}
+        if item["project"] not in old_high:
+            changes.append(f"⚠️ Cursor: {item['project']} at {item['cpu']}% CPU")
+
+    # iTerm session count changes
+    old_sc = old.get("iterm_session_count", 0)
+    new_sc = new.get("iterm_session_count", 0)
+    if new_sc > old_sc:
+        changes.append(f"📟 Terminal: {new_sc - old_sc} new session(s) opened")
+    elif new_sc < old_sc:
+        changes.append(f"📟 Terminal: {old_sc - new_sc} session(s) closed")
+
+    # Frontmost app change
+    old_app = old.get("frontmost_app")
+    new_app = new.get("frontmost_app")
+    if old_app and new_app and old_app != new_app:
+        changes.append(f"🔍 Switched to {new_app}")
+
+    return changes
+
+
+def format_state_changes(changes: list[str]) -> str:
+    """Format state changes for Telegram notification."""
+    if not changes:
+        return ""
+    return "🔔 Dev Environment Update\n\n" + "\n".join(f"  {c}" for c in changes)
+
+
+def _load_saved_state() -> dict:
+    """Load last dev state from settings table."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        row = conn.execute("SELECT value FROM settings WHERE key = 'dev_state'").fetchone()
+        conn.close()
+        if row:
+            return json.loads(row[0])
+    except Exception as e:
+        log.debug("Failed to load dev state: %s", e)
+    return {}
+
+
+def _save_state(state: dict):
+    """Save dev state to settings table."""
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('dev_state', ?)",
+            (json.dumps(state),),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.debug("Failed to save dev state: %s", e)
+
+
+async def poll_and_diff() -> list[str]:
+    """Take a new snapshot, compare with saved state, save new state. Returns changes."""
+    old_state = _load_saved_state()
+    new_state = await snapshot_dev_state()
+    changes = diff_dev_state(old_state, new_state)
+    _save_state(new_state)
+    return changes

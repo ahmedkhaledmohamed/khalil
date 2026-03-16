@@ -6,6 +6,8 @@ from actions.terminal import (
     parse_iterm_sessions,
     format_cursor_status,
     format_terminal_status,
+    diff_dev_state,
+    format_state_changes,
 )
 
 # --- Fixtures: real output from cursor --status ---
@@ -159,3 +161,104 @@ class TestFormatTerminalStatus:
     def test_formats_empty(self):
         text = format_terminal_status({"sessions": [], "count": 0})
         assert "No iTerm2 sessions" in text
+
+
+# --- Milestone 3: Proactive Polling & State Diffing ---
+
+class TestDiffDevState:
+    def test_empty_old_state(self):
+        """First snapshot — no changes."""
+        new = {"cursor_projects": ["foo"], "cursor_window_count": 1,
+               "cursor_high_cpu": [], "iterm_session_count": 2,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        assert diff_dev_state({}, new) == []
+
+    def test_new_project_opened(self):
+        old = {"cursor_projects": ["foo"], "cursor_window_count": 1,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "cursor_projects": ["foo", "bar"], "cursor_window_count": 2}
+        changes = diff_dev_state(old, new)
+        assert any("opened project bar" in c for c in changes)
+
+    def test_project_closed(self):
+        old = {"cursor_projects": ["foo", "bar"], "cursor_window_count": 2,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "cursor_projects": ["foo"], "cursor_window_count": 1}
+        changes = diff_dev_state(old, new)
+        assert any("closed project bar" in c for c in changes)
+
+    def test_all_cursor_windows_closed(self):
+        old = {"cursor_projects": ["foo"], "cursor_window_count": 2,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "cursor_projects": [], "cursor_window_count": 0}
+        changes = diff_dev_state(old, new)
+        assert any("all windows closed" in c for c in changes)
+
+    def test_cursor_opened_from_zero(self):
+        old = {"cursor_projects": [], "cursor_window_count": 0,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Finder"}
+        new = {**old, "cursor_projects": ["proj"], "cursor_window_count": 2, "frontmost_app": "Cursor"}
+        changes = diff_dev_state(old, new)
+        assert any("opened" in c and "2 windows" in c for c in changes)
+
+    def test_high_cpu_alert(self):
+        old = {"cursor_projects": ["foo"], "cursor_window_count": 1,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "cursor_high_cpu": [{"project": "foo", "cpu": 85}]}
+        changes = diff_dev_state(old, new)
+        assert any("85% CPU" in c for c in changes)
+
+    def test_high_cpu_no_repeat(self):
+        """Don't re-alert if same project was already high CPU."""
+        old = {"cursor_projects": ["foo"], "cursor_window_count": 1,
+               "cursor_high_cpu": [{"project": "foo", "cpu": 85}],
+               "iterm_session_count": 1, "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "cursor_high_cpu": [{"project": "foo", "cpu": 90}]}
+        changes = diff_dev_state(old, new)
+        assert not any("CPU" in c for c in changes)
+
+    def test_new_terminal_sessions(self):
+        old = {"cursor_projects": [], "cursor_window_count": 0,
+               "cursor_high_cpu": [], "iterm_session_count": 2,
+               "iterm_ttys": [], "frontmost_app": "iTerm2"}
+        new = {**old, "iterm_session_count": 4}
+        changes = diff_dev_state(old, new)
+        assert any("2 new session(s)" in c for c in changes)
+
+    def test_terminal_sessions_closed(self):
+        old = {"cursor_projects": [], "cursor_window_count": 0,
+               "cursor_high_cpu": [], "iterm_session_count": 3,
+               "iterm_ttys": [], "frontmost_app": "iTerm2"}
+        new = {**old, "iterm_session_count": 1}
+        changes = diff_dev_state(old, new)
+        assert any("2 session(s) closed" in c for c in changes)
+
+    def test_frontmost_app_change(self):
+        old = {"cursor_projects": [], "cursor_window_count": 0,
+               "cursor_high_cpu": [], "iterm_session_count": 1,
+               "iterm_ttys": [], "frontmost_app": "Cursor"}
+        new = {**old, "frontmost_app": "Safari"}
+        changes = diff_dev_state(old, new)
+        assert any("Switched to Safari" in c for c in changes)
+
+    def test_no_changes(self):
+        state = {"cursor_projects": ["foo"], "cursor_window_count": 1,
+                 "cursor_high_cpu": [], "iterm_session_count": 2,
+                 "iterm_ttys": ["/dev/ttys003"], "frontmost_app": "Cursor"}
+        assert diff_dev_state(state, state) == []
+
+
+class TestFormatStateChanges:
+    def test_formats_changes(self):
+        changes = ["🖥 Cursor: opened project foo", "📟 Terminal: 1 new session(s) opened"]
+        text = format_state_changes(changes)
+        assert "Dev Environment Update" in text
+        assert "opened project foo" in text
+
+    def test_empty_changes(self):
+        assert format_state_changes([]) == ""
