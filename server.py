@@ -333,6 +333,33 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\bcheck\s+(?:disk\s+)?(?:space|storage)\b", text_lower):
         return {"action": "shell", "command": "df -h", "description": "Check disk space"}
 
+    # "how many <app> windows open" — pre-built osascript (LLM gets this wrong)
+    m = re.search(r"\bhow\s+many\s+(\w+)\s+windows?\b", text_lower)
+    if m:
+        app = m.group(1).title()
+        return {
+            "action": "shell",
+            "command": f"osascript -e 'tell application \"System Events\" to count windows of process \"{app}\"'",
+            "description": f"Count {app} windows",
+        }
+
+    # "what apps / processes are running"
+    if re.search(r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", text_lower):
+        return {"action": "shell", "command": "ps -eo comm= | sort -u | grep -v '^$'", "description": "List running processes"}
+
+    # "what's my battery" / "battery status"
+    if re.search(r"\b(?:battery|charge)\b.*\b(?:status|level|percentage|life)\b", text_lower) or \
+       re.search(r"\bwhat'?s\s+my\s+battery\b", text_lower):
+        return {"action": "shell", "command": "pmset -g batt", "description": "Check battery status"}
+
+    # "what's my ip"
+    if re.search(r"\bwhat'?s\s+my\s+ip\b", text_lower) or re.search(r"\bmy\s+ip\s+address\b", text_lower):
+        return {"action": "shell", "command": "ipconfig getifaddr en0", "description": "Get local IP address"}
+
+    # "uptime"
+    if re.search(r"\b(?:uptime|how\s+long.*(?:running|been\s+on|up))\b", text_lower):
+        return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
+
     return None
 
 
