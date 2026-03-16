@@ -1,6 +1,15 @@
-"""Google Calendar integration — fetch upcoming events (read-only).
+"""Google Calendar integration — read events and create/update events.
 
-Uses a separate OAuth token (calendar.readonly scope).
+Uses separate OAuth tokens:
+- calendar.readonly scope for reading (TOKEN_FILE_CALENDAR)
+- calendar.events scope for writing (TOKEN_FILE_CALENDAR_WRITE)
+
+Write operations require re-authorization:
+    python3 -c "
+    from actions.calendar import _authorize_write
+    _authorize_write()
+    "
+
 All public functions are async — sync Google API calls run in asyncio.to_thread().
 """
 
@@ -18,14 +27,31 @@ from config import CREDENTIALS_FILE, TOKEN_FILE_CALENDAR, TIMEZONE
 
 log = logging.getLogger("khalil.actions.calendar")
 
-SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES_READ = ["https://www.googleapis.com/auth/calendar.readonly"]
+SCOPES_WRITE = [
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+]
+
+# Backward compatibility
+SCOPES = SCOPES_READ
+
+# Write token stored alongside the read token
+TOKEN_FILE_CALENDAR_WRITE = TOKEN_FILE_CALENDAR.parent / "token_calendar_write.json"
 
 
-def _get_credentials():
-    """Get or refresh OAuth credentials for Calendar readonly."""
+def _get_credentials(write: bool = False):
+    """Get or refresh OAuth credentials for Calendar.
+
+    Args:
+        write: If True, use calendar.events scope for write access.
+    """
+    scopes = SCOPES_WRITE if write else SCOPES_READ
+    token_file = TOKEN_FILE_CALENDAR_WRITE if write else TOKEN_FILE_CALENDAR
+
     creds = None
-    if TOKEN_FILE_CALENDAR.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE_CALENDAR), SCOPES)
+    if token_file.exists():
+        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -36,18 +62,24 @@ def _get_credentials():
                     f"Missing {CREDENTIALS_FILE}. "
                     "Download from Google Cloud Console → APIs → Credentials → OAuth 2.0"
                 )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
             creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_FILE_CALENDAR, "w") as f:
+        with open(token_file, "w") as f:
             f.write(creds.to_json())
 
     return creds
 
 
-def _get_calendar_service():
-    """Get Calendar API service."""
-    creds = _get_credentials()
+def _authorize_write():
+    """Interactive: authorize write access to Calendar. Run manually once."""
+    _get_credentials(write=True)
+    print(f"Calendar write token saved to {TOKEN_FILE_CALENDAR_WRITE}")
+
+
+def _get_calendar_service(write: bool = False):
+    """Get Calendar API service. Use write=True for create/update/delete."""
+    creds = _get_credentials(write=write)
     return build("calendar", "v3", credentials=creds)
 
 
@@ -121,3 +153,80 @@ def format_events_text(events: list[dict]) -> str:
         lines.append(line)
 
     return "\n\n".join(lines)
+
+
+# --- Write Operations (require calendar.events scope) ---
+
+
+def _create_event_sync(
+    summary: str,
+    start_time: datetime,
+    end_time: datetime | None = None,
+    description: str = "",
+    location: str = "",
+    all_day: bool = False,
+) -> dict:
+    """Create a calendar event. Runs in thread."""
+    if not TOKEN_FILE_CALENDAR_WRITE.exists():
+        raise RuntimeError(
+            "Calendar write access not authorized. Run:\n"
+            "  python3 -c \"from actions.calendar import _authorize_write; _authorize_write()\""
+        )
+
+    service = _get_calendar_service(write=True)
+    tz = ZoneInfo(TIMEZONE)
+
+    if end_time is None:
+        end_time = start_time + timedelta(hours=1)
+
+    if all_day:
+        event_body = {
+            "summary": summary,
+            "start": {"date": start_time.strftime("%Y-%m-%d")},
+            "end": {"date": end_time.strftime("%Y-%m-%d")},
+        }
+    else:
+        event_body = {
+            "summary": summary,
+            "start": {"dateTime": start_time.astimezone(tz).isoformat(), "timeZone": TIMEZONE},
+            "end": {"dateTime": end_time.astimezone(tz).isoformat(), "timeZone": TIMEZONE},
+        }
+
+    if description:
+        event_body["description"] = description
+    if location:
+        event_body["location"] = location
+
+    event = service.events().insert(calendarId="primary", body=event_body).execute()
+    return {
+        "id": event["id"],
+        "summary": event.get("summary", ""),
+        "start": event["start"].get("dateTime", event["start"].get("date", "")),
+        "link": event.get("htmlLink", ""),
+    }
+
+
+async def create_event(
+    summary: str,
+    start_time: datetime,
+    end_time: datetime | None = None,
+    description: str = "",
+    location: str = "",
+    all_day: bool = False,
+) -> dict:
+    """Create a calendar event. Returns event dict with id, summary, start, link."""
+    return await asyncio.to_thread(
+        _create_event_sync, summary, start_time, end_time, description, location, all_day
+    )
+
+
+def _delete_event_sync(event_id: str) -> bool:
+    """Delete a calendar event by ID. Runs in thread."""
+    service = _get_calendar_service(write=True)
+    service.events().delete(calendarId="primary", eventId=event_id).execute()
+    return True
+
+
+async def delete_event(event_id: str) -> bool:
+    """Delete a calendar event by ID."""
+    return await asyncio.to_thread(_delete_event_sync, event_id)

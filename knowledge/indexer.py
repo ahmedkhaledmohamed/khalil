@@ -23,6 +23,11 @@ def init_db() -> sqlite3.Connection:
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
 
+    # Enable WAL mode for concurrent read/write without "database is locked" errors
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS documents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
