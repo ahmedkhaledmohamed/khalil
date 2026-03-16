@@ -877,13 +877,18 @@ class TestMacOSNotifications:
         from monitoring import send_macos_notification
         assert callable(send_macos_notification)
 
-    def test_notification_escapes_quotes(self):
-        """Verify the function handles special characters."""
+    def test_notification_escapes_quotes(self, monkeypatch):
+        """Verify the function handles special characters without firing a real notification."""
+        from unittest.mock import MagicMock
         from monitoring import send_macos_notification
-        # Just test it doesn't crash — actual notification requires macOS
+        mock_run = MagicMock(return_value=MagicMock(returncode=0))
+        monkeypatch.setattr("monitoring.subprocess.run", mock_run)
         result = send_macos_notification('Test "Title"', 'Hello "World"')
-        # Result depends on macOS availability — just check no crash
-        assert isinstance(result, bool)
+        assert result is True
+        # Verify quotes were escaped in the osascript call
+        script_arg = mock_run.call_args[0][0][2]  # ["osascript", "-e", script]
+        assert 'Test \\"Title\\"' in script_arg
+        assert 'Hello \\"World\\"' in script_arg
 
 
 # --- #19: Healing Confidence Scoring ---
