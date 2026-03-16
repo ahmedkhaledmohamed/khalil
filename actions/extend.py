@@ -22,7 +22,7 @@ from pathlib import Path
 
 from config import (
     KHALIL_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
-    KEYRING_SERVICE,
+    KEYRING_SERVICE, CLAUDE_CODE_BIN,
 )
 
 log = logging.getLogger("khalil.extend")
@@ -148,6 +148,32 @@ def _get_extension_capabilities() -> list[str]:
     return capabilities
 
 
+# --- Complexity Routing ---
+
+SIMPLE_CAPABILITIES = {
+    "reminder", "note", "bookmark", "timer", "counter",
+    "todo", "list", "tag", "alias",
+}
+
+COMPLEX_SIGNALS = [
+    "slack", "jira", "twitter", "notion", "linear", "github",
+    "oauth", "api key", "webhook", "websocket", "real-time",
+    "scrape", "browser", "authentication", "spotify",
+]
+
+
+def classify_complexity(spec: dict) -> str:
+    """Return 'simple' or 'complex' based on capability spec."""
+    name = spec.get("name", "").lower()
+    desc = spec.get("description", "").lower()
+
+    if any(signal in name or signal in desc for signal in COMPLEX_SIGNALS):
+        return "complex"
+    if name in SIMPLE_CAPABILITIES:
+        return "simple"
+    return "complex"  # default to complex — safer
+
+
 # --- Code Generation ---
 
 ACTION_TEMPLATE = '''"""ACTION_DESCRIPTION"""
@@ -268,6 +294,147 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
     }
 
     return source, json.dumps(manifest, indent=2)
+
+
+# --- Claude Code CLI Generation ---
+
+
+def _build_claude_code_prompt(spec: dict) -> str:
+    """Build a detailed prompt for Claude Code CLI."""
+    return (
+        "You are adding a new capability to Khalil, a personal AI assistant "
+        "(Telegram bot + FastAPI + SQLite).\n\n"
+        f"TASK: Create the \"{spec['name']}\" capability.\n"
+        f"Command: /{spec.get('command', spec['name'])}\n"
+        f"Description: {spec['description']}\n\n"
+        "REQUIREMENTS:\n"
+        "1. Create `actions/{name}.py` following the exact pattern of existing action modules\n"
+        "2. Create `extensions/{name}.json` manifest with keys: name, command, description, "
+        "action_module, handler_function, generated_at, generated_for\n"
+        "3. Read `actions/reminders.py` and `actions/gmail.py` as reference patterns\n"
+        "4. Read `config.py` for available constants and paths\n"
+        "5. Read `server.py` lines 1-50 and the _load_extensions function to understand "
+        "how extensions are registered\n\n"
+        "CONSTRAINTS:\n"
+        "- Use only stdlib + packages already in requirements.txt\n"
+        "- No subprocess, eval, exec, socket, ctypes\n"
+        "- Use async functions for Telegram handlers\n"
+        "- Use SQLite via config.DB_PATH for any state\n"
+        "- Include ensure_tables(conn) if you need DB tables\n"
+        "- Handle errors gracefully with logging\n"
+        "- Keep under 300 lines\n\n"
+        "Create ONLY the action module and manifest. Do not modify server.py."
+    ).format(name=spec["name"])
+
+
+async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
+    """Generate a capability using Claude Code CLI in a worktree.
+
+    Returns (module_source, manifest_json, pr_url).
+    """
+    from actions.claude_code import create_worktree, run_claude_code, cleanup_worktree
+
+    branch = f"khalil-extend/{spec['name']}"
+    wt_path = create_worktree(branch)
+
+    prompt = _build_claude_code_prompt(spec)
+
+    try:
+        success, output = await run_claude_code(prompt, wt_path, timeout=300)
+        if not success:
+            raise RuntimeError(f"Claude Code failed: {output[:500]}")
+
+        # Read the generated files from worktree
+        module_path = wt_path / "actions" / f"{spec['name']}.py"
+        manifest_path = wt_path / "extensions" / f"{spec['name']}.json"
+
+        if not module_path.exists():
+            raise RuntimeError(
+                f"Claude Code didn't create actions/{spec['name']}.py"
+            )
+
+        module_source = module_path.read_text()
+
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text())
+        else:
+            manifest = {
+                "name": spec["name"],
+                "command": spec.get("command", spec["name"]),
+                "description": spec["description"],
+                "action_module": f"actions.{spec['name']}",
+                "handler_function": f"cmd_{spec.get('command', spec['name'])}",
+                "generated_at": datetime.utcnow().isoformat(),
+                "generated_for": spec.get("original_query", spec["description"]),
+            }
+
+        # Validate
+        ok, err = validate_generated_code(module_source)
+        if not ok:
+            raise RuntimeError(f"Validation failed: {err}")
+
+        # Commit and push from worktree, open PR
+        pr_url = await _commit_and_pr_from_worktree(wt_path, branch, spec, manifest)
+        return module_source, json.dumps(manifest), pr_url
+
+    finally:
+        cleanup_worktree(branch)
+
+
+async def _commit_and_pr_from_worktree(
+    wt_path: Path, branch: str, spec: dict, manifest: dict,
+) -> str:
+    """Commit changes in worktree and open a PR. Returns PR URL."""
+    name = spec["name"]
+
+    def _git_in_wt(*args, **kwargs):
+        return subprocess.run(
+            ["git"] + list(args),
+            cwd=str(wt_path),
+            capture_output=True, text=True,
+            timeout=kwargs.get("timeout", 30),
+        )
+
+    def _workflow():
+        _git_in_wt("add", "-A")
+        result = _git_in_wt("commit", "-m",
+            f"Add {name} capability (auto-generated by Khalil via Claude Code)\n\n"
+            f"Co-Authored-By: Khalil Bot <khalil@local>"
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"Commit failed: {result.stderr}")
+
+        result = _git_in_wt("push", "-u", "origin", branch)
+        if result.returncode != 0:
+            raise RuntimeError(f"Push failed: {result.stderr}")
+
+        # Open PR
+        result = subprocess.run(
+            ["gh", "pr", "create",
+             "--title", f"Khalil: Add {name} capability (Claude Code)",
+             "--body",
+             f"## Auto-generated capability (via Claude Code CLI)\n\n"
+             f"**Description**: {spec['description']}\n"
+             f"**Command**: /{spec.get('command', name)}\n"
+             f"**Generated for**: \"{spec.get('original_query', '')}\"\n\n"
+             f"## Files\n"
+             f"- `actions/{name}.py` — action module\n"
+             f"- `extensions/{name}.json` — extension manifest\n\n"
+             f"## Review checklist\n"
+             f"- [ ] Code looks correct and safe\n"
+             f"- [ ] No unnecessary imports or dangerous operations\n"
+             f"- [ ] Tables schema makes sense\n"
+             f"- [ ] Command handler covers basic use cases\n\n"
+             f"Generated by Khalil's self-extension engine using Claude Code CLI.",
+             ],
+            cwd=str(wt_path),
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"PR creation failed: {result.stderr}")
+        return result.stdout.strip()
+
+    return await asyncio.to_thread(_workflow)
 
 
 # --- Validation ---
@@ -463,12 +630,15 @@ async def create_extension_pr(name: str, module_source: str, manifest: dict) -> 
 async def generate_and_pr(payload: dict) -> str:
     """Full pipeline: generate code, validate, create PR.
 
-    Called by autonomy.execute_action() after approval.
+    Routes to simple (raw Claude API) or complex (Claude Code CLI) path
+    based on capability complexity.
+
+    Called directly from server.py background task or via autonomy.
     Returns status message.
     """
     global _last_generation_time
 
-    spec = payload.get("spec", {})
+    spec = payload.get("spec", payload)
     name = spec.get("name", "unknown")
 
     # Rate limit check
@@ -485,25 +655,24 @@ async def generate_and_pr(payload: dict) -> str:
         return f"Extension manifest `extensions/{name}.json` already exists."
 
     try:
-        # Import ask_llm from server (avoid circular import at module level)
-        from server import ask_llm
+        complexity = classify_complexity(spec)
+        log.info("Generating %s action module: %s", complexity, name)
 
-        # Generate code
-        log.info("Generating action module: %s", name)
-        module_source, manifest_json = await generate_action_module(spec, ask_llm)
+        if complexity == "complex" and Path(CLAUDE_CODE_BIN).exists():
+            # Complex path: Claude Code CLI in a worktree
+            module_source, manifest_json, pr_url = await generate_with_claude_code(spec)
+        else:
+            # Simple path: raw Claude API call
+            from server import ask_llm
+            module_source, manifest_json = await generate_action_module(spec, ask_llm)
 
-        # Validate
-        valid, error = validate_generated_code(module_source)
-        if not valid:
-            log.error("Generated code failed validation: %s", error)
-            return f"Generated code failed validation: {error}\nPlease try again or build this manually."
+            valid, error = validate_generated_code(module_source)
+            if not valid:
+                log.error("Generated code failed validation: %s", error)
+                return f"Generated code failed validation: {error}\nPlease try again or build this manually."
 
-        # Parse manifest
-        manifest = json.loads(manifest_json)
-
-        # Create PR
-        log.info("Creating PR for extension: %s", name)
-        pr_url = await create_extension_pr(name, module_source, manifest)
+            manifest = json.loads(manifest_json)
+            pr_url = await create_extension_pr(name, module_source, manifest)
 
         _last_generation_time = time.time()
 
