@@ -692,6 +692,7 @@ _ACTION_PATTERNS = [
     # Cursor integrated terminal (via bridge extension) — must come before generic terminal patterns
     (r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", "cursor_terminal_status"),
     (r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", "cursor_terminal_status"),
+    (r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", "cursor_terminal_status"),
     (r"\brun\s+.+\s+in\s+cursor\s+terminal\b", "cursor_terminal_exec"),
     (r"\bsend\s+.+\s+to\s+cursor\s+terminal\b", "cursor_terminal_exec"),
     (r"\bnew\s+cursor\s+terminal\b", "cursor_terminal_new"),
@@ -912,7 +913,8 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     # Cursor integrated terminal (via bridge) — must come before generic terminal patterns
     if re.search(r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", text_lower) or \
-       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower):
+       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower) or \
+       re.search(r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", text_lower):
         return {"action": "cursor_terminal_status", "description": "Check Cursor terminal sessions"}
 
     m = re.search(r"\brun\s+(.+?)\s+in\s+cursor\s+terminal\b", text_lower)
@@ -979,7 +981,8 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     # Cursor integrated terminal (via bridge extension)
     if re.search(r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", text_lower) or \
-       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower):
+       re.search(r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", text_lower) or \
+       re.search(r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", text_lower):
         return {"action": "cursor_terminal_status", "description": "Check Cursor terminal sessions"}
 
     m = re.search(r"\brun\s+(.+?)\s+in\s+cursor\s+terminal\b", text_lower)
