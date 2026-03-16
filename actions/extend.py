@@ -301,30 +301,73 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
 
 def _build_claude_code_prompt(spec: dict) -> str:
     """Build a detailed prompt for Claude Code CLI."""
+    name = spec["name"]
+    command = spec.get("command", name)
     return (
         "You are adding a new capability to Khalil, a personal AI assistant "
         "(Telegram bot + FastAPI + SQLite).\n\n"
-        f"TASK: Create the \"{spec['name']}\" capability.\n"
-        f"Command: /{spec.get('command', spec['name'])}\n"
+        f"TASK: Create the \"{name}\" capability.\n"
+        f"Command: /{command}\n"
         f"Description: {spec['description']}\n\n"
-        "REQUIREMENTS:\n"
-        "1. Create `actions/{name}.py` following the exact pattern of existing action modules\n"
-        "2. Create `extensions/{name}.json` manifest with keys: name, command, description, "
-        "action_module, handler_function, generated_at, generated_for\n"
-        "3. Read `actions/reminders.py` and `actions/gmail.py` as reference patterns\n"
-        "4. Read `config.py` for available constants and paths\n"
-        "5. Read `server.py` lines 1-50 and the _load_extensions function to understand "
-        "how extensions are registered\n\n"
+        "STEP 1 — READ THESE FILES for context:\n"
+        "- `actions/reminders.py` — reference action module pattern\n"
+        "- `actions/gmail.py` — complex action module pattern\n"
+        "- `config.py` — available constants (DB_PATH, KEYRING_SERVICE, TIMEZONE)\n"
+        "- `requirements.txt` — allowed third-party packages\n"
+        "- `server.py` — search for `_load_extensions` to see how extensions are registered\n\n"
+        f"STEP 2 — CREATE `actions/{name}.py` with this EXACT structure:\n"
+        "```\n"
+        '"""Module docstring — describe what this does.\n'
+        "\n"
+        "If this uses an external API, document:\n"
+        "- What token type is needed (bot token, user token, API key)\n"
+        "- Setup command for the user\n"
+        '"""\n'
+        "import asyncio\n"
+        "import logging\n"
+        "import sqlite3\n"
+        "from config import DB_PATH, KEYRING_SERVICE, TIMEZONE\n"
+        f'log = logging.getLogger("khalil.actions.{name}")\n'
+        "\n"
+        "def ensure_tables(conn: sqlite3.Connection):\n"
+        '    """Create tables. Called once at startup."""\n'
+        "    conn.execute('CREATE TABLE IF NOT EXISTS ...')\n"
+        "    conn.commit()\n"
+        "\n"
+        "# --- Core sync functions (called via asyncio.to_thread) ---\n"
+        "# --- Async wrappers ---\n"
+        "\n"
+        f"async def handle_{command}(update, context):\n"
+        f'    """Handle /{command} command."""\n'
+        "    args = context.args or []\n"
+        "    # Parse subcommands, call core functions, reply_text\n"
+        "```\n\n"
+        f"STEP 3 — CREATE `extensions/{name}.json`:\n"
+        "```json\n"
+        "{\n"
+        f'    "name": "{name}",\n'
+        f'    "command": "{command}",\n'
+        f'    "description": "{spec["description"]}",\n'
+        f'    "action_module": "actions.{name}",\n'
+        f'    "handler_function": "handle_{command}",\n'
+        f'    "generated_at": "<use current ISO timestamp>",\n'
+        f'    "generated_for": "{spec.get("original_query", spec["description"])}"\n'
+        "}\n"
+        "```\n\n"
         "CONSTRAINTS:\n"
-        "- Use only stdlib + packages already in requirements.txt\n"
-        "- No subprocess, eval, exec, socket, ctypes\n"
-        "- Use async functions for Telegram handlers\n"
-        "- Use SQLite via config.DB_PATH for any state\n"
-        "- Include ensure_tables(conn) if you need DB tables\n"
-        "- Handle errors gracefully with logging\n"
+        "- Allowed imports: stdlib, httpx, keyring, and modules from config\n"
+        "- FORBIDDEN: subprocess, eval, exec, socket, ctypes, os.system\n"
+        "- Store credentials via: keyring.get_password(KEYRING_SERVICE, 'key-name')\n"
+        "- Use parameterized SQL (?, ?) — never f-strings in SQL\n"
+        "- Wrap sync HTTP calls with asyncio.to_thread()\n"
+        "- Resolve user IDs to display names when showing messages\n"
+        "- Respect Telegram's 4096 char message limit\n"
         "- Keep under 300 lines\n\n"
+        "IMPORTANT: If the external API requires a specific token type (e.g., user token "
+        "vs bot token), document this clearly and only implement endpoints that work with "
+        "the token type you're using. Do NOT implement features that will fail at runtime.\n\n"
         "Create ONLY the action module and manifest. Do not modify server.py."
-    ).format(name=spec["name"])
+    )
 
 
 async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
@@ -368,10 +411,19 @@ async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
                 "generated_for": spec.get("original_query", spec["description"]),
             }
 
-        # Validate
+        # Validate — retry once with error feedback if it fails
         ok, err = validate_generated_code(module_source)
         if not ok:
-            raise RuntimeError(f"Validation failed: {err}")
+            log.warning("First validation failed (%s), retrying with fix prompt", err)
+            fix_prompt = (
+                f"The generated code in actions/{spec['name']}.py has a validation error:\n"
+                f"{err}\n\nFix the issue in the file."
+            )
+            await run_claude_code(fix_prompt, wt_path, timeout=120)
+            module_source = module_path.read_text()
+            ok, err = validate_generated_code(module_source)
+            if not ok:
+                raise RuntimeError(f"Validation failed after retry: {err}")
 
         # Commit and push from worktree, open PR
         pr_url = await _commit_and_pr_from_worktree(wt_path, branch, spec, manifest)
