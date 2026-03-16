@@ -164,6 +164,21 @@ def truncate_context(results: list[dict], max_chars: int = MAX_CONTEXT_TOKENS * 
     return "\n---\n".join(lines)
 
 
+def _get_extension_capabilities_text() -> str:
+    """Build a text list of installed extension capabilities for the system prompt."""
+    from config import EXTENSIONS_DIR
+    if not EXTENSIONS_DIR or not EXTENSIONS_DIR.exists():
+        return "(none installed)\n"
+    lines = []
+    for manifest_path in sorted(EXTENSIONS_DIR.glob("*.json")):
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            lines.append(f"- /{manifest['command']} — {manifest['description']}")
+        except Exception:
+            continue
+    return ("\n".join(lines) + "\n") if lines else "(none installed)\n"
+
+
 LLM_TIMEOUT = 60.0  # seconds — Ollama can be slow on first call
 CLAUDE_TIMEOUT = 30.0
 _ollama_recovery_attempted = False
@@ -286,7 +301,11 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         "and perform other local system queries. If the user asks about their machine "
         "state, DO NOT suggest they run a command — just tell them you'll check. "
         "The shell execution happens automatically through your action system.\n\n"
+        "EXTENSIONS: You also have these capabilities via installed extensions:\n"
+        f"{_get_extension_capabilities_text()}"
+        "If the user asks for something covered by an extension, tell them to use that command.\n\n"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
+        "AND no extension covers it "
         "(e.g., read Slack messages, post to Twitter, create a Jira ticket, book a flight), "
         "include this exact tag in your response:\n"
         "[CAPABILITY_GAP: short_name | /command_name | one-line description]\n"
@@ -398,6 +417,9 @@ _ACTION_PATTERNS = [
     (r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", "shell"),
     (r"\b(?:battery|cpu|memory|ram|uptime)\b.*\b(?:status|level|usage)\b", "shell"),
     (r"\bwhat'?s\s+my\s+(?:ip|battery|uptime)\b", "shell"),
+    # Email labeling / categorization
+    (r"\b(?:categoriz|label|organiz|sort)\w*\s+(?:my\s+)?(?:email|inbox|mail)\b", "label"),
+    (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),
 ]
 
 
@@ -419,6 +441,33 @@ _APP_NAMES = {
     "vscode": "Visual Studio Code", "vs code": "Visual Studio Code",
     "arc": "Arc", "firefox": "Firefox", "brave": "Brave Browser",
 }
+
+
+async def _try_extension_handler(hint: str, query: str, update, context) -> bool:
+    """Try to route a query to a matching extension handler.
+
+    Looks up extension manifests by command name matching the action hint.
+    Returns True if handled, False otherwise.
+    """
+    import importlib
+    from config import EXTENSIONS_DIR
+
+    if not EXTENSIONS_DIR or not EXTENSIONS_DIR.exists():
+        return False
+
+    for manifest_path in EXTENSIONS_DIR.glob("*.json"):
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            if manifest.get("command") == hint:
+                mod = importlib.import_module(manifest["action_module"])
+                handler_fn = getattr(mod, manifest["handler_function"])
+                # Synthesize args from the query (pass the full query as args)
+                context.args = query.split()
+                await handler_fn(update, context)
+                return True
+        except Exception as e:
+            log.warning("Extension handler %s failed: %s", hint, e)
+    return False
 
 
 def _try_direct_shell_intent(text: str) -> dict | None:
@@ -1870,6 +1919,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _try_inline_healing(update)
 
     # Try natural language action detection
+    # 0. Check if query matches an extension command — route directly
+    action_hint = _looks_like_action(query)
+    if action_hint and action_hint not in ("reminder", "email", "calendar", "shell"):
+        # Extension command — route directly to the handler
+        handled = await _try_extension_handler(action_hint, query, update, context)
+        if handled:
+            return
+
     # 1. Direct mapping for unambiguous patterns (no LLM needed)
     direct_intent = _try_direct_shell_intent(query)
     if direct_intent:
@@ -1879,7 +1936,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if handled:
             return
     # 2. LLM-based detection for ambiguous patterns
-    action_hint = _looks_like_action(query)
+    if action_hint is None:
+        action_hint = _looks_like_action(query)
     if action_hint:
         intent = await detect_intent(query)
         if intent:
@@ -1918,8 +1976,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ask LLM
     response = await ask_claude(query, full_context)
 
-    # Save assistant response to conversation history
-    save_message(chat_id, "assistant", response)
+    # Always strip CAPABILITY_GAP tags before user-facing display
+    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
+    _gap_match = _gap_tag_re.search(response)
+    display_response = _gap_tag_re.sub("", response).strip() if _gap_match else response
+
+    # Save assistant response to conversation history (with tag stripped)
+    save_message(chat_id, "assistant", display_response)
 
     # Track search misses for self-improvement
     from learning import detect_search_miss, record_signal
@@ -1968,40 +2031,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]',
         response,
     )
-    if gap_match:
+    if _gap_match:
         record_signal("capability_gap_detected", {"query": query[:200], "structured": True})
-        spec = {
-            "name": gap_match.group(1),
-            "command": gap_match.group(2).lstrip("/"),
-            "description": gap_match.group(3).strip(),
-            "original_query": query,
-        }
-        # Strip the tag from the displayed response
-        clean_response = response.replace(gap_match.group(0), "").strip()
-        try:
-            await progress_msg.edit_text(clean_response)
-        except Exception:
-            await progress_msg.delete()
-            await update.message.reply_text(clean_response)
-        await _handle_self_extend_with_spec(spec, update)
-        return
+        gap_groups = re.search(
+            r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]', response
+        )
+        if gap_groups:
+            spec = {
+                "name": gap_groups.group(1),
+                "command": gap_groups.group(2).lstrip("/"),
+                "description": gap_groups.group(3).strip(),
+                "original_query": query,
+            }
+            try:
+                await progress_msg.edit_text(display_response)
+            except Exception:
+                await progress_msg.delete()
+                await update.message.reply_text(display_response)
+            await _handle_self_extend_with_spec(spec, update)
+            return
     # 2. Fallback: phrase-based detection
     try:
         from actions.extend import detect_capability_gap, handle_self_extend
-        if detect_capability_gap(response):
+        if detect_capability_gap(display_response):
             record_signal("capability_gap_detected", {"query": query[:200]})
             await _try_inline_healing(update)
             await handle_self_extend(query, update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)
 
-    # Replace progress message with response
+    # Replace progress message with response (tag already stripped)
     try:
-        await progress_msg.edit_text(response)
+        await progress_msg.edit_text(display_response)
     except Exception:
         # If edit fails (e.g., message too long), send as new message
         await progress_msg.delete()
-        await update.message.reply_text(response)
+        await update.message.reply_text(display_response)
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
