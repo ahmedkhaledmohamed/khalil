@@ -200,7 +200,19 @@ _TRANSIENT_PATTERNS = [
 _PERMANENT_PATTERNS = [
     "permission denied", "operation not permitted", "command not found",
     "no such file or directory", "not a directory",
+    "not allowed assistive access",
 ]
+
+# User-friendly hints for specific permanent errors
+_ERROR_HINTS = {
+    "not allowed assistive access": (
+        "macOS requires accessibility permission for this command.\n"
+        "Go to System Settings → Privacy & Security → Accessibility "
+        "and enable access for the app running Khalil (Terminal, Cursor, etc.)."
+    ),
+    "permission denied": "The command needs elevated permissions. You may need to grant access in System Settings.",
+    "command not found": "This command is not installed on your system.",
+}
 
 # Severity ordering for escalation check
 _ACTION_SEVERITY = {ActionType.READ: 0, ActionType.WRITE: 1, ActionType.DANGEROUS: 2}
@@ -249,5 +261,11 @@ def format_output(result: dict, cmd: str) -> str:
 
     if result["returncode"] != 0:
         parts.append(f"Exit code: {result['returncode']}")
+        # Add user-friendly hint for known error types
+        stderr_lower = stderr.lower()
+        for pattern, hint in _ERROR_HINTS.items():
+            if pattern in stderr_lower:
+                parts.append(f"\n💡 {hint}")
+                break
 
     return "\n".join(parts)
