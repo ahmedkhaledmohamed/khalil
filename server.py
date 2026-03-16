@@ -45,18 +45,32 @@ from knowledge.search import hybrid_search, get_stats
 from knowledge.context import get_relevant_context, get_section_names
 from autonomy import AutonomyController
 
+import re as _re_module
+
+# #72: Compile redaction patterns once at module load
+_REDACT_PATTERNS = [_re_module.compile(p, _re_module.IGNORECASE) for p in SENSITIVE_PATTERNS]
+
+
+def _redact_sensitive(text: str) -> str:
+    """Replace sensitive patterns (PII, credentials) with [REDACTED] in log output."""
+    for pat in _REDACT_PATTERNS:
+        text = pat.sub("[REDACTED]", text)
+    return text
+
+
 class _JsonFormatter(logging.Formatter):
-    """Simple JSON log formatter."""
+    """Simple JSON log formatter with sensitive data redaction."""
     def format(self, record):
         import json as _json
+        msg = _redact_sensitive(record.getMessage())
         entry = {
             "ts": self.formatTime(record),
             "level": record.levelname,
             "logger": record.name,
-            "msg": record.getMessage(),
+            "msg": msg,
         }
         if record.exc_info and record.exc_info[0]:
-            entry["exception"] = self.formatException(record.exc_info)
+            entry["exception"] = _redact_sensitive(self.formatException(record.exc_info))
         return _json.dumps(entry)
 
 
@@ -64,6 +78,55 @@ _handler = logging.StreamHandler()
 _handler.setFormatter(_JsonFormatter())
 logging.basicConfig(level=logging.INFO, handlers=[_handler])
 log = logging.getLogger("khalil")
+
+# --- Circuit Breaker (#20) ---
+
+class CircuitBreaker:
+    """Simple circuit breaker for external API calls.
+
+    After `threshold` consecutive failures, opens the circuit for `cooldown_seconds`.
+    During cooldown, calls are rejected immediately without hitting the API.
+    """
+    def __init__(self, name: str, threshold: int = 5, cooldown_seconds: int = 300):
+        self.name = name
+        self.threshold = threshold
+        self.cooldown_seconds = cooldown_seconds
+        self._failures = 0
+        self._opened_at: float | None = None
+
+    def is_open(self) -> bool:
+        if self._opened_at is None:
+            return False
+        import time
+        elapsed = time.time() - self._opened_at
+        if elapsed >= self.cooldown_seconds:
+            # Half-open: allow one attempt
+            self._opened_at = None
+            self._failures = 0
+            log.info("Circuit breaker '%s' half-open — allowing retry", self.name)
+            return False
+        return True
+
+    def record_success(self):
+        self._failures = 0
+        self._opened_at = None
+
+    def record_failure(self):
+        self._failures += 1
+        if self._failures >= self.threshold and self._opened_at is None:
+            import time
+            self._opened_at = time.time()
+            log.warning(
+                "Circuit breaker '%s' OPEN after %d failures — cooldown %ds",
+                self.name, self._failures, self.cooldown_seconds,
+            )
+
+
+# Circuit breakers for external services
+_cb_gmail = CircuitBreaker("gmail")
+_cb_calendar = CircuitBreaker("calendar")
+_cb_ollama = CircuitBreaker("ollama", threshold=3, cooldown_seconds=60)
+
 
 # --- Globals ---
 app = FastAPI(title="Khalil", docs_url=None, redoc_url=None)
@@ -317,7 +380,14 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
 
     user_message = f"Context from Ahmed's archives:\n\n{context}\n\n---\n\nQuestion: {query}"
 
-    if LLM_BACKEND == "claude" and claude:
+    # #78: Privacy-aware LLM routing — force Ollama for sensitive queries
+    import re as _re
+    _force_local = any(_re.search(p, query, _re.IGNORECASE) for p in SENSITIVE_PATTERNS)
+    if _force_local and LLM_BACKEND == "claude":
+        log.info("Privacy routing: sensitive query forced to local Ollama")
+        # Fall through to Ollama path below instead of Claude
+
+    if LLM_BACKEND == "claude" and claude and not _force_local:
         try:
             response = await claude.messages.create(
                 model=CLAUDE_MODEL,
@@ -334,6 +404,14 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
             return f"⚠️ LLM unavailable (Claude error: {type(e).__name__}). Try again later."
 
     # Default: Ollama local LLM
+    # #20: Circuit breaker — skip Ollama if circuit is open
+    if _cb_ollama.is_open():
+        log.warning("Ollama circuit breaker open — skipping to Claude fallback")
+        fallback = await _fallback_to_claude(query, context, system, user_message)
+        if fallback:
+            return fallback
+        return "⚠️ LLM unavailable — Ollama circuit breaker open and Claude fallback failed."
+
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             response = await client.post(
@@ -348,14 +426,17 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
                 },
             )
             response.raise_for_status()
+            _cb_ollama.record_success()
             return response.json()["message"]["content"]
     except httpx.TimeoutException:
         log.error("Ollama LLM call timed out after %.0fs", LLM_TIMEOUT)
+        _cb_ollama.record_failure()
         from learning import record_signal
         record_signal("llm_failure", {"backend": "ollama", "error": "timeout"})
         return "⚠️ LLM timed out. Ollama may be overloaded — try again in a moment."
     except httpx.ConnectError:
         log.error("Cannot connect to Ollama at %s", OLLAMA_URL)
+        _cb_ollama.record_failure()
         from learning import record_signal
         record_signal("llm_failure", {"backend": "ollama", "error": "connection_refused"})
         # Attempt Ollama recovery
@@ -666,6 +747,14 @@ async def _interpret_shell_output(user_query: str, cmd: str, result: dict) -> st
 async def handle_action_intent(intent: dict, update: Update) -> bool:
     """Handle a detected action intent. Returns True if handled."""
     action = intent.get("action")
+
+    # #10: Track capability usage for heatmap
+    if action:
+        try:
+            from learning import record_signal
+            record_signal("capability_usage", {"action": action})
+        except Exception:
+            pass
 
     if action == "reminder":
         from actions.reminders import _parse_relative_time, create_reminder
@@ -2475,6 +2564,21 @@ async def startup():
     _setup_scheduler()
     scheduler.start()
     log.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")
+
+    # #21: Startup self-test — check all subsystems and report
+    try:
+        from monitoring import run_startup_self_test, format_startup_report
+        test_results = await run_startup_self_test()
+        report = format_startup_report(test_results)
+        log.info("Startup self-test:\n%s", report)
+        # Send report to owner via Telegram if there are issues
+        if test_results["overall"] != "ok" and OWNER_CHAT_ID and telegram_app:
+            try:
+                await telegram_app.bot.send_message(OWNER_CHAT_ID, report)
+            except Exception as e:
+                log.warning("Could not send startup report to Telegram: %s", e)
+    except Exception as e:
+        log.warning("Startup self-test failed: %s", e)
 
     log.info("Khalil is ready.")
 

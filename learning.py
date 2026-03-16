@@ -100,6 +100,22 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
     conn.commit()
 
 
+# --- Capability Usage Heatmap (#10) ---
+
+def get_capability_heatmap(days: int = 7) -> list[dict]:
+    """Return capability usage counts for the last N days, sorted by frequency."""
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT json_extract(context, '$.action') as action, COUNT(*) as count "
+        "FROM interaction_signals "
+        "WHERE signal_type = 'capability_usage' AND created_at > ? "
+        "GROUP BY action ORDER BY count DESC",
+        (cutoff,),
+    ).fetchall()
+    return [{"action": r[0], "count": r[1]} for r in rows]
+
+
 # --- Insight Management ---
 
 def store_insight(category: str, summary: str, evidence: str, recommendation: str) -> int:

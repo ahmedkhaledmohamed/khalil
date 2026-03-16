@@ -53,7 +53,15 @@ def detect_recurring_failures() -> list[dict]:
     """
     conn = _get_conn()
     from datetime import datetime, timedelta
-    cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
+    # Configurable signal window — default 7 days, overridable via settings table
+    window_hours = 168  # 7 days
+    try:
+        row = conn.execute("SELECT value FROM settings WHERE key = 'healing_signal_window_hours'").fetchone()
+        if row:
+            window_hours = max(1, int(row[0]))
+    except Exception:
+        pass
+    cutoff = (datetime.utcnow() - timedelta(hours=window_hours)).strftime("%Y-%m-%d %H:%M:%S")
 
     failure_types = (
         "intent_detection_failure", "action_execution_failure", "user_correction",
