@@ -665,6 +665,166 @@ async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[di
     return summaries
 
 
+# --- #1: Conversation Success Scoring ---
+
+def get_conversation_scores(days: int = 7) -> dict:
+    """Aggregate conversation success scores over the last N days.
+
+    Returns {total, positive, negative, corrections, score_pct, by_topic: {topic: {count, corrections}}}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Success signals
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'conversation_success' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    # Explicit feedback
+    feedback_rows = conn.execute(
+        "SELECT value FROM interaction_signals "
+        "WHERE signal_type = 'explicit_feedback' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    total = len(rows)
+    corrections = 0
+    by_topic: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        topic = ctx.get("topic", "general")
+        had_correction = ctx.get("had_correction", False)
+        if topic not in by_topic:
+            by_topic[topic] = {"count": 0, "corrections": 0}
+        by_topic[topic]["count"] += 1
+        if had_correction:
+            corrections += 1
+            by_topic[topic]["corrections"] += 1
+
+    positive_feedback = sum(1 for r in feedback_rows if r[0] > 0)
+    negative_feedback = sum(1 for r in feedback_rows if r[0] < 0)
+
+    # Score: conversations without corrections + positive feedback - negative feedback
+    success_count = (total - corrections) + positive_feedback - negative_feedback
+    score_pct = round(success_count / total * 100, 1) if total else 0.0
+
+    return {
+        "total": total,
+        "positive_feedback": positive_feedback,
+        "negative_feedback": negative_feedback,
+        "corrections": corrections,
+        "score_pct": score_pct,
+        "by_topic": by_topic,
+    }
+
+
+# --- #9: Monthly Meta-Reflection ---
+
+async def run_monthly_meta_reflection(ask_llm_fn) -> list[dict]:
+    """Run monthly meta-reflection — analyze whether weekly insights are actionable.
+
+    Args:
+        ask_llm_fn: async callable(query, context, system_extra) -> str
+
+    Returns:
+        List of meta-insight dicts.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Gather last 30 days of insights
+    insights = conn.execute(
+        "SELECT category, summary, evidence, recommendation, status, created_at "
+        "FROM insights WHERE created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    if len(insights) < 2:
+        log.info("Monthly meta-reflection skipped — insufficient insights (%d)", len(insights))
+        return []
+
+    # Check which applied insights actually stuck (preferences still active)
+    applied_insights = [i for i in insights if i["status"] == "applied"]
+    current_prefs = list_preferences()
+    active_pref_keys = {p["key"] for p in current_prefs if p["confidence"] >= 0.3}
+
+    stuck_count = 0
+    for ai in applied_insights:
+        # Simple heuristic: if any preference key relates to the insight category, it stuck
+        for key in active_pref_keys:
+            if ai["category"] in key or key in ai["summary"].lower():
+                stuck_count += 1
+                break
+
+    insight_data = [
+        {
+            "category": i["category"],
+            "summary": i["summary"],
+            "status": i["status"],
+            "created_at": i["created_at"],
+        }
+        for i in insights
+    ]
+
+    prompt = f"""Analyze the last 30 days of Khalil's self-improvement insights for meta-patterns.
+
+## Insights Generated ({len(insights)} total)
+{json.dumps(insight_data, indent=2)}
+
+## Applied Insights That Stuck: {stuck_count}/{len(applied_insights)}
+## Active Preferences: {len(current_prefs)}
+
+Questions to answer:
+1. Are the weekly insights actually actionable, or too vague?
+2. Are there recurring themes that suggest a systemic issue?
+3. Which categories produce the most useful insights?
+4. What should change about the reflection process itself?
+
+Respond with ONLY a JSON array of meta-insights. Each must have:
+- "category": "meta"
+- "summary": one-sentence finding
+- "recommendation": concrete change to make
+Maximum 3 meta-insights."""
+
+    response = await ask_llm_fn(
+        prompt,
+        "",
+        system_extra="You are analyzing AI self-improvement data. Respond with ONLY a JSON array.",
+    )
+
+    if not response or response.startswith("⚠️"):
+        log.error("Monthly meta-reflection LLM call failed: %s", response[:200] if response else "empty")
+        return []
+
+    try:
+        if "```" in response:
+            response = response.split("```")[1]
+            if response.startswith("json"):
+                response = response[4:]
+        meta_insights = json.loads(response.strip())
+    except (json.JSONDecodeError, IndexError):
+        log.error("Monthly meta-reflection returned invalid JSON: %s", response[:200])
+        return []
+
+    if not isinstance(meta_insights, list):
+        return []
+
+    stored = []
+    for mi in meta_insights[:3]:
+        summary = mi.get("summary", "")
+        recommendation = mi.get("recommendation", "")
+        if not summary:
+            continue
+        insight_id = store_insight("meta", summary, "Monthly meta-reflection", recommendation)
+        mi["id"] = insight_id
+        stored.append(mi)
+
+    log.info("Monthly meta-reflection complete: %d meta-insights generated", len(stored))
+    return stored
+
+
 def decay_preferences():
     """Monthly confidence decay — preferences not re-confirmed lose confidence."""
     conn = _get_conn()

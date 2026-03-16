@@ -565,6 +565,17 @@ _ACTION_PATTERNS = [
     (r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?file\b", "spotlight"),
     (r"\bfind\s+(?:all\s+)?(?:my\s+)?\w+\s+files?\b", "spotlight"),
     (r"\bwhere\s+is\s+(?:my\s+|the\s+)?\w+\b.*\bfile\b", "spotlight"),
+    # #52: GitHub issue creation
+    (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bfile\s+(?:an?\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bnew\s+(?:github\s+)?issue\b", "gh_issue"),
+    # #53: GitHub PR status monitoring
+    (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    (r"\b(?:pr|pull\s+request)\s+status\b", "gh_pr_status"),
+    (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    # #1: Explicit feedback
+    (r"^/feedback\b", "feedback"),
 ]
 
 
@@ -575,6 +586,38 @@ def _looks_like_action(text: str) -> str | None:
         if re.search(pattern, text_lower):
             return hint
     return None
+
+
+# --- #65: Conversation Topic Detection ---
+
+_TOPIC_KEYWORDS = {
+    "work": {"meeting", "sprint", "jira", "standup", "project", "deadline", "team", "slack",
+             "manager", "review", "deploy", "release", "roadmap", "okr", "backlog", "ticket"},
+    "finance": {"money", "investment", "stock", "tax", "budget", "expense", "salary", "bank",
+                "portfolio", "crypto", "dividend", "savings", "mortgage", "rrsp", "tfsa"},
+    "health": {"exercise", "gym", "workout", "diet", "sleep", "doctor", "weight", "run",
+               "meditation", "calories", "steps", "health", "medical", "prescription"},
+    "tech": {"code", "python", "javascript", "api", "database", "server", "bug", "git",
+             "docker", "deploy", "framework", "library", "debug", "refactor", "algorithm"},
+    "family": {"kids", "wife", "husband", "family", "school", "daycare", "children", "parent",
+               "birthday", "vacation", "home", "weekend", "dinner", "park"},
+}
+
+
+def classify_message_topic(text: str) -> str:
+    """#65: Classify a message into a topic using keyword matching.
+
+    Returns one of: 'work', 'finance', 'health', 'tech', 'family', 'general'.
+    """
+    words = set(re.findall(r'\b\w+\b', text.lower()))
+    best_topic = "general"
+    best_score = 0
+    for topic, keywords in _TOPIC_KEYWORDS.items():
+        score = len(words & keywords)
+        if score > best_score:
+            best_score = score
+            best_topic = topic
+    return best_topic
 
 
 # App name normalization for open -a
@@ -678,6 +721,17 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         search_term = m.group(1).strip()
         if search_term:
             return {"action": "shell", "command": f"mdfind 'kMDItemFSName == \"{search_term}\"'", "description": f"Search for file: {search_term}"}
+
+    # #53: GitHub PR status — "check my PRs", "PR status"
+    if re.search(r"\b(?:check\s+(?:my\s+)?(?:pull\s+requests?|prs?)|(?:pr|pull\s+request)\s+status|list\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?))\b", text_lower):
+        return {"action": "shell", "command": "gh pr list --author=@me --state=open", "description": "List your open pull requests"}
+
+    # #52: GitHub issue creation — "create issue <title>"
+    m = re.search(r"\b(?:create|open|file|new)\s+(?:a\s+)?(?:github\s+)?issue\s+(?:for\s+|about\s+|titled?\s+)?['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "shell", "command": f"gh issue create --title '{title}'", "description": f"Create GitHub issue: {title}"}
 
     return None
 
@@ -2278,6 +2332,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
+    # #1: Conversation success scoring — record completion signal
+    try:
+        topic = classify_message_topic(query)
+        record_signal("conversation_success", {
+            "query": query[:200],
+            "topic": topic,
+            "latency_ms": round(_latency_ms, 1),
+            "had_correction": any(re.search(p, query.lower()) for p in _CORRECTION_PATTERNS),
+        })
+    except Exception:
+        pass
+
+
+async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """#1: Record explicit user feedback on conversation quality."""
+    from learning import record_signal
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /feedback <positive|negative> [comment]\n"
+            "Example: /feedback positive Great answer!\n"
+            "Example: /feedback negative Didn't understand my question"
+        )
+        return
+    sentiment = args[0].lower()
+    if sentiment not in ("positive", "negative"):
+        await update.message.reply_text("Feedback must be 'positive' or 'negative'.")
+        return
+    comment = " ".join(args[1:]) if len(args) > 1 else ""
+    score = 1.0 if sentiment == "positive" else -1.0
+    record_signal("explicit_feedback", {
+        "sentiment": sentiment,
+        "comment": comment[:500],
+    }, value=score)
+    await update.message.reply_text(f"Thanks for the feedback! Recorded as {sentiment}.")
+
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -2393,6 +2483,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("backup", cmd_backup))
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
+    application.add_handler(CommandHandler("feedback", cmd_feedback))
 
     # Dynamically register extension handlers
     _load_extensions(application)
