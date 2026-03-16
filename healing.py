@@ -379,6 +379,55 @@ IMPORTS: <any new imports needed, one per line, or "none">
     return code, explanation
 
 
+# --- #19: Healing Confidence Scoring ---
+
+def score_healing_confidence(diagnosis: dict, patched_source: str) -> float:
+    """Score a healing patch's confidence based on similarity to past successful heals.
+
+    Returns a score between 0.0 and 1.0. Higher = more confident.
+    Factors:
+    - Past heals for same fingerprint pattern: +0.3
+    - Patch size (smaller = more confident): +0.2 to +0.3
+    - Signal count (more signals = clearer pattern): +0.1 to +0.3
+    """
+    conn = _get_conn()
+    score = 0.1  # Base confidence
+
+    fingerprint = diagnosis.get("fingerprint", "")
+    failure_count = diagnosis.get("failure_count", 0)
+
+    # Factor 1: Past successful heals for similar patterns
+    try:
+        past_heals = conn.execute(
+            "SELECT COUNT(*) FROM insights WHERE category = 'self_heal' "
+            "AND summary NOT LIKE '%failed_heal%' AND evidence LIKE ?",
+            (f"%{fingerprint.split(':')[0]}%",),
+        ).fetchone()[0]
+        if past_heals > 0:
+            score += min(0.3, past_heals * 0.1)
+    except Exception:
+        pass
+
+    # Factor 2: Patch size — smaller patches are more likely correct
+    lines = patched_source.strip().count("\n") + 1
+    if lines <= 10:
+        score += 0.3
+    elif lines <= 30:
+        score += 0.2
+    else:
+        score += 0.1
+
+    # Factor 3: Signal count — more evidence = clearer pattern
+    if failure_count >= 5:
+        score += 0.3
+    elif failure_count >= 3:
+        score += 0.2
+    else:
+        score += 0.1
+
+    return min(1.0, round(score, 2))
+
+
 # --- Patch Validation ---
 
 def validate_patch(original_source: str, patched_source: str, target_file: Path) -> tuple[bool, str]:
