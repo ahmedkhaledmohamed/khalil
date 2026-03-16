@@ -152,24 +152,42 @@ class AutonomyController:
 
         # Hard guardrails always need approval
         if action_name in HARD_GUARDRAILS:
-            return True
-
-        # Dangerous always needs approval
-        if action_type == ActionType.DANGEROUS:
-            return True
-
-        # Read is always auto-approved
-        if action_type == ActionType.READ:
-            return False
-
-        # Write depends on level
-        if effective_level == AutonomyLevel.SUPERVISED:
-            return True
+            needs = True
+            reason = "hard_guardrail"
+        elif action_type == ActionType.DANGEROUS:
+            needs = True
+            reason = "dangerous_action"
+        elif action_type == ActionType.READ:
+            needs = False
+            reason = "read_auto_approved"
+        elif effective_level == AutonomyLevel.SUPERVISED:
+            needs = True
+            reason = "supervised_mode"
         elif effective_level == AutonomyLevel.GUIDED:
-            # Safe writes auto-approved, risky writes need approval
-            return action_name not in SAFE_WRITES
+            needs = action_name not in SAFE_WRITES
+            reason = "guided_risky" if needs else "guided_safe_write"
         else:  # AUTONOMOUS
-            return False
+            needs = False
+            reason = "autonomous_mode"
+
+        # #8: Decision journal — log every autonomy decision with reasoning
+        try:
+            self.conn.execute(
+                "INSERT INTO audit_log (action_type, description, payload, result, autonomy_level) "
+                "VALUES ('autonomy_decision', ?, ?, ?, ?)",
+                (
+                    f"{'APPROVAL_NEEDED' if needs else 'AUTO_APPROVED'}: {action_name}",
+                    json.dumps({"action": action_name, "action_type": action_type.value,
+                                "effective_level": effective_level.name, "reason": reason}),
+                    reason,
+                    effective_level.name,
+                ),
+            )
+            self.conn.commit()
+        except Exception:
+            pass  # Non-critical — don't block the decision
+
+        return needs
 
     def create_pending_action(self, action_name: str, description: str, payload: dict | None = None) -> int:
         """Queue an action for approval. Returns the action ID."""
@@ -228,6 +246,19 @@ class AutonomyController:
             except Exception:
                 pass
         return result.rowcount > 0
+
+    def get_expiring_actions(self, warn_seconds: int = 300) -> list[dict]:
+        """Get pending actions that will expire within warn_seconds. For pre-expiry reminders."""
+        now = datetime.utcnow()
+        expiry_cutoff = now - timedelta(seconds=PENDING_TTL_SECONDS - warn_seconds)
+        expiry_str = expiry_cutoff.strftime("%Y-%m-%d %H:%M:%S")
+        too_old = (now - timedelta(seconds=PENDING_TTL_SECONDS)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = self.conn.execute(
+            "SELECT id, action_type, description, created_at FROM pending_actions "
+            "WHERE status = 'pending' AND created_at < ? AND created_at > ?",
+            (expiry_str, too_old),
+        ).fetchall()
+        return [{"id": r[0], "action_type": r[1], "description": r[2], "created_at": r[3]} for r in rows]
 
     def expire_stale_actions(self) -> int:
         """Expire pending actions older than PENDING_TTL_SECONDS. Returns count expired."""

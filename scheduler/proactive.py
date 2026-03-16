@@ -5,9 +5,30 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from config import FINANCE_DIR, GOALS_DIR, TIMEZONE
+from config import DB_PATH, FINANCE_DIR, GOALS_DIR, TIMEZONE
 
 log = logging.getLogger("khalil.scheduler.proactive")
+
+# #89: Configurable alert thresholds — defaults can be overridden via settings table
+_DEFAULT_THRESHOLDS = {
+    "stale_goals_days": 90,
+    "stale_projects_days": 60,
+    "stale_portfolio_days": 60,
+}
+
+
+def _get_threshold(key: str) -> int:
+    """Get a threshold from settings, falling back to default."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(DB_PATH))
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (f"threshold_{key}",)).fetchone()
+        conn.close()
+        if row:
+            return max(1, int(row[0]))
+    except Exception:
+        pass
+    return _DEFAULT_THRESHOLDS.get(key, 60)
 
 
 def check_stale_goals() -> str | None:
@@ -18,7 +39,8 @@ def check_stale_goals() -> str | None:
 
     mtime = datetime.fromtimestamp(goals_file.stat().st_mtime, tz=ZoneInfo(TIMEZONE))
     days_old = (datetime.now(ZoneInfo(TIMEZONE)) - mtime).days
-    if days_old > 90:
+    threshold = _get_threshold("stale_goals_days")
+    if days_old > threshold:
         return f"🎯 Goals file hasn't been updated in {days_old} days. Run /goals review."
 
     # Check if goals are actually empty
@@ -48,7 +70,8 @@ def check_stale_projects() -> str | None:
 
         mtime = datetime.fromtimestamp(filepath.stat().st_mtime, tz=ZoneInfo(TIMEZONE))
         days_old = (now - mtime).days
-        if days_old > 60:
+        project_threshold = _get_threshold("stale_projects_days")
+        if days_old > project_threshold:
             stale.append(f"{info['name']}: {len(tasks)} open tasks, last touched {days_old}d ago")
 
     if stale:
@@ -81,7 +104,8 @@ def check_stale_portfolio() -> str | None:
     latest = portfolio_files[0]
     mtime = datetime.fromtimestamp(latest.stat().st_mtime, tz=ZoneInfo(TIMEZONE))
     days_old = (datetime.now(ZoneInfo(TIMEZONE)) - mtime).days
-    if days_old > 60:
+    portfolio_threshold = _get_threshold("stale_portfolio_days")
+    if days_old > portfolio_threshold:
         return f"💰 Portfolio snapshot ({latest.name}) is {days_old} days old. Time for an update."
     return None
 

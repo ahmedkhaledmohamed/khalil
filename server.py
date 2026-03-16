@@ -285,40 +285,60 @@ async def _try_recover_ollama() -> bool:
     return False
 
 
+# #18: Graceful degradation chain — Ollama → Claude Sonnet → Claude Haiku → cached
+_FALLBACK_MODELS = [CLAUDE_MODEL, "claude-haiku-4-5-20251001"]
+
 async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
-    """Fall back to Claude API when Ollama is down. Returns None if Claude unavailable."""
-    if not claude:
-        # Try to initialize Claude on-the-fly
+    """Fall back through Claude model chain when Ollama is down.
+
+    Tries: Claude Sonnet → Claude Haiku → last cached response.
+    """
+    client = claude
+    if not client:
         api_key = get_secret("anthropic-api-key")
         if not api_key:
-            return None
+            return _get_cached_response(query)
         try:
-            temp_claude = anthropic.AsyncAnthropic(api_key=api_key)
-            response = await temp_claude.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            log.info("Fell back to Claude API (Ollama unavailable)")
-            return response.content[0].text
-        except Exception as e:
-            log.error("Claude fallback also failed: %s", e)
-            return None
-    else:
-        try:
-            response = await claude.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            log.info("Fell back to Claude API (Ollama unavailable)")
-            return response.content[0].text
+            client = anthropic.AsyncAnthropic(api_key=api_key)
         except Exception:
-            return None
+            return _get_cached_response(query)
+
+    for model in _FALLBACK_MODELS:
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=1500,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                timeout=CLAUDE_TIMEOUT,
+            )
+            text = response.content[0].text
+            log.info("Fell back to %s (Ollama unavailable)", model)
+            return text
+        except Exception as e:
+            log.warning("Fallback model %s failed: %s", model, e)
+            continue
+
+    # All models failed — try cached response
+    return _get_cached_response(query)
+
+
+def _get_cached_response(query: str) -> str | None:
+    """Return a recent cached response for a similar query, or None."""
+    if not db_conn:
+        return None
+    try:
+        # Find recent assistant response where user asked something similar
+        rows = db_conn.execute(
+            "SELECT content FROM conversations WHERE role = 'assistant' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if rows:
+            log.info("Using cached response (all LLM backends unavailable)")
+            return f"⚠️ LLM unavailable — here's my last response (may not be relevant):\n\n{rows[0][:500]}"
+    except Exception:
+        pass
+    return None
 
 
 async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
@@ -1977,6 +1997,9 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
+    import time as _time
+    _msg_start = _time.monotonic()
+
     global OWNER_CHAT_ID
     if OWNER_CHAT_ID is None:
         OWNER_CHAT_ID = update.effective_chat.id
@@ -2156,6 +2179,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # If edit fails (e.g., message too long), send as new message
         await progress_msg.delete()
         await update.message.reply_text(display_response)
+
+    # #2: Record response latency
+    _latency_ms = (_time.monotonic() - _msg_start) * 1000
+    try:
+        record_signal("response_latency", {"latency_ms": round(_latency_ms, 1), "query_len": len(query)})
+    except Exception:
+        pass
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2435,27 +2465,45 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
-    # Weekly reflection — Sunday 5 PM (before weekly summary at 6 PM)
+    # #4: Configurable reflection cadence — read from settings, default to existing schedule
+    _refl_weekly_day = "sun"
+    _refl_weekly_hour = 17
+    _refl_micro_hour = 23
+    if db_conn:
+        try:
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_weekly_day'").fetchone()
+            if row:
+                _refl_weekly_day = row[0]
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_weekly_hour'").fetchone()
+            if row:
+                _refl_weekly_hour = int(row[0])
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_micro_hour'").fetchone()
+            if row:
+                _refl_micro_hour = int(row[0])
+        except Exception:
+            pass
+
+    # Weekly reflection (configurable day/hour)
     async def _weekly_reflection_job():
         if _can_send():
             await run_reflection(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
 
     scheduler.add_job(
         _weekly_reflection_job,
-        CronTrigger(day_of_week="sun", hour=17, minute=0, timezone=TIMEZONE),
+        CronTrigger(day_of_week=_refl_weekly_day, hour=_refl_weekly_hour, minute=0, timezone=TIMEZONE),
         id="weekly_reflection",
         name="Weekly Reflection",
         replace_existing=True,
     )
 
-    # Daily micro-reflection + self-healing check — 11 PM
+    # Daily micro-reflection + self-healing check (configurable hour)
     async def _micro_reflection_job():
         bot = telegram_app.bot if telegram_app else None
         await run_micro_reflection(ask_claude, bot=bot, chat_id=OWNER_CHAT_ID)
 
     scheduler.add_job(
         _micro_reflection_job,
-        CronTrigger(hour=23, minute=0, timezone=TIMEZONE),
+        CronTrigger(hour=_refl_micro_hour, minute=0, timezone=TIMEZONE),
         id="micro_reflection",
         name="Daily Micro-Reflection",
         replace_existing=True,

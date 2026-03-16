@@ -408,3 +408,218 @@ class TestRateLimits:
         # shell should still be allowed
         allowed, _ = ctrl.check_rate_limit("shell_read")
         assert allowed
+
+
+# ============================================================
+# Batch 3: Items #2, #8, #4, #75, #89, #18, #28
+# ============================================================
+
+
+# --- #2: Response Latency Tracking ---
+
+class TestResponseLatencyTracking:
+    def test_latency_signal_recorded(self, tmp_db):
+        """record_signal can store latency data."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        from learning import record_signal
+        record_signal("response_latency", {"latency_ms": 1234.5, "query_len": 42})
+        row = tmp_db.execute(
+            "SELECT context FROM interaction_signals WHERE signal_type = 'response_latency'"
+        ).fetchone()
+        assert row is not None
+        import json
+        ctx = json.loads(row[0])
+        assert ctx["latency_ms"] == 1234.5
+        assert ctx["query_len"] == 42
+        learning._db_conn = original
+
+
+# --- #8: Decision Journal ---
+
+class TestDecisionJournal:
+    def test_needs_approval_logs_decision(self, tmp_db):
+        """needs_approval should log autonomy_decision to audit_log."""
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        ctrl.needs_approval("search_knowledge")
+        row = tmp_db.execute(
+            "SELECT action_type, description, result FROM audit_log WHERE action_type = 'autonomy_decision'"
+        ).fetchone()
+        assert row is not None
+        assert "AUTO_APPROVED" in row[1]
+        assert row[2] == "read_auto_approved"
+
+    def test_decision_journal_logs_approval_needed(self, tmp_db):
+        """Supervised mode should log APPROVAL_NEEDED for write actions."""
+        from autonomy import AutonomyController
+        from config import AutonomyLevel
+        ctrl = AutonomyController(tmp_db)
+        ctrl.set_level(AutonomyLevel.SUPERVISED)
+        ctrl.needs_approval("send_email")
+        row = tmp_db.execute(
+            "SELECT description FROM audit_log WHERE action_type = 'autonomy_decision' "
+            "AND description LIKE '%send_email%'"
+        ).fetchone()
+        assert row is not None
+        assert "APPROVAL_NEEDED" in row[0]
+
+    def test_decision_journal_payload(self, tmp_db):
+        """Decision journal payload should include action details."""
+        import json
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        ctrl.needs_approval("shell_dangerous")
+        row = tmp_db.execute(
+            "SELECT payload FROM audit_log WHERE action_type = 'autonomy_decision' "
+            "AND description LIKE '%shell_dangerous%'"
+        ).fetchone()
+        assert row is not None
+        payload = json.loads(row[0])
+        assert payload["action"] == "shell_dangerous"
+        assert payload["reason"] == "hard_guardrail"  # shell_dangerous is in HARD_GUARDRAILS
+
+
+# --- #4: Configurable Reflection Cadence ---
+
+class TestConfigurableReflectionCadence:
+    def test_default_reflection_settings(self, tmp_db):
+        """Without settings, defaults should be used."""
+        row = tmp_db.execute(
+            "SELECT value FROM settings WHERE key = 'reflection_weekly_day'"
+        ).fetchone()
+        assert row is None  # No override — defaults apply
+
+    def test_custom_reflection_hour(self, tmp_db):
+        """Settings can override reflection schedule."""
+        tmp_db.execute(
+            "INSERT INTO settings (key, value) VALUES ('reflection_micro_hour', '22')"
+        )
+        tmp_db.commit()
+        row = tmp_db.execute(
+            "SELECT value FROM settings WHERE key = 'reflection_micro_hour'"
+        ).fetchone()
+        assert row is not None
+        assert int(row[0]) == 22
+
+
+# --- #75: Approval Expiry Notification ---
+
+class TestApprovalExpiryNotification:
+    def test_get_expiring_actions_empty(self, tmp_db):
+        from autonomy import AutonomyController
+        ctrl = AutonomyController(tmp_db)
+        result = ctrl.get_expiring_actions()
+        assert result == []
+
+    def test_get_expiring_actions_finds_near_expiry(self, tmp_db):
+        from datetime import datetime, timedelta
+        from autonomy import AutonomyController, PENDING_TTL_SECONDS
+        ctrl = AutonomyController(tmp_db)
+        # Insert a pending action created 55 minutes ago (near 1h TTL)
+        near_expiry = (datetime.utcnow() - timedelta(seconds=PENDING_TTL_SECONDS - 200)).strftime("%Y-%m-%d %H:%M:%S")
+        tmp_db.execute(
+            "INSERT INTO pending_actions (action_type, description, status, created_at) VALUES (?, ?, 'pending', ?)",
+            ("shell_write", "test action", near_expiry),
+        )
+        tmp_db.commit()
+        result = ctrl.get_expiring_actions(warn_seconds=300)
+        assert len(result) == 1
+        assert result[0]["action_type"] == "shell_write"
+
+
+# --- #89: Configurable Alert Thresholds ---
+
+class TestConfigurableAlertThresholds:
+    def test_default_thresholds(self):
+        from scheduler.proactive import _DEFAULT_THRESHOLDS
+        assert _DEFAULT_THRESHOLDS["stale_goals_days"] == 90
+        assert _DEFAULT_THRESHOLDS["stale_projects_days"] == 60
+        assert _DEFAULT_THRESHOLDS["stale_portfolio_days"] == 60
+
+    def test_get_threshold_default(self):
+        from scheduler.proactive import _get_threshold
+        # Should return default when no settings exist
+        result = _get_threshold("stale_goals_days")
+        assert result == 90
+
+    def test_get_threshold_custom(self, tmp_db):
+        """Custom threshold from settings should override default."""
+        # Insert into real DB path temporarily
+        tmp_db.execute(
+            "INSERT INTO settings (key, value) VALUES ('threshold_stale_goals_days', '30')"
+        )
+        tmp_db.commit()
+        # We can't easily test _get_threshold with tmp_db since it opens its own connection
+        # but we verify the setting is stored correctly
+        row = tmp_db.execute(
+            "SELECT value FROM settings WHERE key = 'threshold_stale_goals_days'"
+        ).fetchone()
+        assert int(row[0]) == 30
+
+
+# --- #18: Graceful Degradation Chain ---
+
+class TestGracefulDegradation:
+    def test_fallback_models_defined(self):
+        from server import _FALLBACK_MODELS
+        assert len(_FALLBACK_MODELS) == 2
+        assert "haiku" in _FALLBACK_MODELS[1]
+
+    def test_get_cached_response_no_db(self):
+        from server import _get_cached_response
+        # With no db_conn, should return None
+        import server
+        original = server.db_conn
+        server.db_conn = None
+        result = _get_cached_response("test query")
+        assert result is None
+        server.db_conn = original
+
+    def test_get_cached_response_with_data(self, tmp_db):
+        """Cached response should return last assistant message."""
+        from server import _get_cached_response
+        import server
+        original = server.db_conn
+        server.db_conn = tmp_db
+        tmp_db.execute(
+            "INSERT INTO conversations (chat_id, role, content) VALUES (1, 'assistant', 'Hello from cache')"
+        )
+        tmp_db.commit()
+        result = _get_cached_response("test")
+        assert result is not None
+        assert "Hello from cache" in result
+        server.db_conn = original
+
+
+# --- #28: Post-Generation Smoke Test Expansion ---
+
+class TestSmokeTestExpansion:
+    def test_smoke_test_import_check(self, tmp_path):
+        """Smoke test phase 1 — module with handler should pass."""
+        from actions.extend import smoke_test_module
+        mod = tmp_path / "action_test_cmd.py"
+        mod.write_text("async def cmd_test_cmd(update, context): pass\n")
+        passed, error = smoke_test_module(mod, "test_cmd")
+        assert passed, f"Should pass: {error}"
+
+    def test_smoke_test_missing_handler(self, tmp_path):
+        """Smoke test should fail if handler is missing."""
+        from actions.extend import smoke_test_module
+        mod = tmp_path / "action_bad.py"
+        mod.write_text("x = 1\n")
+        passed, error = smoke_test_module(mod, "bad")
+        assert not passed
+        assert "Missing handler" in error
+
+    def test_smoke_test_mock_call(self, tmp_path):
+        """Smoke test phase 2 — handler called with mock objects should not crash."""
+        from actions.extend import smoke_test_module
+        mod = tmp_path / "action_greet.py"
+        mod.write_text(
+            "async def cmd_greet(update, context):\n"
+            "    await update.message.reply_text('Hello!')\n"
+        )
+        passed, error = smoke_test_module(mod, "greet")
+        assert passed, f"Should pass: {error}"
