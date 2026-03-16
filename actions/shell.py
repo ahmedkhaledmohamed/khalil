@@ -120,6 +120,7 @@ SAFE_PREFIXES = [
     "ioreg ",
     "screencapture ",
     "pbpaste",
+    "osascript ",
 ]
 
 
@@ -188,6 +189,39 @@ async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT)
 
 
 # --- Output Formatting ---
+
+# --- Error Classification ---
+
+_TRANSIENT_PATTERNS = [
+    "timed out", "resource busy", "try again", "connection refused",
+    "resource temporarily unavailable", "interrupted system call",
+]
+
+_PERMANENT_PATTERNS = [
+    "permission denied", "operation not permitted", "command not found",
+    "no such file or directory", "not a directory",
+]
+
+# Severity ordering for escalation check
+_ACTION_SEVERITY = {ActionType.READ: 0, ActionType.WRITE: 1, ActionType.DANGEROUS: 2}
+
+
+def classify_error(returncode: int, stderr: str) -> str:
+    """Classify a shell error as 'transient', 'correctable', or 'permanent'."""
+    stderr_lower = stderr.lower()
+    if any(p in stderr_lower for p in _TRANSIENT_PATTERNS):
+        return "transient"
+    if any(p in stderr_lower for p in _PERMANENT_PATTERNS):
+        return "permanent"
+    return "correctable"
+
+
+def would_escalate(original_cmd: str, corrected_cmd: str) -> bool:
+    """Return True if the corrected command has higher severity than the original."""
+    orig = _ACTION_SEVERITY[classify_command(original_cmd)]
+    corr = _ACTION_SEVERITY[classify_command(corrected_cmd)]
+    return corr > orig
+
 
 def format_output(result: dict, cmd: str) -> str:
     """Format shell output for Telegram."""
