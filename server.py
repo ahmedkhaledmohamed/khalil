@@ -615,6 +615,11 @@ _ACTION_PATTERNS = [
     (r"\btodo\s+list\b", "tasks"),
     (r"\badd\s+(?:a\s+)?task\b", "tasks"),
     (r"\bcreate\s+(?:a\s+)?task\b", "tasks"),
+    # #44: Login item management
+    (r"\b(?:list|show|get)\s+(?:my\s+)?(?:login|startup)\s+items?\b", "shell"),
+    (r"\bstartup\s+items?\b", "shell"),
+    (r"\bshow\s+launch\s+agents?\b", "shell"),
+    (r"\blist\s+launch\s+agents?\b", "shell"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
 ]
@@ -771,6 +776,14 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     if re.search(r"\bpublic\s+ip\b", text_lower) or re.search(r"\bexternal\s+ip\b", text_lower):
         return {"action": "shell", "command": "curl -s ifconfig.me", "description": "Get public IP address"}
+
+    # #44: Login items / launch agents
+    if re.search(r"\b(?:list|show|get)\s+(?:my\s+)?(?:login|startup)\s+items?\b", text_lower) or \
+       re.search(r"\bstartup\s+items?\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"System Events\" to get the name of every login item'", "description": "List login items"}
+
+    if re.search(r"\b(?:show|list)\s+launch\s+agents?\b", text_lower):
+        return {"action": "shell", "command": "ls ~/Library/LaunchAgents/", "description": "Show launch agents"}
 
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \

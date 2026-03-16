@@ -1524,3 +1524,140 @@ def extract_structured_data(email_content: str) -> dict:
         return {"type": "meeting", "fields": fields}
 
     return {"type": "unknown", "fields": {}}
+
+
+# --- #93: Expense Tracking from Email ---
+
+
+def track_expenses_from_emails(days: int = 30) -> dict:
+    """Extract and aggregate expense data from recent email documents.
+
+    Uses extract_structured_data() on recent email documents, filters for
+    receipt-type extractions, and aggregates by vendor and month.
+
+    Returns {total, count, by_vendor: [{vendor, amount, count}], by_month: [{month, total}]}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT content FROM documents WHERE category LIKE 'email%' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    vendor_agg: dict[str, dict] = {}  # vendor -> {amount, count}
+    month_agg: dict[str, float] = {}  # YYYY-MM -> total
+    total = 0.0
+    count = 0
+
+    for row in rows:
+        content = row["content"] if isinstance(row, sqlite3.Row) else row[0]
+        result = extract_structured_data(content)
+        if result["type"] != "receipt":
+            continue
+
+        fields = result["fields"]
+        amount_str = fields.get("amount")
+        if not amount_str:
+            continue
+
+        try:
+            amount = float(_re_module.sub(r"[^\d.]", "", amount_str))
+        except (ValueError, TypeError):
+            continue
+
+        vendor = fields.get("vendor") or "Unknown"
+        date_str = fields.get("date") or ""
+
+        total += amount
+        count += 1
+
+        # Aggregate by vendor
+        if vendor not in vendor_agg:
+            vendor_agg[vendor] = {"amount": 0.0, "count": 0}
+        vendor_agg[vendor]["amount"] += amount
+        vendor_agg[vendor]["count"] += 1
+
+        # Aggregate by month
+        month_match = _re_module.search(r"(\d{4})-(\d{2})", date_str)
+        if month_match:
+            month_key = f"{month_match.group(1)}-{month_match.group(2)}"
+        else:
+            month_key = datetime.utcnow().strftime("%Y-%m")
+        month_agg[month_key] = month_agg.get(month_key, 0.0) + amount
+
+    by_vendor = sorted(
+        [{"vendor": v, "amount": d["amount"], "count": d["count"]} for v, d in vendor_agg.items()],
+        key=lambda x: x["amount"],
+        reverse=True,
+    )
+    by_month = sorted(
+        [{"month": m, "total": t} for m, t in month_agg.items()],
+        key=lambda x: x["month"],
+    )
+
+    return {"total": total, "count": count, "by_vendor": by_vendor, "by_month": by_month}
+
+
+# --- #97: Travel Context Mode ---
+
+
+def detect_travel_mode() -> dict:
+    """Detect if the user is currently traveling based on recent documents.
+
+    Searches recent emails and calendar events for travel-related keywords.
+    Returns {traveling: bool, destination: str|None, dates: str|None, context: str}.
+    """
+    conn = _get_conn()
+    # Look at documents from the last 7 days
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT title, content FROM documents "
+        "WHERE (category LIKE 'email%' OR category LIKE 'calendar%') "
+        "AND created_at > ? ORDER BY created_at DESC LIMIT 100",
+        (cutoff,),
+    ).fetchall()
+
+    travel_keywords = [
+        "flight", "boarding pass", "hotel", "airbnb", "check-in",
+        "itinerary", "booking confirmation", "reservation",
+        "out of office", "ooo", "traveling", "airport",
+    ]
+    calendar_travel_keywords = ["flight", "travel", "hotel", "airport", "ooo", "out of office"]
+
+    travel_hits = []
+    destination = None
+    dates = None
+
+    for row in rows:
+        title = row["title"] if isinstance(row, sqlite3.Row) else row[0]
+        content = row["content"] if isinstance(row, sqlite3.Row) else row[1]
+        combined = f"{title} {content}".lower()
+
+        if any(kw in combined for kw in travel_keywords):
+            travel_hits.append(combined[:200])
+
+            # Try to extract destination from flight data
+            if destination is None:
+                result = extract_structured_data(content)
+                if result["type"] == "flight":
+                    destination = result["fields"].get("arrival")
+                    dates = result["fields"].get("date")
+
+    if not travel_hits:
+        return {"traveling": False, "destination": None, "dates": None, "context": "No travel signals found."}
+
+    context_parts = []
+    if destination:
+        context_parts.append(f"Destination: {destination}")
+    if dates:
+        context_parts.append(f"Dates: {dates}")
+    context_parts.append(f"Found {len(travel_hits)} travel-related document(s) in last 7 days.")
+
+    return {
+        "traveling": True,
+        "destination": destination,
+        "dates": dates,
+        "context": " ".join(context_parts),
+    }
