@@ -693,11 +693,13 @@ async def generate_extension_tests(spec: dict, module_source: str) -> str | None
 
 
 def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
-    """Import the module in a subprocess and verify the handler function exists.
+    """Import the module in a subprocess, verify handler exists, and call it with mocks.
 
     Returns (passed, error_message).
+    #28: Enhanced smoke test — actually invokes the handler with mock objects.
     """
     handler_name = f"cmd_{command_name}"
+    # Phase 1: Import check + handler exists
     test_script = (
         f"import sys; sys.path.insert(0, {str(module_path.parent)!r}); "
         f"mod = __import__({module_path.stem!r}); "
@@ -714,11 +716,53 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
         if result.returncode != 0:
             error = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
             return False, f"Smoke test failed: {error}"
-        return True, ""
     except subprocess.TimeoutExpired:
         return False, "Smoke test timed out (10s)"
     except Exception as e:
         return False, f"Smoke test error: {e}"
+
+    # Phase 2: Call handler with mock Update/Context (catch crashes, not logic errors)
+    khalil_dir = str(module_path.parent.parent)
+    mock_test_script = f"""
+import sys, asyncio
+sys.path.insert(0, {khalil_dir!r})
+sys.path.insert(0, {str(module_path.parent)!r})
+from unittest.mock import AsyncMock, MagicMock
+mod = __import__({module_path.stem!r})
+handler = getattr(mod, {handler_name!r})
+update = MagicMock()
+update.message.text = "/test"
+update.message.reply_text = AsyncMock()
+update.message.reply_html = AsyncMock()
+update.effective_chat.id = 12345
+context = MagicMock()
+context.args = []
+context.bot.send_message = AsyncMock()
+try:
+    asyncio.run(handler(update, context))
+except Exception as e:
+    # Handler may fail due to missing DB/API — that's OK, we're checking for crashes
+    if isinstance(e, (ImportError, SyntaxError, TypeError, AttributeError)):
+        print(f"FAIL: {{type(e).__name__}}: {{e}}", file=sys.stderr)
+        sys.exit(1)
+"""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", mock_test_script],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            error = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
+            if error.startswith("FAIL:"):
+                return False, f"Smoke test (mock call) failed: {error[5:].strip()}"
+            # Non-FAIL errors (e.g., missing API keys) are acceptable
+            log.info("Smoke test mock call returned non-zero but not a code error: %s", error[:200])
+    except subprocess.TimeoutExpired:
+        log.info("Smoke test mock call timed out — handler may depend on external service")
+    except Exception:
+        pass  # Non-critical
+
+    return True, ""
 
 
 def _get_call_name(node: ast.Call) -> str | None:
