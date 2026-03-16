@@ -1656,3 +1656,618 @@ class TestTwoFactorConfirmation:
         from autonomy import AutonomyController
         ctrl = AutonomyController(tmp_db)
         assert ctrl.verify_confirmation_code(9999, "1234") is False
+
+
+# --- #41: Brew Package Management ---
+
+class TestBrewPackageManagement:
+    """Tests for brew command classification and direct intent mapping."""
+
+    def test_brew_list_is_safe(self):
+        """brew list should be classified as READ (safe)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew list") == ActionType.READ
+
+    def test_brew_info_is_safe(self):
+        """brew info <pkg> should be classified as READ (safe)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew info python") == ActionType.READ
+
+    def test_brew_search_is_safe(self):
+        """brew search <pkg> should be classified as READ (safe)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew search node") == ActionType.READ
+
+    def test_brew_install_is_write(self):
+        """brew install should be classified as WRITE (needs approval)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew install python") == ActionType.WRITE
+
+    def test_brew_upgrade_is_write(self):
+        """brew upgrade should be classified as WRITE (needs approval)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew upgrade") == ActionType.WRITE
+
+    def test_brew_uninstall_is_write(self):
+        """brew uninstall should be classified as WRITE (needs approval)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew uninstall node") == ActionType.WRITE
+
+    def test_brew_cleanup_is_write(self):
+        """brew cleanup should be classified as WRITE (needs approval)."""
+        from actions.shell import classify_command
+        from config import ActionType
+        assert classify_command("brew cleanup") == ActionType.WRITE
+
+    def test_brew_list_action_pattern(self):
+        """'list my brew packages' should match shell action pattern."""
+        from server import _looks_like_action
+        assert _looks_like_action("list my brew packages") == "shell"
+
+    def test_brew_install_action_pattern(self):
+        """'brew install wget' should match shell action pattern."""
+        from server import _looks_like_action
+        assert _looks_like_action("brew install wget") == "shell"
+
+    def test_brew_direct_intent_list(self):
+        """'list my brew packages' should map to 'brew list' command."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("list my brew packages")
+        assert result is not None
+        assert result["command"] == "brew list"
+
+    def test_brew_direct_intent_info(self):
+        """'brew info python' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew info python")
+        assert result is not None
+        assert result["command"] == "brew info python"
+
+    def test_brew_direct_intent_search(self):
+        """'brew search node' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew search node")
+        assert result is not None
+        assert result["command"] == "brew search node"
+
+    def test_brew_direct_intent_install(self):
+        """'brew install wget' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew install wget")
+        assert result is not None
+        assert result["command"] == "brew install wget"
+
+    def test_brew_direct_intent_upgrade_all(self):
+        """'brew upgrade' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew upgrade")
+        assert result is not None
+        assert result["command"] == "brew upgrade"
+
+    def test_brew_direct_intent_upgrade_specific(self):
+        """'brew upgrade python' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew upgrade python")
+        assert result is not None
+        assert result["command"] == "brew upgrade python"
+
+    def test_brew_direct_intent_uninstall(self):
+        """'brew uninstall node' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew uninstall node")
+        assert result is not None
+        assert result["command"] == "brew uninstall node"
+
+    def test_brew_direct_intent_cleanup(self):
+        """'brew cleanup' should map directly."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("brew cleanup")
+        assert result is not None
+        assert result["command"] == "brew cleanup"
+
+
+# --- #80: Gmail Action Tests ---
+
+class TestGmailActions:
+    """Tests for Gmail action module with mocked Google API responses."""
+
+    def test_extract_body_plain_text(self):
+        """extract_body should decode base64 plain text body."""
+        import base64
+        from actions.gmail import extract_body
+        text = "Hello, this is a test email."
+        encoded = base64.urlsafe_b64encode(text.encode()).decode()
+        payload = {"body": {"data": encoded}}
+        assert extract_body(payload) == text
+
+    def test_extract_body_multipart_prefers_plain(self):
+        """extract_body should prefer text/plain in multipart messages."""
+        import base64
+        from actions.gmail import extract_body
+        plain_text = "Plain text body"
+        html_text = "<p>HTML body</p>"
+        payload = {
+            "body": {},
+            "parts": [
+                {
+                    "mimeType": "text/html",
+                    "body": {"data": base64.urlsafe_b64encode(html_text.encode()).decode()},
+                },
+                {
+                    "mimeType": "text/plain",
+                    "body": {"data": base64.urlsafe_b64encode(plain_text.encode()).decode()},
+                },
+            ],
+        }
+        assert extract_body(payload) == plain_text
+
+    def test_extract_body_html_fallback(self):
+        """extract_body should strip HTML tags as fallback."""
+        import base64
+        from actions.gmail import extract_body
+        html_text = "<p>Hello <b>World</b></p>"
+        payload = {
+            "body": {},
+            "parts": [
+                {
+                    "mimeType": "text/html",
+                    "body": {"data": base64.urlsafe_b64encode(html_text.encode()).decode()},
+                },
+            ],
+        }
+        result = extract_body(payload)
+        assert "Hello" in result
+        assert "World" in result
+        assert "<p>" not in result
+
+    def test_extract_body_empty(self):
+        """extract_body should return empty string when no body found."""
+        from actions.gmail import extract_body
+        payload = {"body": {}, "parts": []}
+        assert extract_body(payload) == ""
+
+    def test_search_emails_sync(self):
+        """_search_emails_sync should use Gmail API to search and return formatted results."""
+        import base64
+        from unittest.mock import patch, MagicMock
+        from actions.gmail import _search_emails_sync
+
+        mock_service = MagicMock()
+        # Mock messages().list()
+        mock_service.users().messages().list().execute.return_value = {
+            "messages": [{"id": "msg1"}]
+        }
+        # Mock messages().get()
+        body_data = base64.urlsafe_b64encode(b"Test body").decode()
+        mock_service.users().messages().get().execute.return_value = {
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Test Subject"},
+                    {"name": "From", "value": "test@example.com"},
+                    {"name": "To", "value": "me@example.com"},
+                    {"name": "Date", "value": "Mon, 1 Jan 2026"},
+                ],
+                "body": {"data": body_data},
+            },
+            "snippet": "Test snippet",
+        }
+
+        with patch("actions.gmail._get_gmail_service", return_value=mock_service):
+            results = _search_emails_sync("test query", max_results=5)
+
+        assert len(results) == 1
+        assert results[0]["subject"] == "Test Subject"
+        assert results[0]["from"] == "test@example.com"
+        assert "Test body" in results[0]["body"]
+
+    def test_draft_email_sync(self):
+        """_draft_email_sync should create a draft via Gmail API."""
+        from unittest.mock import patch, MagicMock
+        from actions.gmail import _draft_email_sync
+
+        mock_service = MagicMock()
+        mock_service.users().drafts().create().execute.return_value = {
+            "id": "draft123",
+        }
+
+        with patch("actions.gmail._get_gmail_service", return_value=mock_service):
+            result = _draft_email_sync("recipient@example.com", "Test Subject", "Test body")
+
+        assert result["draft_id"] == "draft123"
+        assert result["to"] == "recipient@example.com"
+        assert result["subject"] == "Test Subject"
+
+
+# --- #81: Calendar Action Tests ---
+
+class TestCalendarActions:
+    """Tests for calendar actions with mocked Google API."""
+
+    def test_get_events_sync(self):
+        """_get_events_sync should fetch and format calendar events."""
+        from unittest.mock import patch, MagicMock
+        from actions.calendar import _get_events_sync
+
+        mock_service = MagicMock()
+        mock_service.events().list().execute.return_value = {
+            "items": [
+                {
+                    "summary": "Team Standup",
+                    "start": {"dateTime": "2026-03-16T09:00:00-04:00"},
+                    "end": {"dateTime": "2026-03-16T09:30:00-04:00"},
+                    "location": "Room 101",
+                    "description": "Daily standup",
+                },
+                {
+                    "summary": "All Day Event",
+                    "start": {"date": "2026-03-16"},
+                    "end": {"date": "2026-03-17"},
+                },
+            ]
+        }
+
+        with patch("actions.calendar._get_calendar_service", return_value=mock_service):
+            events = _get_events_sync(days=1)
+
+        assert len(events) == 2
+        assert events[0]["summary"] == "Team Standup"
+        assert events[0]["location"] == "Room 101"
+        assert events[0]["all_day"] is False
+        assert events[1]["summary"] == "All Day Event"
+        assert events[1]["all_day"] is True
+
+    def test_format_events_text_empty(self):
+        """format_events_text should handle empty event list."""
+        from actions.calendar import format_events_text
+        assert format_events_text([]) == "No upcoming events."
+
+    def test_format_events_text_all_day(self):
+        """format_events_text should show 'All day' for all-day events."""
+        from actions.calendar import format_events_text
+        events = [{"summary": "Holiday", "start": "2026-03-16", "end": "2026-03-17", "location": "", "all_day": True}]
+        result = format_events_text(events)
+        assert "All day" in result
+        assert "Holiday" in result
+
+    def test_format_events_text_timed(self):
+        """format_events_text should show formatted time for timed events."""
+        from actions.calendar import format_events_text
+        events = [{
+            "summary": "Meeting",
+            "start": "2026-03-16T14:00:00-04:00",
+            "end": "2026-03-16T15:00:00-04:00",
+            "location": "",
+            "all_day": False,
+        }]
+        result = format_events_text(events)
+        assert "Meeting" in result
+        # Should contain a formatted time (AM/PM)
+        assert "PM" in result or "AM" in result
+
+    def test_format_events_text_with_location(self):
+        """format_events_text should include location when present."""
+        from actions.calendar import format_events_text
+        events = [{
+            "summary": "Lunch",
+            "start": "2026-03-16T12:00:00-04:00",
+            "end": "2026-03-16T13:00:00-04:00",
+            "location": "Cafe Nero",
+            "all_day": False,
+        }]
+        result = format_events_text(events)
+        assert "Cafe Nero" in result
+
+    def test_create_event_sync(self):
+        """_create_event_sync should create an event via Calendar API."""
+        from unittest.mock import patch, MagicMock
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from actions.calendar import _create_event_sync
+
+        mock_service = MagicMock()
+        mock_service.events().insert().execute.return_value = {
+            "id": "event123",
+            "summary": "New Meeting",
+            "start": {"dateTime": "2026-03-17T10:00:00-04:00"},
+            "htmlLink": "https://calendar.google.com/event/123",
+        }
+
+        start = datetime(2026, 3, 17, 10, 0, tzinfo=ZoneInfo("America/Toronto"))
+
+        with patch("actions.calendar._get_calendar_service", return_value=mock_service), \
+             patch("actions.calendar.TOKEN_FILE_CALENDAR_WRITE") as mock_token:
+            mock_token.exists.return_value = True
+            result = _create_event_sync("New Meeting", start)
+
+        assert result["id"] == "event123"
+        assert result["summary"] == "New Meeting"
+        assert "calendar.google.com" in result["link"]
+
+
+# --- #95: Subscription Renewal Alerts ---
+
+class TestSubscriptionRenewals:
+    """Tests for subscription renewal detection from indexed emails."""
+
+    def test_detect_subscription_renewals_empty(self, tmp_db):
+        """Should return empty list when no renewal emails exist."""
+        import learning
+        learning.set_conn(tmp_db)
+        results = learning.detect_subscription_renewals(days_ahead=7)
+        assert results == []
+
+    def test_detect_subscription_renewals_finds_matches(self, tmp_db):
+        """Should find emails containing renewal keywords."""
+        import learning
+        learning.set_conn(tmp_db)
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("email", "finance", "Netflix Renewal",
+             "Your Netflix subscription renewal is on 2026-04-01. Amount: $15.99"),
+        )
+        tmp_db.commit()
+
+        results = learning.detect_subscription_renewals(days_ahead=7)
+        assert len(results) >= 1
+        found = [r for r in results if r["title"] == "Netflix Renewal"]
+        assert len(found) == 1
+        assert found[0]["amount"] == "$15.99"
+        assert found[0]["estimated_date"] == "2026-04-01"
+
+    def test_detect_subscription_renewals_no_duplicates(self, tmp_db):
+        """Should not return duplicate results for the same document."""
+        import learning
+        learning.set_conn(tmp_db)
+        # This document matches multiple keywords
+        tmp_db.execute(
+            "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+            ("email", "finance", "Billing Notice",
+             "Your subscription renewal auto-renew billing cycle will process on 2026-04-15. Total: $29.99"),
+        )
+        tmp_db.commit()
+
+        results = learning.detect_subscription_renewals(days_ahead=7)
+        titles = [r["title"] for r in results]
+        assert titles.count("Billing Notice") == 1
+
+
+# --- #92: Weekend Project Nudge ---
+
+class TestWeekendNudge:
+    """Tests for weekend project nudge generation."""
+
+    def test_returns_none_on_weekday(self, monkeypatch):
+        """Should return None if today is not Saturday."""
+        from unittest.mock import patch
+        from scheduler.proactive import generate_weekend_nudge
+        # Mock date.today() to return a Monday
+        import datetime as dt_mod
+        fake_date = dt_mod.date(2026, 3, 16)  # Monday
+        with patch("scheduler.proactive.date") as mock_date:
+            mock_date.today.return_value = fake_date
+            mock_date.side_effect = lambda *args, **kw: dt_mod.date(*args, **kw)
+            result = generate_weekend_nudge()
+        assert result is None
+
+    def test_returns_nudge_on_saturday_with_stale_items(self, monkeypatch, tmp_path):
+        """Should return a nudge message on Saturday with stale items."""
+        from unittest.mock import patch, MagicMock
+        from scheduler.proactive import generate_weekend_nudge
+        import datetime as dt_mod
+        import sqlite3
+
+        # Set up a temporary DB with an old reminder
+        db_path = tmp_path / "khalil.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY, text TEXT, due_at TEXT, status TEXT)")
+        conn.execute(
+            "INSERT INTO reminders (text, due_at, status) VALUES (?, ?, ?)",
+            ("Review project plan", "2026-02-01 09:00:00", "active"),
+        )
+        conn.commit()
+        conn.close()
+
+        fake_saturday = dt_mod.date(2026, 3, 14)  # Saturday
+        with patch("scheduler.proactive.date") as mock_date, \
+             patch("scheduler.proactive.DB_PATH", db_path), \
+             patch("scheduler.proactive.GOALS_DIR", tmp_path / "nonexistent"):
+            mock_date.today.return_value = fake_saturday
+            mock_date.side_effect = lambda *args, **kw: dt_mod.date(*args, **kw)
+            result = generate_weekend_nudge()
+
+        assert result is not None
+        assert "Weekend Project Nudge" in result
+        assert "Review project plan" in result
+
+    def test_returns_none_on_saturday_with_nothing_stale(self, monkeypatch, tmp_path):
+        """Should return None on Saturday if nothing is stale."""
+        from unittest.mock import patch
+        from scheduler.proactive import generate_weekend_nudge
+        import datetime as dt_mod
+        import sqlite3
+
+        # Set up a DB with no stale items
+        db_path = tmp_path / "khalil.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY, text TEXT, due_at TEXT, status TEXT)")
+        conn.commit()
+        conn.close()
+
+        fake_saturday = dt_mod.date(2026, 3, 14)  # Saturday
+        with patch("scheduler.proactive.date") as mock_date, \
+             patch("scheduler.proactive.DB_PATH", db_path), \
+             patch("scheduler.proactive.GOALS_DIR", tmp_path / "nonexistent"), \
+             patch("actions.projects.KNOWN_PROJECTS", {}):
+            mock_date.today.return_value = fake_saturday
+            mock_date.side_effect = lambda *args, **kw: dt_mod.date(*args, **kw)
+            result = generate_weekend_nudge()
+
+        assert result is None
+
+
+# --- #7: Prompt Effectiveness Scoring ---
+
+class TestPromptEffectiveness:
+    """Tests for prompt effectiveness scoring."""
+
+    def test_empty_data(self, tmp_db):
+        """Should return empty results when no signals exist."""
+        import learning
+        learning.set_conn(tmp_db)
+        result = learning.get_prompt_effectiveness(days=7)
+        assert result["by_topic"] == {}
+        assert result["best_topic"] is None
+        assert result["worst_topic"] is None
+
+    def test_single_topic(self, tmp_db):
+        """Should calculate success rate for a single topic."""
+        import json
+        import learning
+        learning.set_conn(tmp_db)
+
+        # Insert 3 success signals for "work" topic, 1 with correction
+        for i in range(3):
+            ctx = {"topic": "work", "had_correction": i == 0}
+            tmp_db.execute(
+                "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                ("conversation_success", json.dumps(ctx), 1.0),
+            )
+        tmp_db.commit()
+
+        result = learning.get_prompt_effectiveness(days=7)
+        assert "work" in result["by_topic"]
+        assert result["by_topic"]["work"]["total"] == 3
+        assert result["by_topic"]["work"]["successes"] == 2
+        assert result["by_topic"]["work"]["success_rate_pct"] == pytest.approx(66.7, abs=0.1)
+
+    def test_multiple_topics_best_worst(self, tmp_db):
+        """Should identify best and worst topics."""
+        import json
+        import learning
+        learning.set_conn(tmp_db)
+
+        # "tech" topic: 3 successes, 0 corrections (100%)
+        for _ in range(3):
+            tmp_db.execute(
+                "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                ("conversation_success", json.dumps({"topic": "tech", "had_correction": False}), 1.0),
+            )
+        # "finance" topic: 2 signals, both with corrections (0%)
+        for _ in range(2):
+            tmp_db.execute(
+                "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                ("conversation_success", json.dumps({"topic": "finance", "had_correction": True}), 1.0),
+            )
+        tmp_db.commit()
+
+        result = learning.get_prompt_effectiveness(days=7)
+        assert result["best_topic"] == "tech"
+        assert result["worst_topic"] == "finance"
+
+
+# --- #100: MCP Server Expansion ---
+
+class TestMCPServerExpansion:
+    """Tests for new MCP tools added in #100.
+
+    These test the underlying logic directly rather than the decorated MCP functions,
+    to avoid issues with FastMCP module-level imports and test ordering.
+    """
+
+    def test_healing_status_empty(self, tmp_db):
+        """healing_status query should return no rows for empty DB."""
+        rows = tmp_db.execute(
+            "SELECT id, summary FROM insights WHERE category = 'self_heal' ORDER BY created_at DESC LIMIT 10"
+        ).fetchall()
+        assert len(rows) == 0
+
+    def test_healing_status_with_data(self, tmp_db):
+        """healing_status query should find self_heal insights."""
+        tmp_db.execute(
+            "INSERT INTO insights (category, summary, evidence, recommendation, status) "
+            "VALUES ('self_heal', 'Fixed calendar auth', 'Token expired', 'Refresh token', 'applied')"
+        )
+        tmp_db.commit()
+
+        rows = tmp_db.execute(
+            "SELECT id, summary, status, created_at FROM insights "
+            "WHERE category = 'self_heal' ORDER BY created_at DESC LIMIT 10"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["summary"] == "Fixed calendar auth"
+        assert rows[0]["status"] == "applied"
+
+    def test_audit_log_empty(self, tmp_db):
+        """audit_log query should return no rows for empty DB."""
+        rows = tmp_db.execute(
+            "SELECT action_type, description FROM audit_log ORDER BY timestamp DESC LIMIT 10"
+        ).fetchall()
+        assert len(rows) == 0
+
+    def test_audit_log_with_data(self, tmp_db):
+        """audit_log query should return recent entries."""
+        tmp_db.execute(
+            "INSERT INTO audit_log (action_type, description, result, autonomy_level) "
+            "VALUES ('shell', 'Ran brew list', 'success', 'auto')"
+        )
+        tmp_db.commit()
+
+        rows = tmp_db.execute(
+            "SELECT action_type, description, result, autonomy_level, timestamp "
+            "FROM audit_log ORDER BY timestamp DESC LIMIT 5"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["description"] == "Ran brew list"
+        assert rows[0]["autonomy_level"] == "auto"
+
+    def test_learned_preferences_empty(self, tmp_db):
+        """learned_preferences should handle no preferences."""
+        import learning
+        learning.set_conn(tmp_db)
+        prefs = learning.list_preferences()
+        assert prefs == []
+
+    def test_learned_preferences_with_data(self, tmp_db):
+        """learned_preferences should list stored preferences."""
+        import learning
+        learning.set_conn(tmp_db)
+        learning.set_preference("tone", "concise", confidence=0.8)
+
+        prefs = learning.list_preferences()
+        assert len(prefs) == 1
+        assert prefs[0]["key"] == "tone"
+        assert prefs[0]["value"] == "concise"
+        assert prefs[0]["confidence"] == 0.8
+
+    def test_extension_health_empty(self, tmp_db):
+        """Extension health should return empty list when no usage data."""
+        import learning
+        learning.set_conn(tmp_db)
+        health = learning.get_extension_health(days=7)
+        assert health == []
+
+    def test_extension_health_with_data(self, tmp_db):
+        """Extension health should aggregate usage stats."""
+        import json
+        import learning
+        learning.set_conn(tmp_db)
+
+        # Record some extension usage
+        for status in ["invoked", "success", "invoked", "error"]:
+            tmp_db.execute(
+                "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                ("extension_usage", json.dumps({"extension": "weather", "status": status}), 1.0),
+            )
+        tmp_db.commit()
+
+        health = learning.get_extension_health(days=7)
+        assert len(health) == 1
+        assert health[0]["extension"] == "weather"
+        assert health[0]["invocations"] == 2
+        assert health[0]["errors"] == 1

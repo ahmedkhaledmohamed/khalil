@@ -124,6 +124,69 @@ def check_overdue_reminders() -> str | None:
     return None
 
 
+def generate_weekend_nudge() -> str | None:
+    """#92: Generate a weekend project nudge if today is Saturday.
+
+    Checks for stale project-related items (goals, reminders older than 14 days).
+    Returns a nudge message with suggested first step, or None if nothing stale or not Saturday.
+    """
+    today = date.today()
+    if today.weekday() != 5:  # 5 = Saturday
+        return None
+
+    import sqlite3
+    stale_items = []
+
+    # Check for stale goals (goals file older than 14 days)
+    goals_file = GOALS_DIR / "2026.md"
+    if goals_file.exists():
+        mtime = datetime.fromtimestamp(goals_file.stat().st_mtime, tz=ZoneInfo(TIMEZONE))
+        days_old = (datetime.now(ZoneInfo(TIMEZONE)) - mtime).days
+        if days_old > 14:
+            stale_items.append(f"Goals file last updated {days_old} days ago")
+
+    # Check for stale reminders (older than 14 days)
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cutoff = (datetime.now(ZoneInfo(TIMEZONE)) - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+        old_reminders = conn.execute(
+            "SELECT text, due_at FROM reminders WHERE status = 'active' AND due_at < ?",
+            (cutoff,),
+        ).fetchall()
+        conn.close()
+        for r in old_reminders:
+            stale_items.append(f"Overdue reminder: {r[0]} (due {r[1][:10]})")
+    except Exception as e:
+        log.debug("Weekend nudge reminder check failed: %s", e)
+
+    # Check for stale projects
+    try:
+        from actions.projects import KNOWN_PROJECTS, get_open_tasks
+        now = datetime.now(ZoneInfo(TIMEZONE))
+        for key, info in KNOWN_PROJECTS.items():
+            filepath = info["file"]
+            if not filepath.exists():
+                continue
+            tasks = get_open_tasks(key)
+            if not tasks:
+                continue
+            mtime = datetime.fromtimestamp(filepath.stat().st_mtime, tz=ZoneInfo(TIMEZONE))
+            days_old = (now - mtime).days
+            if days_old > 14:
+                stale_items.append(f"Project '{info['name']}': {len(tasks)} open tasks, untouched for {days_old}d")
+    except Exception as e:
+        log.debug("Weekend nudge project check failed: %s", e)
+
+    if not stale_items:
+        return None
+
+    nudge = "🛠 Weekend Project Nudge\n\nSome things have been sitting idle:\n"
+    for item in stale_items[:5]:
+        nudge += f"  • {item}\n"
+    nudge += "\nSuggested first step: pick one item and spend 30 minutes on it today."
+    return nudge
+
+
 def run_proactive_checks() -> list[str]:
     """Run all proactive detectors. Returns list of findings (strings)."""
     checks = [
