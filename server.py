@@ -328,14 +328,47 @@ async def _try_recover_ollama() -> bool:
     return False
 
 
-# #18: Graceful degradation chain — Ollama → Claude Sonnet → Claude Haiku → cached
+# #18: Graceful degradation chain — Ollama local → Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → cached
+_OLLAMA_CLOUD_FALLBACK = "kimi-k2.5:cloud"
 _FALLBACK_MODELS = [CLAUDE_MODEL, "claude-haiku-4-5-20251001"]
+
+
+async def _fallback_to_ollama_cloud(query: str, context: str, system: str, user_message: str) -> str | None:
+    """Try Ollama cloud model (kimi-k2.5) before falling back to Claude."""
+    if contains_sensitive_data(query):
+        log.info("Skipping Ollama cloud fallback — sensitive query")
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/chat",
+                json={
+                    "model": _OLLAMA_CLOUD_FALLBACK,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            log.info("Fell back to %s (local Ollama unavailable)", _OLLAMA_CLOUD_FALLBACK)
+            return response.json()["message"]["content"]
+    except Exception as e:
+        log.warning("Ollama cloud fallback (%s) failed: %s", _OLLAMA_CLOUD_FALLBACK, e)
+        return None
+
 
 async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
     """Fall back through Claude model chain when Ollama is down.
 
-    Tries: Claude Sonnet → Claude Haiku → last cached response.
+    Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → last cached response.
     """
+    # Try Ollama cloud model first (free, no API key needed)
+    kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
+    if kimi_result:
+        return kimi_result
+
     client = claude
     if not client:
         api_key = get_secret("anthropic-api-key")
@@ -622,6 +655,55 @@ _ACTION_PATTERNS = [
     (r"\blist\s+launch\s+agents?\b", "shell"),
     # #1: Explicit feedback
     (r"^/feedback\b", "feedback"),
+    # #43: Disk cleanup assistant
+    (r"\b(?:disk\s+space|storage\s+usage)\b", "shell"),
+    (r"\b(?:large|biggest)\s+files?\b", "shell"),
+    (r"\bclean\s+cache[s]?\b", "shell"),
+    (r"\bclear\s+cache[s]?\b", "shell"),
+    (r"\bclean\s+downloads?\b", "shell"),
+    # #48: Slack message sending
+    (r"\bsend\s+(?:a\s+)?slack\s+message\b", "slack_send"),
+    (r"\bpost\s+to\s+slack\b", "slack_send"),
+    (r"\bmessage\s+on\s+slack\b", "slack_send"),
+    # #51: Spotify playback control
+    (r"\b(?:play|resume)\s+music\b", "shell"),
+    (r"\b(?:pause|stop)\s+music\b", "shell"),
+    (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
+    (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "shell"),
+    # #37: Screenshot and OCR
+    (r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", "screenshot"),
+    (r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", "screenshot"),
+    (r"\bcapture\s+(?:the\s+)?screen\b", "screenshot"),
+    (r"\bscreenshot\b", "screenshot"),
+    # #54: Google Drive file creation
+    (r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:doc|document)\b", "drive_create"),
+    (r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:spreadsheet|sheet)\b", "drive_create"),
+    (r"\bsave\s+to\s+(?:google\s+)?drive\b", "drive_create"),
+    # #55: Multi-account Gmail
+    (r"\bsearch\s+(?:my\s+)?work\s+email\b", "email_work"),
+    (r"\bsearch\s+(?:my\s+)?personal\s+email\b", "email_personal"),
+    (r"\bcheck\s+(?:my\s+)?work\s+(?:inbox|email|mail)\b", "email_work"),
+    (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
+    # Cursor IDE awareness
+    (r"\bcursor\s+(?:status|windows?|projects?|info)\b", "cursor_status"),
+    (r"\b(?:what.s|which)\s+(?:(?:files?|projects?)\s+)?(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
+    (r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", "cursor_status"),
+    (r"\bcursor\s+extensions?\b", "cursor_extensions"),
+    # iTerm2 / terminal awareness
+    (r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", "terminal_status"),
+    (r"\bterminal\s+(?:status|sessions?)\b", "terminal_status"),
+    (r"\biterm\s+(?:status|sessions?)\b", "terminal_status"),
+    (r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", "terminal_status"),
+    # Terminal control (must come after terminal_status to not shadow)
+    (r"\brun\s+.+\s+in\s+(?:the\s+)?(?:terminal|iterm|tab|session)\b", "terminal_exec"),
+    (r"\bsend\s+.+\s+to\s+(?:the\s+)?(?:terminal|iterm)\b", "terminal_exec"),
+    (r"\bnew\s+(?:terminal\s+)?tab\b", "terminal_new_tab"),
+    (r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", "terminal_new_tab"),
+    # Cursor control
+    (r"\bopen\s+.+\s+in\s+cursor\b", "cursor_open"),
+    (r"\bcursor\s+open\s+", "cursor_open"),
+    (r"\bjump\s+to\s+(?:line\s+)?\d+", "cursor_goto"),
+    (r"\bcursor\s+diff\b", "cursor_diff"),
 ]
 
 
@@ -648,6 +730,33 @@ _TOPIC_KEYWORDS = {
     "family": {"kids", "wife", "husband", "family", "school", "daycare", "children", "parent",
                "birthday", "vacation", "home", "weekend", "dinner", "park"},
 }
+
+
+def _ocr_screenshot(image_path: str = "/tmp/khalil_screenshot.png") -> str:
+    """#37: OCR stub — extract text from a screenshot image.
+
+    Full OCR requires macOS Vision framework via pyobjc or Shortcuts.
+    This stub captures the intent and returns guidance.
+    """
+    import os
+    if not os.path.exists(image_path):
+        return f"No screenshot found at {image_path}. Take a screenshot first."
+    # Attempt via macOS Shortcuts if available
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["shortcuts", "run", "Extract Text from Image", "--input-path", image_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        pass
+    return (
+        f"Screenshot saved to {image_path}. "
+        "OCR text extraction requires macOS Vision framework (pyobjc-framework-Vision) "
+        "or a configured Shortcuts automation. Install pyobjc-framework-Vision for full OCR support."
+    )
 
 
 def classify_message_topic(text: str) -> str:
@@ -785,6 +894,63 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:show|list)\s+launch\s+agents?\b", text_lower):
         return {"action": "shell", "command": "ls ~/Library/LaunchAgents/", "description": "Show launch agents"}
 
+    # Cursor IDE awareness — direct handlers (no LLM needed)
+    if re.search(r"\bcursor\s+(?:status|windows?|projects?|info)\b", text_lower) or \
+       re.search(r"\b(?:what.s|which)\s+(?:files?|projects?)\s+(?:are\s+)?open\s+in\s+cursor\b", text_lower) or \
+       re.search(r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", text_lower):
+        return {"action": "cursor_status", "description": "Check Cursor IDE status"}
+
+    if re.search(r"\bcursor\s+extensions?\b", text_lower):
+        return {"action": "cursor_extensions", "description": "List Cursor extensions"}
+
+    # New terminal tab (must come before terminal_status to avoid "tab" matching "status")
+    if re.search(r"\bnew\s+(?:terminal\s+)?tab\b", text_lower) or \
+       re.search(r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", text_lower):
+        return {"action": "terminal_new_tab", "description": "Open new terminal tab"}
+
+    # iTerm2 / terminal awareness — direct handlers
+    if re.search(r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", text_lower) or \
+       re.search(r"\bterminal\s+(?:status|sessions?)\b", text_lower) or \
+       re.search(r"\biterm\s+(?:status|sessions?)\b", text_lower) or \
+       re.search(r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", text_lower):
+        return {"action": "terminal_status", "description": "Check terminal sessions"}
+
+    # Terminal control — "run X in terminal", "send X to terminal"
+    m = re.search(r"\brun\s+(.+?)\s+in\s+(?:the\s+)?(?:terminal|iterm|tab|session)\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "terminal_exec", "command": cmd, "session": "current", "description": f"Run in terminal: {cmd}"}
+
+    m = re.search(r"\bsend\s+(.+?)\s+to\s+(?:the\s+)?(?:terminal|iterm)\b", text_lower)
+    if m:
+        cmd = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "terminal_exec", "command": cmd, "session": "current", "description": f"Send to terminal: {cmd}"}
+
+    # Cursor control — "open X in cursor", "cursor open X"
+    m = re.search(r"\bopen\s+(.+?)\s+in\s+cursor\b", text_lower)
+    if m:
+        path = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_open", "path": path, "description": f"Open in Cursor: {path}"}
+
+    m = re.search(r"\bcursor\s+open\s+(.+)$", text_lower)
+    if m:
+        path = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "cursor_open", "path": path, "description": f"Open in Cursor: {path}"}
+
+    # "jump to line N in file" / "cursor goto file:line"
+    m = re.search(r"\bjump\s+to\s+(?:line\s+)?(\d+)\s+in\s+(.+?)$", text_lower)
+    if m:
+        line = int(m.group(1))
+        path = text_stripped[m.start(2):m.end(2)].strip()
+        return {"action": "cursor_open", "path": path, "line": line, "description": f"Jump to {path}:{line}"}
+
+    # "cursor diff file1 file2"
+    m = re.search(r"\bcursor\s+diff\s+(\S+)\s+(\S+)", text_lower)
+    if m:
+        f1 = text_stripped[m.start(1):m.end(1)]
+        f2 = text_stripped[m.start(2):m.end(2)]
+        return {"action": "cursor_diff", "file1": f1, "file2": f2, "description": f"Diff: {f1} vs {f2}"}
+
     # #36: Clipboard — "what's on my clipboard", "read clipboard"
     if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
        re.search(r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", text_lower):
@@ -887,6 +1053,74 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         task_title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
         if task_title:
             return {"action": "tasks_create", "title": task_title, "description": f"Create task: {task_title}"}
+
+    # #43: Disk cleanup assistant (all READ — informational only)
+    if re.search(r"\b(?:disk\s+space|storage\s+usage)\b", text_lower):
+        return {"action": "shell", "command": "df -h /", "description": "Check disk space usage"}
+
+    if re.search(r"\b(?:large|biggest)\s+files?\b", text_lower):
+        return {"action": "shell", "command": "du -sh ~/Downloads/* ~/Desktop/* 2>/dev/null | sort -rh | head -20", "description": "Show largest files in Downloads and Desktop"}
+
+    if re.search(r"\bclean\s+cache|clear\s+cache", text_lower):
+        return {"action": "shell", "command": "du -sh ~/Library/Caches/* 2>/dev/null | sort -rh | head -10", "description": "Show cache sizes (read-only)"}
+
+    if re.search(r"\bclean\s+downloads?\b", text_lower):
+        return {"action": "shell", "command": "ls -lhS ~/Downloads/ | head -20", "description": "Show largest files in Downloads"}
+
+    # #51: Spotify playback control via osascript
+    if re.search(r"\b(?:play|resume)\s+music\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to play'", "description": "Play/resume Spotify"}
+
+    if re.search(r"\b(?:pause|stop)\s+music\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to pause'", "description": "Pause Spotify"}
+
+    if re.search(r"\b(?:next|skip)\s+(?:song|track)\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to next track'", "description": "Skip to next track"}
+
+    if re.search(r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", text_lower):
+        return {"action": "shell", "command": "osascript -e 'tell application \"Spotify\" to get name of current track & \" by \" & artist of current track'", "description": "Show currently playing track"}
+
+    # #48: Slack message sending
+    m = re.search(r"\b(?:send\s+(?:a\s+)?slack\s+message|post\s+to\s+slack|message\s+on\s+slack)\b.*?(?:to\s+|in\s+)?#?(\w[\w-]*)\s*[:\-]?\s*(.+?)$", text_lower)
+    if m:
+        channel = m.group(1)
+        message_text = text_stripped[m.start(2):m.end(2)].strip()
+        return {"action": "slack_send", "channel": channel, "text": message_text, "description": f"Send Slack message to #{channel}"}
+
+    # Slack without parsed channel/message — return generic intent
+    if re.search(r"\b(?:send\s+(?:a\s+)?slack\s+message|post\s+to\s+slack|message\s+on\s+slack)\b", text_lower):
+        return {"action": "slack_send", "channel": None, "text": None, "description": "Send a Slack message"}
+
+    # #37: Screenshot capture (READ — just capturing, not modifying)
+    if re.search(r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", text_lower):
+        return {"action": "shell", "command": "screencapture -w /tmp/khalil_screenshot.png", "description": "Capture window screenshot"}
+
+    if re.search(r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", text_lower) or \
+       re.search(r"\bcapture\s+(?:the\s+)?screen\b", text_lower) or \
+       text_lower.strip() == "screenshot":
+        return {"action": "shell", "command": "screencapture -x /tmp/khalil_screenshot.png", "description": "Take screenshot (silent)"}
+
+    # #54: Google Drive file creation
+    m = re.search(r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:doc|document)\s+(?:called|named|titled?)?\s*['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "drive_create_doc", "title": title, "description": f"Create Google Doc: {title}"}
+
+    m = re.search(r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:spreadsheet|sheet)\s+(?:called|named|titled?)?\s*['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "drive_create_sheet", "title": title, "description": f"Create Google Sheet: {title}"}
+
+    # #55: Multi-account Gmail
+    if re.search(r"\bsearch\s+(?:my\s+)?work\s+(?:email|inbox|mail)\b", text_lower) or \
+       re.search(r"\bcheck\s+(?:my\s+)?work\s+(?:email|inbox|mail)\b", text_lower):
+        return {"action": "email_search", "account": "work", "description": "Search work email"}
+
+    if re.search(r"\bsearch\s+(?:my\s+)?personal\s+(?:email|inbox|mail)\b", text_lower) or \
+       re.search(r"\bcheck\s+(?:my\s+)?personal\s+(?:email|inbox|mail)\b", text_lower):
+        return {"action": "email_search", "account": "personal", "description": "Search personal email"}
 
     return None
 
@@ -1118,6 +1352,115 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             await update.message.reply_text(f"❌ Calendar fetch failed: {e}")
         return True
 
+    elif action == "cursor_status":
+        from actions.terminal import get_cursor_status, format_cursor_status
+        status = await get_cursor_status()
+        autonomy.log_audit("cursor_status", "Checked Cursor IDE status", result="ok")
+        await update.message.reply_text(format_cursor_status(status))
+        return True
+
+    elif action == "cursor_extensions":
+        from actions.terminal import get_cursor_extensions
+        extensions = await get_cursor_extensions()
+        autonomy.log_audit("cursor_extensions", "Listed Cursor extensions", result="ok")
+        if extensions:
+            text = f"🧩 Cursor Extensions ({len(extensions)}):\n" + "\n".join(f"  • {e}" for e in extensions)
+        else:
+            text = "🧩 No Cursor extensions found (or Cursor not running)"
+        await update.message.reply_text(text)
+        return True
+
+    elif action == "terminal_status":
+        from actions.terminal import get_terminal_status, format_terminal_status
+        status = await get_terminal_status()
+        autonomy.log_audit("terminal_status", "Checked terminal sessions", result="ok")
+        await update.message.reply_text(format_terminal_status(status))
+        return True
+
+    elif action == "terminal_exec":
+        from actions.terminal import send_to_iterm
+        cmd = intent.get("command", "")
+        session = intent.get("session", "current")
+        if not cmd:
+            return False
+        # Always requires approval — injecting into live terminal
+        action_id = autonomy.create_pending_action(
+            "terminal_exec",
+            f"Run in terminal: {cmd}",
+            {"command": cmd, "session": session},
+        )
+        await update.message.reply_text(
+            f"📟 Send to iTerm ({session}):\n\n`{cmd}`\n\n{autonomy.format_level()}",
+            reply_markup=approve_deny_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    elif action == "terminal_new_tab":
+        from actions.terminal import create_iterm_tab
+        cmd = intent.get("command")
+        if autonomy.needs_approval("terminal_new_tab"):
+            desc = f"New terminal tab" + (f" running: {cmd}" if cmd else "")
+            action_id = autonomy.create_pending_action(
+                "terminal_new_tab", desc, {"command": cmd},
+            )
+            await update.message.reply_text(
+                f"📟 {desc}\n\n{autonomy.format_level()}",
+                reply_markup=approve_deny_keyboard(),
+                parse_mode="Markdown",
+            )
+        else:
+            result = await create_iterm_tab(cmd)
+            if result["success"]:
+                autonomy.log_audit("terminal_new_tab", "Created new terminal tab", result="ok")
+                await update.message.reply_text("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+            else:
+                await update.message.reply_text(f"⚠️ Failed to create tab: {result['error']}")
+        return True
+
+    elif action == "cursor_open":
+        from actions.terminal import cursor_open
+        path = intent.get("path", "")
+        line = intent.get("line")
+        if not path:
+            return False
+        # cursor -g is READ (navigates), cursor <folder> could open new window
+        import os
+        is_dir = os.path.isdir(os.path.expanduser(path))
+        action_name = "cursor_open_project" if is_dir else "cursor_open"
+        if autonomy.needs_approval(action_name):
+            desc = f"Open in Cursor: {path}" + (f":{line}" if line else "")
+            action_id = autonomy.create_pending_action(
+                action_name, desc, {"path": path, "line": line},
+            )
+            await update.message.reply_text(
+                f"🖥 {desc}\n\n{autonomy.format_level()}",
+                reply_markup=approve_deny_keyboard(),
+                parse_mode="Markdown",
+            )
+        else:
+            result = await cursor_open(path, line)
+            if result["success"]:
+                autonomy.log_audit(action_name, f"Opened {path}" + (f":{line}" if line else ""), result="ok")
+                await update.message.reply_text(f"🖥 Opened in Cursor: {path}" + (f":{line}" if line else ""))
+            else:
+                await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+        return True
+
+    elif action == "cursor_diff":
+        from actions.terminal import cursor_diff
+        f1 = intent.get("file1", "")
+        f2 = intent.get("file2", "")
+        if not f1 or not f2:
+            return False
+        result = await cursor_diff(f1, f2)
+        if result["success"]:
+            autonomy.log_audit("cursor_diff", f"Diff: {f1} vs {f2}", result="ok")
+            await update.message.reply_text(f"🖥 Diff opened in Cursor: {f1} vs {f2}")
+        else:
+            await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+        return True
+
     elif action == "shell":
         from actions.shell import classify_command, execute_shell, format_output
         cmd = intent.get("command", "")
@@ -1204,6 +1547,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/nudge — What needs attention right now\n"
         "/audit — View recent actions\n"
         "/health — System health status\n"
+        "/dev — Dev environment (Cursor + terminal)\n"
         "/run — Run a shell command\n"
         "/backup — Export backup\n"
         "/clear — Clear conversation history\n"
@@ -1397,6 +1741,44 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
                 else:
                     await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+            elif result["action_type"] == "terminal_exec":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import send_to_iterm
+                iterm_result = await send_to_iterm(payload["command"], payload.get("session", "current"))
+                autonomy.log_audit("terminal_exec", f"Sent: {payload['command']}", payload,
+                                   "ok" if iterm_result["success"] else iterm_result["error"])
+                if iterm_result["success"]:
+                    await query.message.reply_text(f"📟 Sent to terminal: `{payload['command']}`", parse_mode="Markdown")
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {iterm_result['error']}")
+
+            elif result["action_type"] == "terminal_new_tab":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import create_iterm_tab
+                tab_result = await create_iterm_tab(payload.get("command"))
+                autonomy.log_audit("terminal_new_tab", "Created tab", payload,
+                                   "ok" if tab_result["success"] else tab_result["error"])
+                if tab_result["success"]:
+                    cmd = payload.get("command")
+                    await query.message.reply_text("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {tab_result['error']}")
+
+            elif result["action_type"] in ("cursor_open", "cursor_open_project"):
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from actions.terminal import cursor_open
+                open_result = await cursor_open(payload["path"], payload.get("line"))
+                autonomy.log_audit(result["action_type"], f"Opened {payload['path']}", payload,
+                                   "ok" if open_result["success"] else open_result["error"])
+                if open_result["success"]:
+                    line_str = f":{payload['line']}" if payload.get("line") else ""
+                    await query.message.reply_text(f"🖥 Opened in Cursor: {payload['path']}{line_str}")
+                else:
+                    await query.message.reply_text(f"⚠️ Failed: {open_result['error']}")
+
             else:
                 status_msg = await autonomy.execute_action(result)
                 await query.message.reply_text(status_msg)
@@ -2156,6 +2538,30 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show dev environment status — Cursor windows + terminal sessions."""
+    from actions.terminal import (
+        get_cursor_status, format_cursor_status,
+        get_terminal_status, format_terminal_status,
+        get_frontmost_app,
+    )
+
+    cursor_status, terminal_status, frontmost = await asyncio.gather(
+        get_cursor_status(),
+        get_terminal_status(),
+        get_frontmost_app(),
+    )
+
+    lines = ["🖥 Dev Environment\n"]
+    lines.append(format_cursor_status(cursor_status))
+    lines.append("")
+    lines.append(format_terminal_status(terminal_status))
+    if frontmost:
+        lines.append(f"\n🔍 Frontmost: {frontmost}")
+
+    await update.message.reply_text("\n".join(lines))
+
+
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /backup command: export or list backups."""
     from actions.backup import export_backup, list_backups, format_backup_summary
@@ -2568,6 +2974,71 @@ def _wrap_extension_handler(handler_fn, extension_name: str):
     return wrapper
 
 
+# --- #48: Slack Message Sending ---
+
+async def send_slack_message(channel: str, text: str) -> str:
+    """Send a message to Slack via incoming webhook.
+
+    Webhook URL is stored in keyring as 'slack-webhook-url'.
+    Returns a status message.
+    """
+    webhook_url = get_secret("slack-webhook-url")
+    if not webhook_url:
+        return ("Slack webhook not configured. Set it with:\n"
+                "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'slack-webhook-url', 'YOUR_URL')\"")
+
+    payload = {"text": text}
+    if channel:
+        payload["channel"] = f"#{channel}" if not channel.startswith("#") else channel
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(webhook_url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            return f"Message sent to #{channel}."
+        return f"Slack API error: {resp.status_code} — {resp.text[:200]}"
+
+
+# --- #25: Extension Re-registration Helper ---
+
+def reregister_extension(application, name: str) -> str:
+    """Re-register a single extension's command handler on a running Application.
+
+    Call after hot_reload_extension() to update the Telegram handler.
+    Returns status message.
+    """
+    import importlib
+    from config import EXTENSIONS_DIR
+
+    manifest_path = EXTENSIONS_DIR / f"{name}.json"
+    if not manifest_path.exists():
+        return f"Extension '{name}' manifest not found."
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        module_name = manifest["action_module"]
+        handler_name = manifest["handler_function"]
+        command = manifest["command"]
+
+        mod = sys.modules.get(module_name)
+        if mod is None:
+            mod = importlib.import_module(module_name)
+
+        handler_fn = getattr(mod, handler_name)
+        wrapped = _wrap_extension_handler(handler_fn, manifest.get("name", command))
+
+        # Remove existing handler for this command if present
+        for group_handlers in application.handlers.values():
+            for h in group_handlers:
+                if isinstance(h, CommandHandler) and command in h.commands:
+                    group_handlers.remove(h)
+                    break
+
+        application.add_handler(CommandHandler(command, wrapped))
+        return f"Extension '{name}' re-registered as /{command}."
+    except Exception as e:
+        return f"Failed to re-register '{name}': {e}"
+
+
 def _load_extensions(application):
     """Dynamically register command handlers from extension manifests."""
     import importlib
@@ -2635,6 +3106,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("goals", cmd_goals))
     application.add_handler(CommandHandler("nudge", cmd_nudge))
     application.add_handler(CommandHandler("health", cmd_health))
+    application.add_handler(CommandHandler("dev", cmd_dev))
     application.add_handler(CommandHandler("backup", cmd_backup))
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
@@ -2896,6 +3368,22 @@ def _setup_scheduler():
         CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
         id="oauth_refresh",
         name="OAuth Token Refresh",
+        replace_existing=True,
+    )
+
+    # Dev environment state polling — every 60 seconds
+    async def _dev_state_poll_job():
+        if not _can_send():
+            return
+        from scheduler.tasks import poll_dev_state
+        await poll_dev_state(telegram_app.bot, OWNER_CHAT_ID)
+
+    scheduler.add_job(
+        _dev_state_poll_job,
+        "interval",
+        seconds=60,
+        id="dev_state_poll",
+        name="Dev State Poll",
         replace_existing=True,
     )
 

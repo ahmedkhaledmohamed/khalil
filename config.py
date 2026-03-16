@@ -39,6 +39,8 @@ TOKEN_FILE_CALENDAR = SCRIPTS_DIR / "token_calendar.json"  # calendar.readonly
 TOKEN_FILE_MODIFY = SCRIPTS_DIR / "token_modify.json"  # gmail.modify for label management (#46)
 TOKEN_FILE_CONTACTS = SCRIPTS_DIR / "token_contacts.json"  # contacts.readonly for People API (#49)
 TOKEN_FILE_TASKS = SCRIPTS_DIR / "token_tasks.json"  # tasks.readonly for Google Tasks (#50)
+TOKEN_FILE_DRIVE_WRITE = SCRIPTS_DIR / "token_drive_write.json"  # drive.file for Doc/Sheet creation (#54)
+TOKEN_FILE_WORK = SCRIPTS_DIR / "token_work.json"  # gmail.readonly for work account (#55)
 
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"
@@ -48,7 +50,7 @@ EMBED_PROVIDER = "ollama"  # #68: "ollama" (default) — abstraction for future 
 
 # LLM config — "ollama" (free, local) or "claude" (paid, cloud)
 LLM_BACKEND = "ollama"  # switch to "claude" if you have an API key
-OLLAMA_LLM_MODEL = "qwen2.5:14b"
+OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"

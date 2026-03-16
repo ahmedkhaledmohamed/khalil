@@ -181,7 +181,14 @@ async def hybrid_search(query: str, limit: int = 8, category: str | None = None)
 
     # #63: Apply freshness boost — recent documents rank higher
     for r in merged:
-        created_at = r.get("created_at") or (r.get("metadata") or {}).get("created_at")
+        meta = r.get("metadata") or {}
+        if isinstance(meta, str):
+            try:
+                import json
+                meta = json.loads(meta)
+            except (json.JSONDecodeError, TypeError):
+                meta = {}
+        created_at = r.get("created_at") or meta.get("created_at")
         r["freshness"] = _compute_freshness_score(created_at)
 
     # #62: Rerank by combined score (semantic distance + keyword overlap + freshness)

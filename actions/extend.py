@@ -24,10 +24,36 @@ from pathlib import Path
 
 from config import (
     KHALIL_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
-    KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH,
+    KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH, DATA_DIR,
 )
 
 log = logging.getLogger("khalil.extend")
+
+
+# --- #24: Dependency Injection for Extensions ---
+
+class KhalilContext:
+    """Clean interface for extensions instead of requiring internal imports.
+
+    Extensions receive this object and use it to interact with Khalil's
+    core systems (DB, LLM, notifications, search, signals).
+    """
+
+    def __init__(self, db, ask_llm, notify):
+        self.db = db          # sqlite3 connection
+        self.ask_llm = ask_llm  # async callable(query, context, system_extra) -> str
+        self.notify = notify    # async callable(message) -> None
+
+    def search(self, query, limit=5):
+        """Search knowledge base."""
+        from knowledge.search import keyword_search
+        return keyword_search(query, limit=limit)
+
+    def record_signal(self, signal_type, context=None):
+        """Record an interaction signal."""
+        from learning import record_signal
+        record_signal(signal_type, context)
+
 
 # Rate limit: max 1 generation per hour
 _last_generation_time: float = 0
@@ -606,7 +632,10 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         "7. Import only from stdlib, `config`, and existing khalil modules\n"
         "8. Include helpful reply_text messages\n"
         "9. Handle errors gracefully\n"
-        "10. Keep it under 200 lines\n\n"
+        "10. Keep it under 200 lines\n"
+        "11. Extensions can optionally accept a KhalilContext object (from actions.extend) "
+        "which provides: db (sqlite3 conn), ask_llm (async callable), notify (async callable), "
+        "search(query, limit), and record_signal(type, context). Use it instead of raw internal imports when possible.\n\n"
         "**QUALITY RULES**:\n"
         "- For matching/filtering: use word-boundary regex (re.search with \\b), not substring matching\n"
         "- For write operations (labeling, sending, modifying, deleting): include a preview/dry-run subcommand that shows what would happen without doing it\n"
@@ -884,7 +913,18 @@ BLOCKLISTED_QUALIFIED_CALLS = {
 
 BLOCKLISTED_IMPORTS = {
     "subprocess", "ctypes", "socket", "http.server", "xmlrpc",
+    "signal", "multiprocessing", "webbrowser",
 }
+
+# #74: Extension sandboxing — whitelist of allowed imports
+SANDBOX_ALLOWED_IMPORTS = {
+    "json", "re", "datetime", "logging", "httpx", "asyncio",
+    "collections", "dataclasses", "enum", "functools", "itertools",
+    "math", "pathlib", "textwrap", "typing", "uuid",
+}
+
+# #74: Dangerous function calls beyond what BLOCKLISTED_BARE_CALLS covers
+_SANDBOX_BLOCKED_CALLS = {"__import__", "compile", "globals", "locals", "vars", "delattr"}
 
 
 def validate_generated_code(source: str) -> tuple[bool, str, list[str]]:
@@ -945,6 +985,63 @@ def validate_generated_code(source: str) -> tuple[bool, str, list[str]]:
     warnings = _check_quality_warnings(source)
 
     return True, "", warnings
+
+
+def validate_extension_safety(source_code: str) -> tuple[bool, list[str]]:
+    """#74: Validate extension code against sandbox rules.
+
+    Checks:
+    - All imports are in SANDBOX_ALLOWED_IMPORTS whitelist
+    - No eval(), exec(), __import__(), subprocess, os.system calls
+    - No file system access outside DATA_DIR
+
+    Returns (safe: bool, violations: list[str]).
+    """
+    violations = []
+
+    try:
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        return False, [f"Syntax error: {e}"]
+
+    data_dir_str = str(DATA_DIR)
+
+    for node in ast.walk(tree):
+        # Check imports against whitelist
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                top_level = alias.name.split(".")[0]
+                if top_level not in SANDBOX_ALLOWED_IMPORTS:
+                    violations.append(f"Disallowed import: {alias.name} (not in whitelist)")
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                top_level = node.module.split(".")[0]
+                if top_level not in SANDBOX_ALLOWED_IMPORTS:
+                    violations.append(f"Disallowed import: {node.module} (not in whitelist)")
+
+        # Check dangerous function calls
+        if isinstance(node, ast.Call):
+            call_name = _get_call_name(node)
+            if call_name:
+                bare_name = call_name.rsplit(".", 1)[-1]
+                # Check sandbox-specific blocks
+                if bare_name in _SANDBOX_BLOCKED_CALLS:
+                    violations.append(f"Blocked call: {call_name}")
+                if bare_name in BLOCKLISTED_BARE_CALLS:
+                    violations.append(f"Blocked call: {call_name}")
+                # Check for os.system, subprocess.run, etc.
+                if any(call_name == b or call_name.startswith(b + ".") for b in BLOCKLISTED_QUALIFIED_CALLS):
+                    violations.append(f"Blocked call: {call_name}")
+
+        # Check for string literals that reference paths outside DATA_DIR
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            val = node.value
+            # Flag absolute paths that aren't under DATA_DIR
+            if val.startswith("/") and not val.startswith(data_dir_str) and not val.startswith("/tmp"):
+                violations.append(f"File path outside DATA_DIR: {val}")
+
+    return len(violations) == 0, violations
 
 
 def _check_quality_warnings(source: str) -> list[str]:
@@ -1039,7 +1136,19 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
 
     Returns (passed, error_message).
     #28: Enhanced smoke test — actually invokes the handler with mock objects.
+    #74: Now includes sandbox safety validation.
     """
+    # Phase 0: Sandbox safety check (#74) — check for blocked imports/calls only
+    try:
+        source = module_path.read_text()
+        safe, violations = validate_extension_safety(source)
+        # Only block on hard violations (blocked imports/calls), not whitelist violations
+        hard_violations = [v for v in violations if "Blocked" in v or "File path outside" in v]
+        if hard_violations:
+            return False, f"Sandbox violation: {'; '.join(hard_violations[:3])}"
+    except Exception as e:
+        log.warning("Sandbox check failed for %s: %s", module_path, e)
+
     handler_name = f"cmd_{command_name}"
     # Phase 1: Import check + handler exists
     test_script = (
@@ -1154,6 +1263,7 @@ async def create_extension_pr(
     name: str, module_source: str, manifest: dict,
     warnings: list[str] | None = None,
     test_source: str | None = None,
+    scheduler_source: str | None = None,
 ) -> str:
     """Create a branch, commit the generated files, push, and open a PR.
 
@@ -1163,6 +1273,7 @@ async def create_extension_pr(
     action_file = KHALIL_DIR / "actions" / f"{name}.py"
     manifest_file = EXTENSIONS_DIR / f"{name}.json"
     test_file = KHALIL_DIR / "tests" / f"test_{name}.py" if test_source else None
+    scheduler_file = KHALIL_DIR / "actions" / f"{name}_scheduler.py" if scheduler_source else None
 
     def _git_workflow():
         # Check gh is authenticated
@@ -1191,11 +1302,16 @@ async def create_extension_pr(
             # Write test file if generated
             if test_file and test_source:
                 test_file.write_text(test_source)
+            # #30: Write scheduler job if generated
+            if scheduler_file and scheduler_source:
+                scheduler_file.write_text(scheduler_source)
 
             # Commit and push
             files_to_add = [str(action_file), str(manifest_file)]
             if test_file and test_source:
                 files_to_add.append(str(test_file))
+            if scheduler_file and scheduler_source:
+                files_to_add.append(str(scheduler_file))
             _run_git("add", *files_to_add)
             _run_git(
                 "commit", "-m",
@@ -1214,6 +1330,7 @@ async def create_extension_pr(
                 f"- `actions/{name}.py` — action module\n"
                 f"- `extensions/{name}.json` — extension manifest\n"
                 + (f"- `tests/test_{name}.py` — integration tests\n" if test_source else "")
+                + (f"- `actions/{name}_scheduler.py` — scheduler job\n" if scheduler_source else "")
                 + f"\n"
                 f"## Review checklist\n"
                 f"- [ ] Code looks correct and safe\n"
@@ -1305,6 +1422,12 @@ async def generate_and_pr(payload: dict) -> str:
                 log.error("Generated code failed validation: %s", error)
                 return f"Generated code failed validation: {error}\nPlease try again or build this manually."
 
+            # #30: Generate scheduler job if spec mentions periodic/scheduled work
+            scheduler_source = None
+            if spec_needs_scheduler(spec):
+                scheduler_source = MULTI_FILE_TEMPLATE["scheduler_job"].format(name=name)
+                log.info("Generated scheduler job for multi-file extension: %s", name)
+
             # Generate integration tests alongside the module
             test_source = await generate_extension_tests(spec, module_source)
             if test_source:
@@ -1313,7 +1436,10 @@ async def generate_and_pr(payload: dict) -> str:
                 log.warning("Test generation failed for %s — proceeding without tests", name)
 
             manifest = json.loads(manifest_json)
-            pr_url = await create_extension_pr(name, module_source, manifest, warnings, test_source)
+            if scheduler_source:
+                manifest["scheduler_job"] = f"actions.{name}_scheduler"
+
+            pr_url = await create_extension_pr(name, module_source, manifest, warnings, test_source, scheduler_source)
 
         _last_generation_time = time.time()
 
@@ -1384,3 +1510,109 @@ _pending_extensions: dict[str, dict] = {}
 def get_pending_extension(name: str) -> dict | None:
     """Retrieve and remove a pending extension spec."""
     return _pending_extensions.pop(name, None)
+
+
+# --- #25: Extension Hot-Reload ---
+
+def hot_reload_extension(name: str) -> str:
+    """Reload a single extension by name without restarting the bot.
+
+    Finds the extension manifest, reloads the Python module via importlib,
+    and returns a status message. The Telegram handler re-registration
+    must be done by the caller (server.py) since it holds the Application.
+    """
+    import importlib
+
+    manifest_path = EXTENSIONS_DIR / f"{name}.json"
+    if not manifest_path.exists():
+        return f"Extension '{name}' not found."
+
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        module_name = manifest["action_module"]
+
+        # Reload the module
+        if module_name in sys.modules:
+            mod = importlib.reload(sys.modules[module_name])
+        else:
+            mod = importlib.import_module(module_name)
+
+        # Verify handler exists
+        handler_name = manifest["handler_function"]
+        if not hasattr(mod, handler_name):
+            return f"Reloaded {module_name} but handler '{handler_name}' not found."
+
+        return f"Extension '{name}' reloaded successfully."
+    except Exception as e:
+        return f"Failed to reload '{name}': {e}"
+
+
+def reload_all_extensions() -> list[str]:
+    """Reload all extensions. Returns list of status messages."""
+    results = []
+    if not EXTENSIONS_DIR.exists():
+        return ["No extensions directory found."]
+
+    for manifest_path in sorted(EXTENSIONS_DIR.glob("*.json")):
+        if manifest_path.name.endswith(".prev.json"):
+            continue
+        name = manifest_path.stem
+        results.append(hot_reload_extension(name))
+    return results if results else ["No extensions found."]
+
+
+# --- #30: Multi-File Extension Generation ---
+
+MULTI_FILE_TEMPLATE = {
+    "scheduler_job": '''"""Scheduler job for {name}."""
+
+import logging
+from datetime import datetime
+from config import DB_PATH
+
+log = logging.getLogger("khalil.scheduler.{name}")
+
+
+async def run_{name}_job():
+    """Periodic job for {name}. Register with APScheduler."""
+    import sqlite3
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    try:
+        log.info("{name} scheduler job running at %s", datetime.utcnow().isoformat())
+        # TODO: Implement periodic logic
+    finally:
+        conn.close()
+''',
+    "db_migration": '''"""DB migration for {name}."""
+
+import sqlite3
+from config import DB_PATH
+
+
+def migrate_{name}():
+    """Run database migration for {name}."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        conn.execute("""CREATE TABLE IF NOT EXISTS {name}_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            value TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""")
+        conn.commit()
+    finally:
+        conn.close()
+''',
+}
+
+# Keywords that signal the extension needs a scheduler job
+_SCHEDULER_KEYWORDS = {"periodic", "scheduled", "recurring", "monitor", "poll", "watch", "cron"}
+
+
+def spec_needs_scheduler(spec: dict) -> bool:
+    """Check if spec description suggests a periodic/scheduled component."""
+    desc = spec.get("description", "").lower()
+    name = spec.get("name", "").lower()
+    combined = f"{desc} {name}"
+    return any(kw in combined for kw in _SCHEDULER_KEYWORDS)

@@ -1661,3 +1661,114 @@ def detect_travel_mode() -> dict:
         "dates": dates,
         "context": " ".join(context_parts),
     }
+
+
+# --- #60: Entity Extraction and Linking ---
+
+# Known company suffixes for regex-based NER
+_COMPANY_SUFFIXES = r"\b(?:Inc|Corp|Ltd|LLC|Co|Group|Technologies|Labs|Studios|Games)\b"
+
+# Precompiled patterns for entity extraction
+_ENTITY_PATTERNS = [
+    ("email", _re_module.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")),
+    ("url", _re_module.compile(r"https?://[^\s<>\"']+|www\.[^\s<>\"']+")),
+    ("date", _re_module.compile(
+        r"\b(?:\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|"
+        r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:,?\s+\d{4})?)\b",
+        _re_module.IGNORECASE,
+    )),
+    ("company", _re_module.compile(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+" + _COMPANY_SUFFIXES)),
+    ("person", _re_module.compile(r"\b([A-Z][a-z]{1,20})\s+([A-Z][a-z]{1,20})\b")),
+]
+
+# Common words that look like person names but aren't
+_FALSE_POSITIVE_NAMES = {
+    "The", "This", "That", "These", "Those", "Monday", "Tuesday", "Wednesday",
+    "Thursday", "Friday", "Saturday", "Sunday", "January", "February", "March",
+    "April", "May", "June", "July", "August", "September", "October", "November",
+    "December", "Google", "Apple", "Microsoft", "Amazon", "Netflix", "Spotify",
+    "Hello", "Dear", "Best", "Kind", "Regards", "Thanks", "Please", "Sorry",
+    "Good", "Morning", "Evening", "Night", "New", "York", "San", "Los",
+}
+
+
+def extract_entities(text: str) -> list[dict]:
+    """#60: Extract entities from text using regex-based NER.
+
+    Returns list of {type, value, position} dicts.
+    Types: 'email', 'url', 'date', 'company', 'person'.
+    """
+    entities = []
+    seen_values = set()  # deduplicate
+
+    for entity_type, pattern in _ENTITY_PATTERNS:
+        for match in pattern.finditer(text):
+            value = match.group(0).strip()
+
+            # Filter false positive person names
+            if entity_type == "person":
+                first, last = match.group(1), match.group(2)
+                if first in _FALSE_POSITIVE_NAMES or last in _FALSE_POSITIVE_NAMES:
+                    continue
+                value = f"{first} {last}"
+
+            if entity_type == "company":
+                value = match.group(1).strip() + " " + match.group(0).split()[-1]
+
+            if value not in seen_values:
+                seen_values.add(value)
+                entities.append({
+                    "type": entity_type,
+                    "value": value,
+                    "position": match.start(),
+                })
+
+    # Sort by position in text
+    entities.sort(key=lambda e: e["position"])
+    return entities
+
+
+def build_entity_index(days: int = 7) -> dict[str, list[dict]]:
+    """#60: Process recent conversations and build entity frequency map.
+
+    Returns dict mapping entity type -> list of {value, count} sorted by frequency.
+    Also records entity mentions as interaction signals.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Fetch recent conversation content from interaction_signals
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals WHERE created_at > ? AND context IS NOT NULL",
+        (cutoff,),
+    ).fetchall()
+
+    # Count entities across all conversations
+    entity_counts: dict[str, dict[str, int]] = {}
+    for row in rows:
+        try:
+            ctx = json.loads(row["context"]) if isinstance(row["context"], str) else row["context"]
+            text = ctx.get("query", "") or ctx.get("text", "") or ""
+        except (json.JSONDecodeError, AttributeError):
+            continue
+
+        if not text:
+            continue
+
+        for entity in extract_entities(text):
+            etype = entity["type"]
+            evalue = entity["value"]
+            if etype not in entity_counts:
+                entity_counts[etype] = {}
+            entity_counts[etype][evalue] = entity_counts[etype].get(evalue, 0) + 1
+
+    # Build frequency-sorted index and record signals
+    index = {}
+    for etype, values in entity_counts.items():
+        sorted_entities = sorted(values.items(), key=lambda x: x[1], reverse=True)
+        index[etype] = [{"value": v, "count": c} for v, c in sorted_entities]
+        # Record top entities as signals
+        for value, count in sorted_entities[:5]:
+            record_signal("entity_mention", {"type": etype, "value": value, "count": count})
+
+    return index

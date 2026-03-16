@@ -157,3 +157,17 @@ async def run_micro_reflection(ask_claude_fn, bot=None, chat_id: int = None):
     except Exception as e:
         log.error(f"Self-healing check failed: {e}")
         _record_scheduler_failure("self_healing_check", e)
+
+
+async def poll_dev_state(bot, chat_id: int):
+    """Poll dev environment state and notify on changes."""
+    try:
+        from actions.terminal import poll_and_diff, format_state_changes
+        changes = await poll_and_diff()
+        if changes:
+            message = format_state_changes(changes)
+            await bot.send_message(chat_id=chat_id, text=message)
+            log.info("Dev state changes detected: %d", len(changes))
+    except Exception as e:
+        log.debug("Dev state poll failed: %s", e)
+        _record_scheduler_failure("dev_state_poll", e)

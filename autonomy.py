@@ -35,6 +35,15 @@ ACTION_RULES = {
     "shell_read": ActionType.READ,
     "shell_write": ActionType.WRITE,
     "shell_dangerous": ActionType.DANGEROUS,
+    # Terminal / Cursor control
+    "cursor_status": ActionType.READ,
+    "cursor_extensions": ActionType.READ,
+    "terminal_status": ActionType.READ,
+    "cursor_open": ActionType.READ,      # navigates existing window
+    "cursor_diff": ActionType.READ,      # opens diff view
+    "cursor_open_project": ActionType.WRITE,  # opens new window
+    "terminal_exec": ActionType.WRITE,   # injects command into live session
+    "terminal_new_tab": ActionType.WRITE,
 }
 
 # Safe writes: auto-approved in GUIDED mode (low risk, easily reversible)

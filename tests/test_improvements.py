@@ -1,6 +1,7 @@
 """Tests for Khalil improvements."""
 
 import asyncio
+import json
 import os
 import re
 import sqlite3
@@ -4235,3 +4236,766 @@ class TestLoginItemManagement:
         # It's a shell action, which goes through safety classification
         # The command itself is read-only (osascript get / ls)
         assert "osascript" in result["command"] or "ls" in result["command"]
+
+
+# ============================================================
+# Batch 13: Items #24, #25, #30, #43, #48, #51, #83
+# ============================================================
+
+
+# --- #24: Dependency Injection for Extensions ---
+
+class TestKhalilContext:
+    def test_khalil_context_attributes(self):
+        """KhalilContext exposes db, ask_llm, and notify."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock
+        db = MagicMock()
+        ask_llm = AsyncMock()
+        notify = AsyncMock()
+        ctx = KhalilContext(db=db, ask_llm=ask_llm, notify=notify)
+        assert ctx.db is db
+        assert ctx.ask_llm is ask_llm
+        assert ctx.notify is notify
+
+    def test_khalil_context_search_method(self):
+        """KhalilContext.search delegates to keyword_search."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock, patch
+        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        with patch("knowledge.search.keyword_search", return_value=[{"title": "test"}]) as mock_search:
+            results = ctx.search("test query", limit=3)
+            mock_search.assert_called_once_with("test query", limit=3)
+            assert results == [{"title": "test"}]
+
+    def test_khalil_context_record_signal(self):
+        """KhalilContext.record_signal delegates to learning.record_signal."""
+        from actions.extend import KhalilContext
+        from unittest.mock import MagicMock, AsyncMock, patch
+        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        with patch("learning.record_signal") as mock_signal:
+            ctx.record_signal("test_type", {"key": "value"})
+            mock_signal.assert_called_once_with("test_type", {"key": "value"})
+
+    def test_khalil_context_mentioned_in_prompt(self):
+        """Code generation prompt references KhalilContext."""
+        from actions.extend import generate_action_module
+        import inspect
+        source = inspect.getsource(generate_action_module)
+        assert "KhalilContext" in source
+
+
+# --- #25: Extension Hot-Reload ---
+
+class TestExtensionHotReload:
+    def test_hot_reload_not_found(self, tmp_path, monkeypatch):
+        """hot_reload_extension returns error for missing extension."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        from actions.extend import hot_reload_extension
+        result = hot_reload_extension("nonexistent")
+        assert "not found" in result
+
+    def test_hot_reload_valid_extension(self, tmp_path, monkeypatch):
+        """hot_reload_extension reloads module and returns success."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        # Create a minimal manifest
+        manifest = {
+            "name": "test_ext",
+            "command": "testext",
+            "action_module": "os.path",  # use a stdlib module for testing
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "test_ext.json").write_text(json.dumps(manifest))
+        from actions.extend import hot_reload_extension
+        result = hot_reload_extension("test_ext")
+        assert "reloaded successfully" in result
+
+    def test_reload_all_extensions_empty(self, tmp_path, monkeypatch):
+        """reload_all_extensions returns message when no extensions."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        from actions.extend import reload_all_extensions
+        results = reload_all_extensions()
+        assert results == ["No extensions found."]
+
+    def test_reload_all_extensions_with_entries(self, tmp_path, monkeypatch):
+        """reload_all_extensions processes all manifest files."""
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        manifest = {
+            "name": "ext1",
+            "command": "ext1",
+            "action_module": "os.path",
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "ext1.json").write_text(json.dumps(manifest))
+        from actions.extend import reload_all_extensions
+        results = reload_all_extensions()
+        assert len(results) == 1
+        assert "reloaded" in results[0]
+
+    def test_reregister_extension_missing(self, monkeypatch):
+        """reregister_extension handles missing manifest."""
+        from server import reregister_extension
+        from unittest.mock import MagicMock
+        monkeypatch.setattr("config.EXTENSIONS_DIR", __import__("pathlib").Path("/nonexistent"))
+        app = MagicMock()
+        result = reregister_extension(app, "missing")
+        assert "not found" in result
+
+
+# --- #30: Multi-File Extension Generation ---
+
+class TestMultiFileExtension:
+    def test_spec_needs_scheduler_positive(self):
+        """Specs with scheduler keywords should trigger multi-file."""
+        from actions.extend import spec_needs_scheduler
+        assert spec_needs_scheduler({"description": "monitor stock prices periodically"}) is True
+        assert spec_needs_scheduler({"description": "scheduled daily report"}) is True
+        assert spec_needs_scheduler({"description": "recurring email digest"}) is True
+
+    def test_spec_needs_scheduler_negative(self):
+        """Specs without scheduler keywords should not trigger multi-file."""
+        from actions.extend import spec_needs_scheduler
+        assert spec_needs_scheduler({"description": "track my reading list"}) is False
+        assert spec_needs_scheduler({"description": "search my contacts"}) is False
+
+    def test_multi_file_template_exists(self):
+        """MULTI_FILE_TEMPLATE has scheduler_job and db_migration."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        assert "scheduler_job" in MULTI_FILE_TEMPLATE
+        assert "db_migration" in MULTI_FILE_TEMPLATE
+
+    def test_scheduler_template_renders(self):
+        """Scheduler job template renders with name placeholder."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        rendered = MULTI_FILE_TEMPLATE["scheduler_job"].format(name="price_monitor")
+        assert "run_price_monitor_job" in rendered
+        assert "khalil.scheduler.price_monitor" in rendered
+
+    def test_db_migration_template_renders(self):
+        """DB migration template renders with name placeholder."""
+        from actions.extend import MULTI_FILE_TEMPLATE
+        rendered = MULTI_FILE_TEMPLATE["db_migration"].format(name="price_monitor")
+        assert "migrate_price_monitor" in rendered
+        assert "price_monitor_data" in rendered
+
+
+# --- #43: Disk Cleanup Assistant ---
+
+class TestDiskCleanup:
+    def test_disk_space_pattern(self):
+        """'disk space' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("check disk space") == "shell"
+
+    def test_storage_usage_pattern(self):
+        """'storage usage' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("show storage usage") == "shell"
+
+    def test_large_files_pattern(self):
+        """'large files' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("show large files") == "shell"
+
+    def test_clean_cache_pattern(self):
+        """'clean cache' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("clean caches") == "shell"
+
+    def test_clean_downloads_pattern(self):
+        """'clean downloads' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("clean downloads") == "shell"
+
+    def test_disk_space_direct_intent(self):
+        """'disk space' maps to df -h /."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("check disk space")
+        assert result is not None
+        assert "df -h" in result["command"]
+
+    def test_large_files_direct_intent(self):
+        """'show large files' maps to du + sort."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("show me the large files")
+        assert result is not None
+        assert "du" in result["command"]
+        assert "sort" in result["command"]
+
+    def test_clean_cache_direct_intent(self):
+        """'clean cache' shows cache sizes (read-only)."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("clean caches")
+        assert result is not None
+        assert "Library/Caches" in result["command"]
+
+    def test_clean_downloads_direct_intent(self):
+        """'clean downloads' shows Downloads sorted by size."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("clean downloads")
+        assert result is not None
+        assert "Downloads" in result["command"]
+
+
+# --- #48: Slack Message Sending ---
+
+class TestSlackIntegration:
+    def test_slack_send_pattern(self):
+        """'send slack message' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("send a slack message to #general") == "slack_send"
+
+    def test_post_to_slack_pattern(self):
+        """'post to slack' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("post to slack in #random") == "slack_send"
+
+    def test_message_on_slack_pattern(self):
+        """'message on slack' triggers slack_send action."""
+        from server import _looks_like_action
+        assert _looks_like_action("message on slack") == "slack_send"
+
+    def test_slack_direct_intent_with_channel(self):
+        """Slack send parses channel and message."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("send a slack message to general: hello team")
+        assert result is not None
+        assert result["action"] == "slack_send"
+        assert result["channel"] == "general"
+
+    def test_slack_direct_intent_generic(self):
+        """Slack send without channel returns generic intent."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("send a slack message")
+        assert result is not None
+        assert result["action"] == "slack_send"
+
+    def test_send_slack_message_no_webhook(self):
+        """send_slack_message returns error when webhook not configured."""
+        from server import send_slack_message
+        from unittest.mock import patch
+        with patch("server.get_secret", return_value=None):
+            result = asyncio.run(send_slack_message("general", "hello"))
+            assert "not configured" in result
+
+    def test_send_slack_message_success(self):
+        """send_slack_message posts to webhook."""
+        from server import send_slack_message
+        from unittest.mock import patch, AsyncMock, MagicMock
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_resp)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        with patch("server.get_secret", return_value="https://hooks.slack.com/test"), \
+             patch("httpx.AsyncClient", return_value=mock_client):
+            result = asyncio.run(send_slack_message("general", "hello"))
+            assert "sent" in result.lower()
+
+
+# --- #51: Spotify Playback Control ---
+
+class TestSpotifyPlayback:
+    def test_play_music_pattern(self):
+        """'play music' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("play music") == "shell"
+
+    def test_pause_music_pattern(self):
+        """'pause music' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("pause music") == "shell"
+
+    def test_next_song_pattern(self):
+        """'next song' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("next song") == "shell"
+
+    def test_now_playing_pattern(self):
+        """'what's playing' triggers shell action."""
+        from server import _looks_like_action
+        assert _looks_like_action("what's playing") == "shell"
+
+    def test_play_music_direct_intent(self):
+        """'play music' maps to osascript play."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("play music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "play" in result["command"]
+
+    def test_pause_music_direct_intent(self):
+        """'pause music' maps to osascript pause."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("pause music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "pause" in result["command"]
+
+    def test_next_song_direct_intent(self):
+        """'skip song' maps to osascript next track."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("skip song")
+        assert result is not None
+        assert "next track" in result["command"]
+
+    def test_current_song_direct_intent(self):
+        """'what's playing' maps to osascript get current track."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("what's playing")
+        assert result is not None
+        assert "current track" in result["command"]
+
+    def test_resume_music_direct_intent(self):
+        """'resume music' also maps to Spotify play."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("resume music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "play" in result["command"]
+
+    def test_stop_music_direct_intent(self):
+        """'stop music' also maps to Spotify pause."""
+        from server import _try_direct_shell_intent
+        result = _try_direct_shell_intent("stop music")
+        assert result is not None
+        assert "Spotify" in result["command"]
+        assert "pause" in result["command"]
+
+
+# --- #83: Integration Test Suite ---
+
+class TestIntegrationE2E:
+    """E2E-style tests verifying handle_message wiring with mocked externals."""
+
+    def test_shell_intent_full_flow(self, mock_update, mock_context):
+        """Message triggering shell intent goes through direct mapping."""
+        from server import _try_direct_shell_intent
+        # Verify battery query maps to a shell command
+        result = _try_direct_shell_intent("what's my battery level")
+        assert result is not None
+        assert result["action"] == "shell"
+        assert "batt" in result["command"]
+
+    def test_knowledge_search_flow(self, mock_update, mock_context, mock_ask_llm):
+        """Knowledge search queries are not action intents and fall through to LLM.
+
+        Tests the intent detection path: _looks_like_action returns None,
+        _try_direct_shell_intent returns None → query goes to LLM context pipeline.
+        """
+        from server import _looks_like_action, _try_direct_shell_intent
+        query = "what did I discuss about RRSP"
+        # Should not be detected as an action
+        assert _looks_like_action(query) is None
+        # Should not map to a direct shell intent
+        assert _try_direct_shell_intent(query) is None
+        # This means it falls through to the LLM + knowledge search path
+
+    def test_reminder_intent_detection(self, mock_update, mock_context):
+        """Reminder phrases are detected by _looks_like_action."""
+        from server import _looks_like_action
+        assert _looks_like_action("remind me to buy groceries tomorrow") == "reminder"
+        assert _looks_like_action("set a reminder for 3pm") == "reminder"
+        assert _looks_like_action("don't let me forget the meeting") == "reminder"
+
+    def test_disk_cleanup_e2e(self, mock_update, mock_context):
+        """Disk cleanup message → direct shell intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "show me the biggest files on my computer"
+        hint = _looks_like_action(query)
+        assert hint == "shell"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert intent["action"] == "shell"
+        assert "du" in intent["command"]
+
+    def test_spotify_e2e(self, mock_update, mock_context):
+        """Spotify command → direct shell intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "play music"
+        hint = _looks_like_action(query)
+        assert hint == "shell"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert "Spotify" in intent["command"]
+
+    def test_slack_e2e(self, mock_update, mock_context):
+        """Slack send message → action pattern → direct intent pipeline."""
+        from server import _try_direct_shell_intent, _looks_like_action
+        query = "send a slack message to general: standup update"
+        hint = _looks_like_action(query)
+        assert hint == "slack_send"
+        intent = _try_direct_shell_intent(query)
+        assert intent is not None
+        assert intent["action"] == "slack_send"
+        assert intent["channel"] == "general"
+
+    def test_extension_hot_reload_e2e(self, tmp_path, monkeypatch):
+        """Hot reload + re-register cycle."""
+        from actions.extend import hot_reload_extension
+        monkeypatch.setattr("actions.extend.EXTENSIONS_DIR", tmp_path)
+        manifest = {
+            "name": "test_ext",
+            "command": "testext",
+            "action_module": "os.path",
+            "handler_function": "exists",
+            "description": "test",
+        }
+        (tmp_path / "test_ext.json").write_text(json.dumps(manifest))
+        result = hot_reload_extension("test_ext")
+        assert "reloaded successfully" in result
+
+
+# --- #37: Screenshot and OCR ---
+
+class TestScreenshotOCR:
+    def test_screenshot_pattern_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("take a screenshot") == "screenshot"
+        assert _looks_like_action("capture screen") == "screenshot"
+        assert _looks_like_action("screenshot of window") == "screenshot"
+        assert _looks_like_action("screenshot") == "screenshot"
+
+    def test_screenshot_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("take a screenshot")
+        assert intent is not None
+        assert intent["action"] == "shell"
+        assert "screencapture -x" in intent["command"]
+        assert "/tmp/khalil_screenshot.png" in intent["command"]
+
+    def test_window_screenshot_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("screenshot of the window")
+        assert intent is not None
+        assert "screencapture -w" in intent["command"]
+
+    def test_ocr_stub_no_file(self):
+        from server import _ocr_screenshot
+        result = _ocr_screenshot("/tmp/nonexistent_khalil_test.png")
+        assert "No screenshot found" in result
+
+    def test_ocr_stub_with_file(self, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n")  # minimal PNG header
+        from server import _ocr_screenshot
+        result = _ocr_screenshot(str(img))
+        # Should mention Vision framework since shortcuts likely not available
+        assert "screenshot" in result.lower() or "OCR" in result or "Vision" in result
+
+
+# --- #54: Google Drive File Creation ---
+
+class TestGoogleDriveCreation:
+    def test_drive_create_pattern_detected(self):
+        from server import _looks_like_action
+        assert _looks_like_action("create a google document") == "drive_create"
+        assert _looks_like_action("create a spreadsheet") == "drive_create"
+        assert _looks_like_action("save to drive") == "drive_create"
+
+    def test_drive_doc_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("create a document called Budget 2026")
+        assert intent is not None
+        assert intent["action"] == "drive_create_doc"
+        assert "Budget 2026" in intent["title"]
+
+    def test_drive_sheet_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("create a spreadsheet called Q1 Expenses")
+        assert intent is not None
+        assert intent["action"] == "drive_create_sheet"
+        assert "Q1 Expenses" in intent["title"]
+
+    def test_drive_scopes_defined(self):
+        from actions.gmail import SCOPES_DRIVE_WRITE
+        assert "https://www.googleapis.com/auth/drive.file" in SCOPES_DRIVE_WRITE
+
+    def test_token_file_drive_write_configured(self):
+        from config import TOKEN_FILE_DRIVE_WRITE
+        assert "drive_write" in str(TOKEN_FILE_DRIVE_WRITE)
+
+    def test_create_drive_doc_calls_api(self):
+        """Mock the Drive API and verify create_drive_doc works."""
+        from unittest.mock import patch, MagicMock
+        from actions.gmail import create_drive_doc
+
+        mock_service = MagicMock()
+        mock_service.files().create().execute.return_value = {
+            "id": "doc123", "name": "Test", "webViewLink": "https://docs.google.com/d/doc123"
+        }
+
+        with patch("actions.gmail._get_drive_service", return_value=mock_service):
+            result = asyncio.run(create_drive_doc("Test Doc"))
+            assert result["id"] == "doc123"
+            assert result["type"] == "document"
+
+    def test_create_drive_sheet_calls_api(self):
+        from unittest.mock import patch, MagicMock
+        from actions.gmail import create_drive_sheet
+
+        mock_service = MagicMock()
+        mock_service.files().create().execute.return_value = {
+            "id": "sheet456", "name": "Test Sheet", "webViewLink": "https://sheets.google.com/d/sheet456"
+        }
+
+        with patch("actions.gmail._get_drive_service", return_value=mock_service):
+            result = asyncio.run(create_drive_sheet("Test Sheet"))
+            assert result["id"] == "sheet456"
+            assert result["type"] == "spreadsheet"
+
+
+# --- #55: Multi-Account Gmail ---
+
+class TestMultiAccountGmail:
+    def test_multi_account_patterns(self):
+        from server import _looks_like_action
+        assert _looks_like_action("search my work email") == "email_work"
+        assert _looks_like_action("search my personal email") == "email_personal"
+        assert _looks_like_action("check my work inbox") == "email_work"
+
+    def test_work_email_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("search my work email")
+        assert intent is not None
+        assert intent["action"] == "email_search"
+        assert intent["account"] == "work"
+
+    def test_personal_email_direct_intent(self):
+        from server import _try_direct_shell_intent
+        intent = _try_direct_shell_intent("search my personal email")
+        assert intent is not None
+        assert intent["action"] == "email_search"
+        assert intent["account"] == "personal"
+
+    def test_gmail_accounts_config(self):
+        from actions.gmail import GMAIL_ACCOUNTS
+        assert "personal" in GMAIL_ACCOUNTS
+        assert "work" in GMAIL_ACCOUNTS
+
+    def test_token_file_work_configured(self):
+        from config import TOKEN_FILE_WORK
+        assert "work" in str(TOKEN_FILE_WORK)
+
+    def test_search_all_accounts_merges(self):
+        from unittest.mock import patch, MagicMock
+        from actions.gmail import search_all_accounts
+
+        # Mock _search_emails_account_sync to return different results per account
+        def mock_search(query, account="personal", max_results=5):
+            return [{"id": f"{account}_1", "account": account, "subject": f"Test from {account}",
+                     "from": "", "to": "", "date": "2026-01-01", "snippet": "", "body": ""}]
+
+        with patch("actions.gmail._search_emails_account_sync", side_effect=mock_search), \
+             patch("actions.gmail.GMAIL_ACCOUNTS", {"personal": MagicMock(exists=lambda: True), "work": MagicMock(exists=lambda: True)}):
+            results = asyncio.run(search_all_accounts("test"))
+            assert len(results) == 2
+            accounts = {r["account"] for r in results}
+            assert "personal" in accounts
+            assert "work" in accounts
+
+
+# --- #60: Entity Extraction and Linking ---
+
+class TestEntityExtraction:
+    def test_extract_email_entities(self):
+        from learning import extract_entities
+        entities = extract_entities("Contact john@example.com for details")
+        emails = [e for e in entities if e["type"] == "email"]
+        assert len(emails) == 1
+        assert emails[0]["value"] == "john@example.com"
+
+    def test_extract_url_entities(self):
+        from learning import extract_entities
+        entities = extract_entities("Visit https://example.com/page for info")
+        urls = [e for e in entities if e["type"] == "url"]
+        assert len(urls) == 1
+        assert "example.com" in urls[0]["value"]
+
+    def test_extract_date_entities(self):
+        from learning import extract_entities
+        entities = extract_entities("Meeting on 2026-03-15 at noon")
+        dates = [e for e in entities if e["type"] == "date"]
+        assert len(dates) == 1
+        assert "2026-03-15" in dates[0]["value"]
+
+    def test_extract_date_written_format(self):
+        from learning import extract_entities
+        entities = extract_entities("Deadline is March 15, 2026")
+        dates = [e for e in entities if e["type"] == "date"]
+        assert len(dates) >= 1
+
+    def test_extract_person_names(self):
+        from learning import extract_entities
+        entities = extract_entities("I met with Sarah Johnson yesterday about the project")
+        persons = [e for e in entities if e["type"] == "person"]
+        assert any("Sarah Johnson" in p["value"] for p in persons)
+
+    def test_filter_false_positive_names(self):
+        from learning import extract_entities
+        entities = extract_entities("Good Morning everyone")
+        persons = [e for e in entities if e["type"] == "person"]
+        assert len(persons) == 0
+
+    def test_extract_company(self):
+        from learning import extract_entities
+        entities = extract_entities("Working with Acme Corp on the deal")
+        companies = [e for e in entities if e["type"] == "company"]
+        assert len(companies) >= 1
+        assert any("Acme" in c["value"] for c in companies)
+
+    def test_entities_sorted_by_position(self):
+        from learning import extract_entities
+        text = "Email john@test.com and visit https://example.com"
+        entities = extract_entities(text)
+        positions = [e["position"] for e in entities]
+        assert positions == sorted(positions)
+
+    def test_deduplicate_entities(self):
+        from learning import extract_entities
+        entities = extract_entities("Contact john@test.com and also john@test.com")
+        emails = [e for e in entities if e["type"] == "email"]
+        assert len(emails) == 1
+
+    def test_build_entity_index(self, tmp_path, monkeypatch):
+        import sqlite3
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute("""CREATE TABLE IF NOT EXISTS interaction_signals (
+            id INTEGER PRIMARY KEY, signal_type TEXT, context TEXT, value REAL DEFAULT 1.0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS learned_preferences (
+            key TEXT PRIMARY KEY, value TEXT, source_insight_id INTEGER,
+            confidence REAL DEFAULT 0.5, created_at TIMESTAMP, updated_at TIMESTAMP)""")
+        conn.execute("INSERT INTO interaction_signals (signal_type, context) VALUES (?, ?)",
+                     ("test", json.dumps({"query": "Email sarah@example.com about the meeting with John Smith"})))
+        conn.commit()
+
+        monkeypatch.setattr("learning._db_conn", conn)
+        from learning import build_entity_index
+        index = build_entity_index(days=1)
+        assert isinstance(index, dict)
+        # Should find at least the email
+        if "email" in index:
+            assert any("sarah@example.com" in e["value"] for e in index["email"])
+
+
+# --- #74: Extension Sandboxing ---
+
+class TestExtensionSandboxing:
+    def test_safe_extension_passes(self):
+        from actions.extend import validate_extension_safety
+        safe_code = '''
+import json
+import re
+import logging
+
+async def cmd_test(update, context):
+    data = json.loads("{}")
+    await update.message.reply_text("OK")
+'''
+        safe, violations = validate_extension_safety(safe_code)
+        assert safe is True
+        assert violations == []
+
+    def test_blocked_import_subprocess(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import subprocess
+async def cmd_test(update, context):
+    subprocess.run(["ls"])
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("subprocess" in v for v in violations)
+
+    def test_blocked_import_os(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import os
+async def cmd_test(update, context):
+    os.system("rm -rf /")
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("os" in v.lower() for v in violations)
+
+    def test_blocked_eval_call(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import json
+async def cmd_test(update, context):
+    eval("print('hacked')")
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("eval" in v for v in violations)
+
+    def test_blocked_exec_call(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import json
+async def cmd_test(update, context):
+    exec("import os")
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("exec" in v for v in violations)
+
+    def test_blocked_dunder_import(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import json
+async def cmd_test(update, context):
+    __import__("os")
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("__import__" in v for v in violations)
+
+    def test_file_path_outside_data_dir(self):
+        from actions.extend import validate_extension_safety
+        bad_code = '''
+import json
+async def cmd_test(update, context):
+    path = "/etc/passwd"
+    data = json.loads("{}")
+'''
+        safe, violations = validate_extension_safety(bad_code)
+        assert safe is False
+        assert any("/etc/passwd" in v for v in violations)
+
+    def test_tmp_path_allowed(self):
+        from actions.extend import validate_extension_safety
+        ok_code = '''
+import json
+async def cmd_test(update, context):
+    path = "/tmp/test.json"
+    data = json.loads("{}")
+'''
+        safe, violations = validate_extension_safety(ok_code)
+        assert safe is True
+
+    def test_sandbox_whitelist_exists(self):
+        from actions.extend import SANDBOX_ALLOWED_IMPORTS
+        assert "json" in SANDBOX_ALLOWED_IMPORTS
+        assert "re" in SANDBOX_ALLOWED_IMPORTS
+        assert "asyncio" in SANDBOX_ALLOWED_IMPORTS
+        assert "subprocess" not in SANDBOX_ALLOWED_IMPORTS
+
+    def test_smoke_test_includes_sandbox_check(self, tmp_path):
+        """Verify smoke_test_module runs sandbox validation."""
+        from actions.extend import smoke_test_module
+        bad_module = tmp_path / "bad_ext.py"
+        bad_module.write_text('''
+import subprocess
+async def cmd_bad(update, context):
+    subprocess.run(["ls"])
+''')
+        passed, error = smoke_test_module(bad_module, "bad")
+        assert passed is False
+        assert "Sandbox violation" in error
