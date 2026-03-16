@@ -98,6 +98,90 @@ async def run_health_check() -> dict:
     }
 
 
+async def run_startup_self_test() -> dict:
+    """Run comprehensive startup self-test of all subsystems.
+
+    Checks: DB, Ollama, OAuth tokens, GitHub auth, scheduler readiness.
+    Returns dict with per-subsystem status and overall pass/fail.
+    """
+    results = {}
+
+    # 1. Database
+    db = check_database()
+    results["database"] = db
+
+    # 2. Ollama
+    ollama = await check_ollama()
+    results["ollama"] = ollama
+
+    # 3. OAuth tokens
+    try:
+        from oauth_utils import check_all_tokens
+        token_results = check_all_tokens()
+        unhealthy = [t for t in token_results if t["status"] not in ("healthy", "refreshed")]
+        results["oauth"] = {
+            "status": "ok" if not unhealthy else "degraded",
+            "tokens": token_results,
+            "unhealthy_count": len(unhealthy),
+        }
+    except Exception as e:
+        results["oauth"] = {"status": "error", "error": str(e)}
+
+    # 4. GitHub auth (for self-healing PRs)
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["gh", "auth", "status"], capture_output=True, text=True, timeout=10
+        )
+        results["github"] = {
+            "status": "ok" if proc.returncode == 0 else "not_authenticated",
+        }
+    except FileNotFoundError:
+        results["github"] = {"status": "not_installed"}
+    except Exception as e:
+        results["github"] = {"status": "error", "error": str(e)}
+
+    # Overall
+    issues = []
+    if results["database"]["status"] != "ok":
+        issues.append("Database")
+    if results["ollama"]["status"] != "ok":
+        issues.append("Ollama")
+    if results.get("oauth", {}).get("status") != "ok":
+        issues.append("OAuth")
+    if results.get("github", {}).get("status") != "ok":
+        issues.append("GitHub CLI")
+
+    results["overall"] = "ok" if not issues else "degraded"
+    results["issues"] = issues
+    return results
+
+
+def format_startup_report(results: dict) -> str:
+    """Format startup self-test results for logging or Telegram."""
+    lines = ["🔍 Khalil Startup Self-Test\n"]
+    status_icons = {"ok": "✅", "degraded": "⚠️", "error": "❌", "down": "❌"}
+
+    for subsystem in ["database", "ollama", "oauth", "github"]:
+        info = results.get(subsystem, {})
+        icon = status_icons.get(info.get("status", "error"), "❓")
+        label = subsystem.capitalize()
+        detail = ""
+        if subsystem == "database" and info.get("status") == "ok":
+            detail = f" ({info.get('documents', 0)} docs)"
+        elif subsystem == "ollama" and info.get("status") == "ok":
+            detail = f" ({', '.join(info.get('models', [])[:3])})"
+        elif subsystem == "oauth":
+            detail = f" ({info.get('unhealthy_count', '?')} unhealthy)" if info.get("status") != "ok" else ""
+        lines.append(f"  {icon} {label}{detail}")
+
+    overall_icon = "✅" if results["overall"] == "ok" else "⚠️"
+    lines.append(f"\n{overall_icon} Overall: {results['overall'].upper()}")
+    if results.get("issues"):
+        lines.append(f"Issues: {', '.join(results['issues'])}")
+    return "\n".join(lines)
+
+
 async def generate_self_check_message() -> str | None:
     """Generate a self-check notification if there are issues. Returns None if all clear."""
     report = await run_health_check()

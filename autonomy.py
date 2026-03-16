@@ -42,6 +42,14 @@ SAFE_WRITES = {"create_reminder", "draft_email", "shell_read"}
 # Pending action TTL: expire after 1 hour
 PENDING_TTL_SECONDS = 3600
 
+# #70: Per-action-type rate limits (action_prefix -> (max_count, window_seconds))
+DEFAULT_RATE_LIMITS = {
+    "send_email": (5, 3600),       # 5 emails per hour
+    "shell": (20, 60),             # 20 shell commands per minute
+    "create_reminder": (10, 3600), # 10 reminders per hour
+    "generate_capability": (2, 3600),  # 2 extensions per hour
+}
+
 
 class AutonomyController:
     def __init__(self, conn: sqlite3.Connection):
@@ -122,6 +130,20 @@ class AutonomyController:
         if self._level == AutonomyLevel.AUTONOMOUS:
             return AutonomyLevel.GUIDED
         return self._level
+
+    def check_rate_limit(self, action_name: str) -> tuple[bool, str]:
+        """Check if an action exceeds its rate limit. Returns (allowed, reason)."""
+        for prefix, (max_count, window_seconds) in DEFAULT_RATE_LIMITS.items():
+            if action_name.startswith(prefix):
+                cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).strftime("%Y-%m-%d %H:%M:%S")
+                count = self.conn.execute(
+                    "SELECT COUNT(*) FROM audit_log WHERE action_type LIKE ? AND timestamp > ?",
+                    (f"{prefix}%", cutoff),
+                ).fetchone()[0]
+                if count >= max_count:
+                    return False, f"Rate limit exceeded: {count}/{max_count} {prefix} actions in {window_seconds}s"
+                break
+        return True, ""
 
     def needs_approval(self, action_name: str) -> bool:
         """Check if an action needs user approval given current autonomy level."""
