@@ -146,6 +146,13 @@ SAFE_PREFIXES = [
     "osascript ",
     # Clipboard read
     "pbpaste",
+    # Cursor IDE (read-only)
+    "cursor --status",
+    "cursor --list-extensions",
+    "cursor --version",
+    "cursor -g ",
+    "cursor --goto ",
+    "cursor --diff ",
 ]
 
 
