@@ -97,9 +97,36 @@ class AutonomyController:
         """Classify an action into read/write/dangerous."""
         return ACTION_RULES.get(action_name, ActionType.WRITE)
 
+    def _effective_level(self) -> AutonomyLevel:
+        """Return the effective autonomy level, adjusted by time-of-day context.
+
+        During work hours (8 AM - 6 PM weekdays), use configured level.
+        Outside work hours, cap at GUIDED (more conservative).
+        """
+        # Check if context-aware autonomy is enabled
+        row = self.conn.execute(
+            "SELECT value FROM settings WHERE key = 'context_aware_autonomy'"
+        ).fetchone()
+        if not row or row[0] != "1":
+            return self._level
+
+        from datetime import datetime
+        import zoneinfo
+        from config import TIMEZONE
+        now = datetime.now(zoneinfo.ZoneInfo(TIMEZONE))
+        is_work_hours = now.weekday() < 5 and 8 <= now.hour < 18
+
+        if is_work_hours:
+            return self._level
+        # Outside work hours, cap at GUIDED
+        if self._level == AutonomyLevel.AUTONOMOUS:
+            return AutonomyLevel.GUIDED
+        return self._level
+
     def needs_approval(self, action_name: str) -> bool:
         """Check if an action needs user approval given current autonomy level."""
         action_type = self.classify_action(action_name)
+        effective_level = self._effective_level()
 
         # Hard guardrails always need approval
         if action_name in HARD_GUARDRAILS:
@@ -114,9 +141,9 @@ class AutonomyController:
             return False
 
         # Write depends on level
-        if self._level == AutonomyLevel.SUPERVISED:
+        if effective_level == AutonomyLevel.SUPERVISED:
             return True
-        elif self._level == AutonomyLevel.GUIDED:
+        elif effective_level == AutonomyLevel.GUIDED:
             # Safe writes auto-approved, risky writes need approval
             return action_name not in SAFE_WRITES
         else:  # AUTONOMOUS

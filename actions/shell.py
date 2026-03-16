@@ -108,6 +108,28 @@ SAFE_PREFIXES = [
     "git remote",
     "git show",
     "git stash list",
+    # Text processing (read-only)
+    "grep ",
+    "grep -",
+    "awk ",
+    "sed -n ",      # read-only sed (print mode)
+    "sed -n'",
+    "sort ",
+    "uniq ",
+    "cut ",
+    "tr ",
+    "diff ",
+    # Spotlight / metadata search
+    "mdls ",
+    "mdfind ",
+    "mdutil -s",
+    # Network diagnostics (read-only)
+    "lsof ",
+    "lsof -i",
+    "netstat ",
+    # Software updates (list only)
+    "softwareupdate --list",
+    "softwareupdate -l",
     # Other read-only
     "echo ",
     "which ",
@@ -120,8 +142,34 @@ SAFE_PREFIXES = [
     "ioreg ",
     "screencapture ",
     "pbpaste",
+    "pbcopy",
     "osascript ",
+    # Clipboard read
+    "pbpaste",
 ]
+
+
+def sanitize_command(cmd: str) -> tuple[str | None, str]:
+    """Sanitize a shell command for injection patterns.
+
+    Returns (sanitized_cmd, rejection_reason). If rejected, cmd is None.
+    LLM-generated commands may contain chained operators that bypass classification.
+    """
+    # Reject null bytes
+    if "\x00" in cmd:
+        return None, "Command contains null bytes"
+
+    # Reject backtick/subshell injection
+    if "`" in cmd or "$(" in cmd:
+        return None, "Command contains subshell expansion (backticks or $(...)). Rejected for safety."
+
+    # Reject command chaining operators (;, &&, ||, |) unless the whole command is safe
+    # We allow pipes for safe read-only pipelines (e.g. "ps aux | grep python")
+    # but reject ; and && and || which allow arbitrary command injection
+    if re.search(r"[;&]|&&|\|\|", cmd):
+        return None, "Command contains chaining operators (;, &&, ||). Split into separate commands."
+
+    return cmd.strip(), ""
 
 
 def classify_command(cmd: str) -> ActionType:
@@ -160,6 +208,18 @@ async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT)
 
     Returns: {"returncode": int, "stdout": str, "stderr": str, "timed_out": bool}
     """
+    # Sanitize command before execution
+    sanitized, reason = sanitize_command(cmd)
+    if sanitized is None:
+        log.warning("Command rejected by sanitizer: %s — %s", cmd[:100], reason)
+        return {
+            "returncode": -2,
+            "stdout": "",
+            "stderr": f"Command rejected: {reason}",
+            "timed_out": False,
+        }
+    cmd = sanitized
+
     if not cwd:
         cwd = os.path.expanduser("~")
 

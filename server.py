@@ -166,6 +166,81 @@ def truncate_context(results: list[dict], max_chars: int = MAX_CONTEXT_TOKENS * 
 
 LLM_TIMEOUT = 60.0  # seconds — Ollama can be slow on first call
 CLAUDE_TIMEOUT = 30.0
+_ollama_recovery_attempted = False
+
+
+async def _try_recover_ollama() -> bool:
+    """Detect dead Ollama process, attempt restart. Returns True if recovered."""
+    global _ollama_recovery_attempted
+    import subprocess
+    if _ollama_recovery_attempted:
+        return False  # Only try once per session to avoid loops
+    _ollama_recovery_attempted = True
+
+    # Check if Ollama process is running
+    try:
+        result = subprocess.run(["pgrep", "-x", "ollama"], capture_output=True)
+        if result.returncode == 0:
+            log.info("Ollama process found but not responding — may be hung")
+            return False
+
+        # Process not running — try to start it
+        log.warning("Ollama process not running. Attempting restart...")
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        # Give it a moment to start
+        import asyncio
+        await asyncio.sleep(3)
+
+        # Verify it started
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            if resp.status_code == 200:
+                log.info("Ollama restarted successfully")
+                _ollama_recovery_attempted = False  # Reset so we can recover again later
+                return True
+    except Exception as e:
+        log.warning("Ollama recovery failed: %s", e)
+    return False
+
+
+async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
+    """Fall back to Claude API when Ollama is down. Returns None if Claude unavailable."""
+    if not claude:
+        # Try to initialize Claude on-the-fly
+        api_key = get_secret("anthropic-api-key")
+        if not api_key:
+            return None
+        try:
+            temp_claude = anthropic.AsyncAnthropic(api_key=api_key)
+            response = await temp_claude.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1500,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                timeout=CLAUDE_TIMEOUT,
+            )
+            log.info("Fell back to Claude API (Ollama unavailable)")
+            return response.content[0].text
+        except Exception as e:
+            log.error("Claude fallback also failed: %s", e)
+            return None
+    else:
+        try:
+            response = await claude.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=1500,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                timeout=CLAUDE_TIMEOUT,
+            )
+            log.info("Fell back to Claude API (Ollama unavailable)")
+            return response.content[0].text
+        except Exception:
+            return None
 
 
 async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
@@ -189,7 +264,17 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
     except Exception:
         pass  # Preferences not available yet (DB not initialized)
 
+    # Temporal context — inject current date/time into every LLM call
+    from datetime import datetime as _dt
+    import zoneinfo
+    _now = _dt.now(zoneinfo.ZoneInfo(TIMEZONE))
+    _temporal = (
+        f"CURRENT TIME: {_now.strftime('%A, %B %d, %Y at %I:%M %p %Z')} "
+        f"(Q{(_now.month - 1) // 3 + 1} {_now.year})\n\n"
+    )
+
     system = (
+        f"{_temporal}"
         "You are Khalil, Ahmed's personal AI assistant. "
         "You have deep knowledge of his life, career, family, finances, and projects. "
         "Answer based on the provided context from his personal archives. "
@@ -254,7 +339,31 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         log.error("Cannot connect to Ollama at %s", OLLAMA_URL)
         from learning import record_signal
         record_signal("llm_failure", {"backend": "ollama", "error": "connection_refused"})
-        return "⚠️ LLM unavailable — Ollama is not running. Start it with: ollama serve"
+        # Attempt Ollama recovery
+        if await _try_recover_ollama():
+            # Retry the request after recovery
+            try:
+                async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+                    response = await client.post(
+                        f"{OLLAMA_URL}/api/chat",
+                        json={
+                            "model": OLLAMA_LLM_MODEL,
+                            "messages": [
+                                {"role": "system", "content": system},
+                                {"role": "user", "content": user_message},
+                            ],
+                            "stream": False,
+                        },
+                    )
+                    response.raise_for_status()
+                    return response.json()["message"]["content"]
+            except Exception:
+                pass  # Fall through to Claude fallback
+        # Fall back to Claude API
+        fallback = await _fallback_to_claude(query, context, system, user_message)
+        if fallback:
+            return fallback
+        return "⚠️ LLM unavailable — Ollama is not running and Claude fallback failed. Start Ollama with: ollama serve"
     except (httpx.HTTPError, KeyError) as e:
         log.error("Ollama LLM call failed: %s", e)
         from learning import record_signal
@@ -2219,6 +2328,22 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # OAuth token refresh — every 6 hours, proactively refresh before expiry
+    async def _oauth_refresh_job():
+        from oauth_utils import proactive_token_refresh
+        async def _notify(msg):
+            if _can_send():
+                await telegram_app.bot.send_message(chat_id=OWNER_CHAT_ID, text=msg)
+        await proactive_token_refresh(notify_fn=_notify)
+
+    scheduler.add_job(
+        _oauth_refresh_job,
+        CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
+        id="oauth_refresh",
+        name="OAuth Token Refresh",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
@@ -2266,6 +2391,17 @@ async def startup():
                 "Ollama health check FAILED — LLM and embeddings will be unavailable. "
                 "Start Ollama with: ollama serve"
             )
+
+    # Proactive OAuth token refresh
+    try:
+        from oauth_utils import proactive_token_refresh
+        token_problems = await proactive_token_refresh()
+        if token_problems:
+            log.warning("OAuth token issues at startup: %s", token_problems)
+        else:
+            log.info("OAuth tokens: all healthy")
+    except Exception as e:
+        log.warning("OAuth token check failed: %s", e)
 
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
