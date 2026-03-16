@@ -328,14 +328,47 @@ async def _try_recover_ollama() -> bool:
     return False
 
 
-# #18: Graceful degradation chain — Ollama → Claude Sonnet → Claude Haiku → cached
+# #18: Graceful degradation chain — Ollama local → Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → cached
+_OLLAMA_CLOUD_FALLBACK = "kimi-k2.5:cloud"
 _FALLBACK_MODELS = [CLAUDE_MODEL, "claude-haiku-4-5-20251001"]
+
+
+async def _fallback_to_ollama_cloud(query: str, context: str, system: str, user_message: str) -> str | None:
+    """Try Ollama cloud model (kimi-k2.5) before falling back to Claude."""
+    if contains_sensitive_data(query):
+        log.info("Skipping Ollama cloud fallback — sensitive query")
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+            response = await client.post(
+                f"{OLLAMA_URL}/api/chat",
+                json={
+                    "model": _OLLAMA_CLOUD_FALLBACK,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user_message},
+                    ],
+                    "stream": False,
+                },
+            )
+            response.raise_for_status()
+            log.info("Fell back to %s (local Ollama unavailable)", _OLLAMA_CLOUD_FALLBACK)
+            return response.json()["message"]["content"]
+    except Exception as e:
+        log.warning("Ollama cloud fallback (%s) failed: %s", _OLLAMA_CLOUD_FALLBACK, e)
+        return None
+
 
 async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
     """Fall back through Claude model chain when Ollama is down.
 
-    Tries: Claude Sonnet → Claude Haiku → last cached response.
+    Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → last cached response.
     """
+    # Try Ollama cloud model first (free, no API key needed)
+    kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
+    if kimi_result:
+        return kimi_result
+
     client = claude
     if not client:
         api_key = get_secret("anthropic-api-key")
