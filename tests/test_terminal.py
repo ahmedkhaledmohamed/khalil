@@ -1,5 +1,6 @@
 """Tests for actions/terminal.py — Cursor IDE and iTerm2 awareness."""
 
+import asyncio
 import pytest
 from actions.terminal import (
     parse_cursor_status,
@@ -398,3 +399,24 @@ class TestAutonomyRules:
         from autonomy import ACTION_RULES
         from config import ActionType
         assert ACTION_RULES["cursor_diff"] == ActionType.READ
+
+
+# --- Milestone 6: MCP Tools ---
+
+class TestMcpToolsExist:
+    """Verify MCP dev tools are defined in mcp_server.py source."""
+
+    def test_mcp_tools_defined_in_source(self):
+        """Check that all dev environment MCP tools exist in mcp_server.py source."""
+        from pathlib import Path
+        source = (Path(__file__).parent.parent / "mcp_server.py").read_text()
+        expected_tools = [
+            "dev_environment_status",
+            "cursor_open_file",
+            "list_terminal_sessions",
+            "run_in_terminal",
+            "cursor_diff_files",
+        ]
+        for tool_name in expected_tools:
+            assert f"async def {tool_name}" in source, f"MCP tool {tool_name} not found in mcp_server.py"
+            assert f"@mcp.tool()" in source  # At least one decorator exists
