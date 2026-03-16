@@ -1833,10 +1833,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Detect embedded shell commands — LLM suggests running them instead of executing
     suggested_cmd = _extract_shell_from_response(response)
     if suggested_cmd:
-        # Record signal — healing system can learn which queries need direct intent templates
+        # Record signal + trigger healing immediately — this is deterministic, don't wait for nightly
         record_signal("response_suggests_manual_action", {
             "query": query[:200], "suggested_cmd": suggested_cmd,
         })
+        await _try_inline_healing(update)
         from actions.shell import classify_command, format_output
         classification = classify_command(suggested_cmd)
         if classification != ActionType.DANGEROUS:
@@ -1880,6 +1881,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from actions.extend import detect_capability_gap, handle_self_extend
         if detect_capability_gap(response):
             record_signal("capability_gap_detected", {"query": query[:200]})
+            await _try_inline_healing(update)
             await handle_self_extend(query, update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)

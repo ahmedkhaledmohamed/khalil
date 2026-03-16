@@ -40,6 +40,9 @@ FAILURE_CODE_MAP = {
 # Errors that are deterministic — trigger healing after just 1 occurrence
 CRITICAL_ERROR_PATTERNS = ["ImportError", "ModuleNotFoundError", "AttributeError", "SyntaxError"]
 
+# Signal types that are inherently deterministic — always threshold 1
+DETERMINISTIC_SIGNAL_TYPES = {"response_suggests_manual_action", "capability_gap_detected"}
+
 
 # --- Failure Detection ---
 
@@ -55,6 +58,7 @@ def detect_recurring_failures() -> list[dict]:
     failure_types = (
         "intent_detection_failure", "action_execution_failure", "user_correction",
         "extension_runtime_failure", "response_suggests_manual_action",
+        "capability_gap_detected",
     )
     placeholders = ",".join("?" for _ in failure_types)
     rows = conn.execute(
@@ -71,7 +75,7 @@ def detect_recurring_failures() -> list[dict]:
     for r in rows:
         ctx = json.loads(r["context"]) if r["context"] else {}
         # Build fingerprint from signal type + action hint or action type
-        hint = ctx.get("action_hint") or ctx.get("action") or "unknown"
+        hint = ctx.get("action_hint") or ctx.get("action") or ctx.get("suggested_cmd", "unknown")
         fingerprint = f"{r['signal_type']}:{hint}"
         groups.setdefault(fingerprint, []).append({
             "signal_type": r["signal_type"],
@@ -81,12 +85,14 @@ def detect_recurring_failures() -> list[dict]:
 
     triggers = []
     for fingerprint, signals in groups.items():
-        # Critical errors (ImportError, etc.) trigger after just 1 occurrence
+        # Deterministic signals and critical errors trigger after just 1 occurrence
+        signal_type = signals[0]["signal_type"]
+        is_deterministic = signal_type in DETERMINISTIC_SIGNAL_TYPES
         has_critical = any(
             any(pat in str(s["context"].get("error", "")) for pat in CRITICAL_ERROR_PATTERNS)
             for s in signals
         )
-        threshold = 1 if has_critical else HEALING_FAILURE_THRESHOLD
+        threshold = 1 if (is_deterministic or has_critical) else HEALING_FAILURE_THRESHOLD
         if len(signals) < threshold:
             continue
 
