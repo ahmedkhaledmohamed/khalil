@@ -44,6 +44,14 @@ CAPABILITY_GAP_PHRASES = [
     "that's not something i support",
     "i'm not able to",
     "no built-in support for",
+    "i would need direct access",
+    "i don't have real-time",
+    "i can't determine",
+    "i don't have access to your",
+    "i can't access your",
+    "i'm unable to",
+    "that's beyond my current",
+    "check your mac manually",
 ]
 
 

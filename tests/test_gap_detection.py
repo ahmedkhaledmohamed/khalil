@@ -20,6 +20,13 @@ class TestPhraseDetection:
         assert detect_capability_gap("I CAN'T DO THAT") is True
         assert detect_capability_gap("I Don't Have The Ability") is True
 
+    def test_device_access_refusal(self):
+        """Regression: Khalil said it can't access the device when it can run shell commands."""
+        assert detect_capability_gap("I would need direct access to your device") is True
+        assert detect_capability_gap("I don't have real-time monitoring capabilities") is True
+        assert detect_capability_gap("I can't determine the exact number") is True
+        assert detect_capability_gap("please check your Mac manually") is True
+
     @pytest.mark.parametrize("response", [
         "Here are your emails from last week.",
         "The meeting is at 3pm tomorrow.",
