@@ -118,8 +118,41 @@ def keyword_search(query: str, limit: int = 10, category: str | None = None) -> 
     return [dict(r) for r in rows]
 
 
+def _compute_rerank_score(result: dict, query_terms: list[str]) -> float:
+    """Compute a combined reranking score for a search result.
+
+    Combines:
+    - Semantic distance (inverted, if available from vector search)
+    - Keyword match count (how many query terms appear in the content)
+    - Freshness score (time-decay)
+
+    Higher score = more relevant.
+    """
+    score = 0.0
+
+    # 1. Semantic distance — lower distance = better. Invert and normalize to 0-1 range.
+    distance = result.get("distance")
+    if distance is not None:
+        # Typical cosine distances are 0.0-2.0; normalize so 0.0 -> 1.0, 2.0 -> 0.0
+        score += max(0.0, 1.0 - distance / 2.0) * 0.4
+    elif result.get("match_type") == "keyword":
+        # Keyword-only results get a baseline semantic score
+        score += 0.1
+
+    # 2. Keyword match count — proportion of query terms found in content
+    content = ((result.get("title") or "") + " " + (result.get("content") or "")).lower()
+    if query_terms:
+        match_count = sum(1 for t in query_terms if t in content)
+        score += (match_count / len(query_terms)) * 0.35
+
+    # 3. Freshness
+    score += result.get("freshness", 0.5) * 0.25
+
+    return round(score, 4)
+
+
 async def hybrid_search(query: str, limit: int = 8, category: str | None = None) -> list[dict]:
-    """Combine vector and keyword search, deduplicate, rank.
+    """Combine vector and keyword search, deduplicate, rerank.
 
     Falls back to keyword-only search if Ollama is unavailable.
     """
@@ -151,8 +184,12 @@ async def hybrid_search(query: str, limit: int = 8, category: str | None = None)
         created_at = r.get("created_at") or (r.get("metadata") or {}).get("created_at")
         r["freshness"] = _compute_freshness_score(created_at)
 
-    # Re-sort: semantic results first, then by freshness within each match type
-    merged.sort(key=lambda r: (0 if r["match_type"] == "semantic" else 1, -r["freshness"]))
+    # #62: Rerank by combined score (semantic distance + keyword overlap + freshness)
+    query_terms = [t.lower() for t in query.split() if len(t) > 2]
+    for r in merged:
+        r["rerank_score"] = _compute_rerank_score(r, query_terms)
+
+    merged.sort(key=lambda r: -r["rerank_score"])
 
     return merged[:limit]
 

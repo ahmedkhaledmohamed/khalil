@@ -1,6 +1,8 @@
-"""Tests for the batch 1 improvements (items #17, #33, #59, #73, #15, #16, #69, #79, #23, #45)."""
+"""Tests for Khalil improvements."""
 
+import asyncio
 import os
+import re
 import sqlite3
 import sys
 
@@ -2271,3 +2273,476 @@ class TestMCPServerExpansion:
         assert health[0]["extension"] == "weather"
         assert health[0]["invocations"] == 2
         assert health[0]["errors"] == 1
+
+
+# --- #99: CLI for local testing ---
+
+class TestCLI:
+    def test_cli_exists(self):
+        """cli.py should exist at the khalil root."""
+        cli_path = os.path.join(os.path.dirname(__file__), "..", "cli.py")
+        assert os.path.exists(cli_path)
+
+    def test_cli_has_ask_function(self):
+        """cli.py should define _ask coroutine."""
+        import importlib
+        import cli
+        importlib.reload(cli)
+        assert hasattr(cli, "_ask")
+        assert asyncio.iscoroutinefunction(cli._ask)
+
+    def test_cli_has_repl(self):
+        """cli.py should define _repl for interactive mode."""
+        import cli
+        assert hasattr(cli, "_repl")
+        assert callable(cli._repl)
+
+
+# --- #98: Proactive Knowledge Gap Filling ---
+
+class TestKnowledgeGapFilling:
+    def test_no_signals_returns_empty(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.fill_knowledge_gaps()
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_clusters_similar_queries(self, tmp_db):
+        """Queries with 3+ occurrences and word overlap should be clustered."""
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            # Insert 3 similar search_miss signals
+            for q in ["spotify quarterly goals Q1", "quarterly goals spotify review", "spotify goals quarterly update"]:
+                tmp_db.execute(
+                    "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                    ("search_miss", json.dumps({"query": q}), 1.0),
+                )
+            tmp_db.commit()
+            result = learning.fill_knowledge_gaps()
+            assert isinstance(result, list)
+            # Should find at least one cluster
+            assert len(result) >= 1
+            assert "query" in result[0]
+            assert "results_found" in result[0]
+            assert "indexed" in result[0]
+        finally:
+            learning._db_conn = original
+
+    def test_below_threshold_skipped(self, tmp_db):
+        """Clusters with fewer than 3 queries should not be returned."""
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            # Only 2 signals — below the 3-occurrence threshold
+            for q in ["unique topic alpha", "unique topic alpha repeated"]:
+                tmp_db.execute(
+                    "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                    ("search_miss", json.dumps({"query": q}), 1.0),
+                )
+            tmp_db.commit()
+            result = learning.fill_knowledge_gaps()
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+
+# --- #12: Causal Insight Validation ---
+
+class TestInsightValidation:
+    def test_empty_when_no_applied_insights(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.validate_applied_insights(days=14)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_validates_preference_insight(self, tmp_db):
+        """A preference insight with active linked preference should validate."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            from datetime import datetime, timedelta
+            resolved_at = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+            tmp_db.execute(
+                "INSERT INTO insights (id, category, summary, evidence, recommendation, status, resolved_at, resolved_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (1, "preference", "User prefers short replies", "signals", "set preference", "applied", resolved_at, "auto"),
+            )
+            tmp_db.execute(
+                "INSERT INTO learned_preferences (key, value, source_insight_id, confidence) "
+                "VALUES (?, ?, ?, ?)",
+                ("response_length", '"short"', 1, 0.7),
+            )
+            tmp_db.commit()
+            result = learning.validate_applied_insights(days=14)
+            assert len(result) == 1
+            assert result[0]["validated"] is True
+            assert "still active" in result[0]["reason"]
+        finally:
+            learning._db_conn = original
+
+    def test_invalidates_decayed_preference(self, tmp_db):
+        """A preference insight with decayed confidence should not validate."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            from datetime import datetime, timedelta
+            resolved_at = (datetime.utcnow() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+            tmp_db.execute(
+                "INSERT INTO insights (id, category, summary, evidence, recommendation, status, resolved_at, resolved_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (1, "preference", "User prefers long replies", "signals", "set preference", "applied", resolved_at, "auto"),
+            )
+            tmp_db.execute(
+                "INSERT INTO learned_preferences (key, value, source_insight_id, confidence) "
+                "VALUES (?, ?, ?, ?)",
+                ("response_length", '"long"', 1, 0.1),
+            )
+            tmp_db.commit()
+            result = learning.validate_applied_insights(days=14)
+            assert len(result) == 1
+            assert result[0]["validated"] is False
+            assert "decayed" in result[0]["reason"]
+        finally:
+            learning._db_conn = original
+
+    def test_validates_knowledge_gap_reduction(self, tmp_db):
+        """A knowledge_gap insight should validate if search misses decreased."""
+        import json
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            from datetime import datetime, timedelta
+            resolved_at = (datetime.utcnow() - timedelta(days=5)).strftime("%Y-%m-%d %H:%M:%S")
+            before = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+            # Insert insight
+            tmp_db.execute(
+                "INSERT INTO insights (id, category, summary, evidence, recommendation, status, resolved_at, resolved_by) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (1, "knowledge_gap", "Missing info on topic X", "signals", "index more", "applied", resolved_at, "auto"),
+            )
+            # 3 misses before, 0 after
+            for _ in range(3):
+                tmp_db.execute(
+                    "INSERT INTO interaction_signals (signal_type, context, value, created_at) VALUES (?, ?, ?, ?)",
+                    ("search_miss", json.dumps({"query": "topic X"}), 1.0, before),
+                )
+            tmp_db.commit()
+            result = learning.validate_applied_insights(days=14)
+            assert len(result) == 1
+            assert result[0]["validated"] is True
+            assert "decreased" in result[0]["reason"]
+        finally:
+            learning._db_conn = original
+
+
+# --- #84: Healing Regression Tests ---
+
+class TestHealingPipeline:
+    def test_detect_recurring_failures_empty(self, tmp_db):
+        """No signals should return empty triggers."""
+        import healing
+        from unittest.mock import patch
+        with patch.object(healing, "_get_conn", return_value=tmp_db):
+            result = healing.detect_recurring_failures()
+            assert result == []
+
+    def test_detect_recurring_failures_with_signals(self, tmp_db):
+        """Signals above threshold should trigger detection."""
+        import json
+        import healing
+        from unittest.mock import patch
+        with patch.object(healing, "_get_conn", return_value=tmp_db):
+            for _ in range(4):
+                tmp_db.execute(
+                    "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                    ("intent_detection_failure", json.dumps({"action_hint": "shell"}), 1.0),
+                )
+            tmp_db.commit()
+            result = healing.detect_recurring_failures()
+            assert len(result) >= 1
+            assert result[0]["fingerprint"] == "intent_detection_failure:shell"
+            assert result[0]["failure_count"] >= 4
+
+    def test_score_healing_confidence_range(self, tmp_db):
+        """Score should always be between 0.0 and 1.0."""
+        from healing import score_healing_confidence
+        from unittest.mock import patch
+        with patch("healing._get_conn", return_value=tmp_db):
+            diagnosis = {"fingerprint": "test:test", "failure_count": 10}
+            score = score_healing_confidence(diagnosis, "x = 1\ny = 2")
+            assert 0.0 <= score <= 1.0
+
+    def test_score_healing_confidence_small_vs_large(self, tmp_db):
+        """Small patches should score higher than large patches."""
+        from healing import score_healing_confidence
+        from unittest.mock import patch
+        with patch("healing._get_conn", return_value=tmp_db):
+            diagnosis = {"fingerprint": "test:test", "failure_count": 5}
+            small = score_healing_confidence(diagnosis, "x = 1")
+            large = score_healing_confidence(diagnosis, "\n".join(f"line_{i}" for i in range(50)))
+            assert small > large
+
+    def test_failure_code_map_references_valid_files(self):
+        """All files in FAILURE_CODE_MAP should exist on disk."""
+        from healing import FAILURE_CODE_MAP
+        from config import KHALIL_DIR
+        for fingerprint, targets in FAILURE_CODE_MAP.items():
+            for rel_path, func_name in targets:
+                file_path = KHALIL_DIR / rel_path
+                assert file_path.exists(), f"FAILURE_CODE_MAP[{fingerprint}] references missing file: {rel_path}"
+
+    def test_critical_error_patterns_detection(self):
+        """CRITICAL_ERROR_PATTERNS should match known error strings."""
+        from healing import CRITICAL_ERROR_PATTERNS
+        test_errors = [
+            "ImportError: No module named 'foo'",
+            "ModuleNotFoundError: No module named 'bar'",
+            "AttributeError: 'NoneType' has no attribute 'x'",
+            "SyntaxError: invalid syntax",
+        ]
+        for error in test_errors:
+            assert any(pat in error for pat in CRITICAL_ERROR_PATTERNS), f"Pattern not matched: {error}"
+
+    def test_deterministic_signals_threshold_one(self, tmp_db):
+        """Deterministic signal types should trigger after just 1 occurrence."""
+        import json
+        import healing
+        from unittest.mock import patch
+        with patch.object(healing, "_get_conn", return_value=tmp_db):
+            tmp_db.execute(
+                "INSERT INTO interaction_signals (signal_type, context, value) VALUES (?, ?, ?)",
+                ("capability_gap_detected", json.dumps({"action_hint": "test_action"}), 1.0),
+            )
+            tmp_db.commit()
+            result = healing.detect_recurring_failures()
+            # Should trigger with just 1 signal since it's deterministic
+            assert len(result) >= 1
+
+
+# --- #85: Extension Regression Tests ---
+
+class TestExtensionPipeline:
+    def test_detect_capability_gap_positive(self):
+        """Phrases indicating inability should trigger gap detection."""
+        from actions.extend import detect_capability_gap
+        assert detect_capability_gap("I can't do that for you") is True
+        assert detect_capability_gap("I don't have access to your calendar") is True
+        assert detect_capability_gap("That isn't available yet") is True
+        assert detect_capability_gap("You need to check your Mac manually") is True
+
+    def test_detect_capability_gap_negative(self):
+        """Normal responses should not trigger gap detection."""
+        from actions.extend import detect_capability_gap
+        assert detect_capability_gap("Here are your calendar events for today") is False
+        assert detect_capability_gap("Email sent successfully") is False
+        assert detect_capability_gap("The weather in Toronto is 15C") is False
+
+    def test_check_extension_overlap_no_overlap(self):
+        from actions.extend import check_extension_overlap
+        result = check_extension_overlap({
+            "name": "pomodoro_timer",
+            "command": "pomodoro",
+            "description": "Pomodoro timer for focus sessions",
+        })
+        assert result is None
+
+    def test_check_extension_overlap_builtin(self):
+        from actions.extend import check_extension_overlap
+        result = check_extension_overlap({
+            "name": "remind_helper",
+            "command": "remind",
+            "description": "Set reminders",
+        })
+        assert result is not None
+        assert "remind" in result.lower()
+
+    def test_gap_gate_patterns_regex(self):
+        """GAP_GATE_PATTERNS should match known refusal variants."""
+        import re
+        from actions.extend import GAP_GATE_PATTERNS
+        positives = [
+            "i can't do that",
+            "i cannot access your files",
+            "i'm unable to check that",
+            "that is beyond my current capabilities",
+            "check your mac manually for that info",
+            "i don't have real-time data",
+            "no built-in support for that feature",
+            "that isn't supported right now",
+        ]
+        for phrase in positives:
+            matched = any(re.search(p, phrase.lower()) for p in GAP_GATE_PATTERNS)
+            assert matched, f"GAP_GATE_PATTERNS failed to match: '{phrase}'"
+
+        negatives = [
+            "here are your results",
+            "the email has been sent",
+            "done",
+        ]
+        for phrase in negatives:
+            matched = any(re.search(p, phrase.lower()) for p in GAP_GATE_PATTERNS)
+            assert not matched, f"GAP_GATE_PATTERNS falsely matched: '{phrase}'"
+
+    def test_smoke_test_module_basic(self, tmp_path):
+        """smoke_test_module should pass for a valid module with an async handler."""
+        from actions.extend import smoke_test_module
+        module = tmp_path / "test_ext.py"
+        module.write_text(
+            "async def cmd_test(update, context):\n"
+            "    await update.message.reply_text('hello')\n"
+        )
+        passed, error = smoke_test_module(module, "test")
+        assert passed, f"Smoke test should pass but got: {error}"
+
+    def test_smoke_test_module_missing_handler(self, tmp_path):
+        """smoke_test_module should fail when the handler function is missing."""
+        from actions.extend import smoke_test_module
+        module = tmp_path / "test_ext2.py"
+        module.write_text("def some_other_func(): pass\n")
+        passed, error = smoke_test_module(module, "missing")
+        assert not passed
+        assert "missing" in error.lower() or "Missing" in error
+
+
+# --- #90: Email Follow-up Detector ---
+
+class TestEmailFollowupDetector:
+    def test_no_sent_emails_returns_empty(self, tmp_db):
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            result = learning.detect_email_followups(days=7)
+            assert result == []
+        finally:
+            learning._db_conn = original
+
+    def test_detects_awaiting_reply(self, tmp_db):
+        """A sent email without a matching reply should be flagged."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            tmp_db.execute(
+                "INSERT INTO documents (source, category, title, content, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("gmail-sent", "email-sent", "Meeting follow up", "Hi, just following up...",
+                 "2026-03-15 10:00:00"),
+            )
+            tmp_db.commit()
+            result = learning.detect_email_followups(days=7)
+            assert len(result) == 1
+            assert result[0]["awaiting_reply"] is True
+            assert result[0]["subject"] == "Meeting follow up"
+        finally:
+            learning._db_conn = original
+
+    def test_detects_replied(self, tmp_db):
+        """A sent email with a matching Re: reply should not be flagged as awaiting."""
+        import learning
+        original = learning._db_conn
+        learning._db_conn = tmp_db
+        try:
+            tmp_db.execute(
+                "INSERT INTO documents (source, category, title, content, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("gmail-sent", "email-sent", "Project update", "Here is the update...",
+                 "2026-03-14 10:00:00"),
+            )
+            tmp_db.execute(
+                "INSERT INTO documents (source, category, title, content, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                ("gmail", "email", "Re: Project update", "Thanks for the update!",
+                 "2026-03-15 10:00:00"),
+            )
+            tmp_db.commit()
+            result = learning.detect_email_followups(days=7)
+            assert len(result) == 1
+            assert result[0]["awaiting_reply"] is False
+        finally:
+            learning._db_conn = original
+
+
+# --- #62: RAG Result Reranking ---
+
+class TestRerankScore:
+    def test_compute_rerank_score_with_distance(self):
+        from knowledge.search import _compute_rerank_score
+        result = {
+            "title": "Test Doc",
+            "content": "Python automation scripts for deployment",
+            "distance": 0.5,
+            "match_type": "semantic",
+            "freshness": 0.8,
+        }
+        score = _compute_rerank_score(result, ["python", "automation"])
+        assert 0.0 < score <= 1.0
+
+    def test_compute_rerank_score_keyword_only(self):
+        from knowledge.search import _compute_rerank_score
+        result = {
+            "title": "Deployment Guide",
+            "content": "How to deploy python apps",
+            "match_type": "keyword",
+            "freshness": 0.5,
+        }
+        score = _compute_rerank_score(result, ["deploy", "python"])
+        assert score > 0.0
+
+    def test_higher_keyword_match_scores_higher(self):
+        from knowledge.search import _compute_rerank_score
+        result_high = {
+            "title": "Python automation",
+            "content": "Python automation for deploy",
+            "match_type": "keyword",
+            "freshness": 0.5,
+        }
+        result_low = {
+            "title": "Unrelated",
+            "content": "Nothing matching here",
+            "match_type": "keyword",
+            "freshness": 0.5,
+        }
+        terms = ["python", "automation", "deploy"]
+        assert _compute_rerank_score(result_high, terms) > _compute_rerank_score(result_low, terms)
+
+    def test_closer_semantic_distance_scores_higher(self):
+        from knowledge.search import _compute_rerank_score
+        close = {
+            "title": "Test", "content": "test content",
+            "distance": 0.2, "match_type": "semantic", "freshness": 0.5,
+        }
+        far = {
+            "title": "Test", "content": "test content",
+            "distance": 1.5, "match_type": "semantic", "freshness": 0.5,
+        }
+        assert _compute_rerank_score(close, ["test"]) > _compute_rerank_score(far, ["test"])
+
+    def test_fresher_docs_score_higher(self):
+        from knowledge.search import _compute_rerank_score
+        fresh = {
+            "title": "Test", "content": "test content",
+            "match_type": "keyword", "freshness": 1.0,
+        }
+        stale = {
+            "title": "Test", "content": "test content",
+            "match_type": "keyword", "freshness": 0.1,
+        }
+        assert _compute_rerank_score(fresh, ["test"]) > _compute_rerank_score(stale, ["test"])

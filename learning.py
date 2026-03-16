@@ -1003,6 +1003,235 @@ def get_prompt_effectiveness(days: int = 7) -> dict:
     }
 
 
+# --- #98: Proactive Knowledge Gap Filling ---
+
+def fill_knowledge_gaps(ask_llm_fn=None) -> list[dict]:
+    """Detect recurring knowledge gaps and attempt to fill them from existing archives.
+
+    Queries interaction_signals for capability_gap_detected and search_miss signals
+    from the last 7 days, clusters similar queries, and searches the documents table
+    for answers.
+
+    Returns list of {query, results_found, indexed} dicts.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type IN ('capability_gap_detected', 'search_miss') AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    # Extract queries
+    queries: list[str] = []
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        q = ctx.get("query", "").strip()
+        if q:
+            queries.append(q)
+
+    # Group by simple word overlap — cluster queries sharing >= 2 non-stopword tokens
+    stopwords = {"the", "a", "an", "is", "it", "to", "in", "for", "of", "and", "on", "my", "me", "i", "what", "how"}
+    clusters: dict[str, list[str]] = {}
+    for q in queries:
+        tokens = {w.lower() for w in q.split() if w.lower() not in stopwords and len(w) > 2}
+        matched = False
+        for key, members in clusters.items():
+            key_tokens = {w.lower() for w in key.split() if w.lower() not in stopwords and len(w) > 2}
+            if len(tokens & key_tokens) >= 2:
+                members.append(q)
+                matched = True
+                break
+        if not matched:
+            clusters[q] = [q]
+
+    results = []
+    for representative, members in clusters.items():
+        if len(members) < 3:
+            continue
+
+        # Search existing documents for answers
+        terms = representative.lower().split()[:5]
+        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in terms])
+        params = [f"%{t}%" for t in terms if len(t) > 2]
+        if not params:
+            continue
+        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in params])
+
+        found = conn.execute(
+            f"SELECT id, title FROM documents WHERE {conditions} LIMIT 5",
+            params,
+        ).fetchall()
+
+        results.append({
+            "query": representative,
+            "results_found": len(found),
+            "indexed": len(found) > 0,
+        })
+
+    return results
+
+
+# --- #12: Causal Insight Validation ---
+
+def validate_applied_insights(days: int = 14) -> list[dict]:
+    """Validate whether recently applied insights actually improved outcomes.
+
+    For each insight applied in the last N days, checks:
+    - preference insights: is the preference still active (confidence not decayed)?
+    - knowledge_gap insights: did the same gap queries decrease?
+    - response_quality insights: did user corrections decrease?
+
+    Returns list of {insight_id, summary, validated: bool, reason}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    applied = conn.execute(
+        "SELECT id, category, summary, evidence, resolved_at FROM insights "
+        "WHERE status = 'applied' AND resolved_at > ? ORDER BY resolved_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    results = []
+    for row in applied:
+        insight_id = row["id"]
+        category = row["category"]
+        summary = row["summary"] or ""
+        resolved_at = row["resolved_at"]
+
+        if category == "preference":
+            # Check if a related preference is still active
+            prefs = conn.execute(
+                "SELECT confidence FROM learned_preferences WHERE source_insight_id = ?",
+                (insight_id,),
+            ).fetchall()
+            if prefs:
+                active = any(p["confidence"] >= 0.3 for p in prefs)
+                results.append({
+                    "insight_id": insight_id,
+                    "summary": summary,
+                    "validated": active,
+                    "reason": "preference still active" if active else "preference decayed below threshold",
+                })
+            else:
+                results.append({
+                    "insight_id": insight_id,
+                    "summary": summary,
+                    "validated": False,
+                    "reason": "no linked preference found",
+                })
+
+        elif category == "knowledge_gap":
+            # Check if search_miss signals decreased after the insight was applied
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'search_miss' AND created_at < ? AND created_at > ?",
+                (resolved_at, (datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S") - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")),
+            ).fetchone()[0]
+            after_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'search_miss' AND created_at > ?",
+                (resolved_at,),
+            ).fetchone()[0]
+            improved = after_count < before_count or after_count == 0
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": improved,
+                "reason": f"search misses {'decreased' if improved else 'did not decrease'} ({before_count} -> {after_count})",
+            })
+
+        elif category == "response_quality":
+            # Check if user corrections decreased after the insight was applied
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'user_correction' AND created_at < ? AND created_at > ?",
+                (resolved_at, (datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S") - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")),
+            ).fetchone()[0]
+            after_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'user_correction' AND created_at > ?",
+                (resolved_at,),
+            ).fetchone()[0]
+            improved = after_count < before_count or after_count == 0
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": improved,
+                "reason": f"corrections {'decreased' if improved else 'did not decrease'} ({before_count} -> {after_count})",
+            })
+
+        else:
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": True,
+                "reason": f"no validation logic for category '{category}'",
+            })
+
+    return results
+
+
+# --- #90: Email Follow-up Detector ---
+
+def detect_email_followups(days: int = 7) -> list[dict]:
+    """Detect sent emails that may be awaiting replies.
+
+    Searches documents for sent emails and checks for matching replies.
+    Best-effort heuristic using the knowledge base.
+
+    Returns list of {subject, sent_date, awaiting_reply: bool, days_waiting}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Find sent emails
+    sent_rows = conn.execute(
+        "SELECT title, created_at FROM documents "
+        "WHERE (LOWER(category) LIKE '%sent%' OR LOWER(source) LIKE '%sent%') "
+        "AND created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    results = []
+    for row in sent_rows:
+        subject = row["title"] or ""
+        sent_date = row["created_at"] or ""
+
+        # Search for replies — look for "Re: <subject>" in the documents table
+        clean_subject = subject.replace("Re: ", "").replace("RE: ", "").strip()
+        if not clean_subject:
+            continue
+
+        reply = conn.execute(
+            "SELECT id FROM documents WHERE title LIKE ? AND created_at > ? LIMIT 1",
+            (f"%Re: {clean_subject}%", sent_date),
+        ).fetchone()
+
+        awaiting = reply is None
+        days_waiting = 0
+        if awaiting and sent_date:
+            try:
+                sent_dt = datetime.strptime(sent_date[:19], "%Y-%m-%d %H:%M:%S")
+                days_waiting = (datetime.utcnow() - sent_dt).days
+            except (ValueError, TypeError):
+                pass
+
+        results.append({
+            "subject": subject,
+            "sent_date": sent_date,
+            "awaiting_reply": awaiting,
+            "days_waiting": days_waiting,
+        })
+
+    return results
+
+
 def decay_preferences():
     """Monthly confidence decay — preferences not re-confirmed lose confidence."""
     conn = _get_conn()
