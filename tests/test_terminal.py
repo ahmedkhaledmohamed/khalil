@@ -416,7 +416,98 @@ class TestMcpToolsExist:
             "list_terminal_sessions",
             "run_in_terminal",
             "cursor_diff_files",
+            # Cursor terminal bridge tools
+            "cursor_terminal_status",
+            "cursor_terminal_send",
+            "cursor_terminal_create",
+            "cursor_terminal_output",
         ]
         for tool_name in expected_tools:
             assert f"async def {tool_name}" in source, f"MCP tool {tool_name} not found in mcp_server.py"
             assert f"@mcp.tool()" in source  # At least one decorator exists
+
+
+# --- Cursor Terminal Bridge ---
+
+class TestBridgeClient:
+    """Test bridge client functions (unit tests, no actual bridge needed)."""
+
+    def test_format_cursor_terminal_status_error(self):
+        from actions.terminal import format_cursor_terminal_status
+        result = format_cursor_terminal_status({"error": "Bridge not running", "terminals": [], "workspace": None})
+        assert "Bridge not running" in result
+
+    def test_format_cursor_terminal_status_with_terminals(self):
+        from actions.terminal import format_cursor_terminal_status
+        status = {
+            "terminals": [
+                {"id": 0, "name": "zsh", "pid": 123, "isActive": True},
+                {"id": 1, "name": "node", "pid": 456, "isActive": False},
+            ],
+            "workspace": {"folders": [{"name": "khalil", "path": "/Users/ahmedm/khalil"}], "activeFile": None},
+            "count": 2,
+        }
+        result = format_cursor_terminal_status(status)
+        assert "Cursor Terminals (2)" in result
+        assert "zsh" in result
+        assert "node" in result
+        assert "Workspace: khalil" in result
+
+    def test_format_cursor_terminal_status_empty(self):
+        from actions.terminal import format_cursor_terminal_status
+        status = {"terminals": [], "workspace": None, "count": 0}
+        result = format_cursor_terminal_status(status)
+        assert "No terminals open" in result
+
+
+class TestCursorTerminalIntents:
+    """Test intent patterns for Cursor terminal bridge commands."""
+
+    def _match(self, text):
+        import re
+        from server import _ACTION_PATTERNS
+        text_lower = text.lower()
+        for pattern, hint in _ACTION_PATTERNS:
+            if re.search(pattern, text_lower):
+                return hint
+        return None
+
+    def test_cursor_terminal_status(self):
+        assert self._match("cursor terminal status") == "cursor_terminal_status"
+
+    def test_cursor_terminal_sessions(self):
+        assert self._match("cursor terminal sessions") == "cursor_terminal_status"
+
+    def test_whats_in_cursor_terminal(self):
+        assert self._match("what's running in the cursor terminal") == "cursor_terminal_status"
+
+    def test_run_in_cursor_terminal(self):
+        assert self._match("run npm test in cursor terminal") == "cursor_terminal_exec"
+
+    def test_send_to_cursor_terminal(self):
+        assert self._match("send ls to cursor terminal") == "cursor_terminal_exec"
+
+    def test_new_cursor_terminal(self):
+        assert self._match("new cursor terminal") == "cursor_terminal_new"
+
+    def test_create_cursor_terminal(self):
+        assert self._match("create a cursor terminal") == "cursor_terminal_new"
+
+
+class TestCursorTerminalAutonomy:
+    """Test autonomy classification for Cursor terminal bridge actions."""
+
+    def test_cursor_terminal_status_is_read(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_terminal_status"] == ActionType.READ
+
+    def test_cursor_terminal_exec_is_write(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_terminal_exec"] == ActionType.WRITE
+
+    def test_cursor_terminal_new_is_write(self):
+        from autonomy import ACTION_RULES
+        from config import ActionType
+        assert ACTION_RULES["cursor_terminal_new"] == ActionType.WRITE

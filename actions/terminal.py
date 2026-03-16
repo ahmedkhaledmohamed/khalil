@@ -11,7 +11,10 @@ import json
 import logging
 import re
 from datetime import datetime
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
+
+import httpx
 
 from config import DB_PATH, TIMEZONE
 
@@ -566,3 +569,124 @@ async def cursor_diff(file1: str, file2: str) -> dict:
         return {"success": False, "error": "Cursor CLI not found"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+# --- Cursor Terminal Bridge Client ---
+
+BRIDGE_URL = "http://127.0.0.1:8034"
+
+
+async def _bridge_request(method: str, path: str, body: dict = None, timeout: int = 10) -> dict:
+    """Make a request to the Khalil Terminal Bridge extension."""
+    url = f"{BRIDGE_URL}{path}"
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.request(method, url, json=body)
+            data = resp.json()
+            if resp.status_code >= 400:
+                return {"error": data.get("error", f"HTTP {resp.status_code}"), "status": resp.status_code}
+            return data
+    except httpx.ConnectError:
+        return {"error": "Cursor Terminal Bridge not running. Install the khalil-terminal-bridge extension."}
+    except httpx.TimeoutException:
+        return {"error": "Bridge request timed out"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def bridge_status() -> dict:
+    """Check if the Cursor Terminal Bridge is running."""
+    return await _bridge_request("GET", "/status")
+
+
+async def bridge_list_terminals() -> list[dict]:
+    """List all terminals in Cursor via the bridge."""
+    result = await _bridge_request("GET", "/terminals")
+    return result.get("terminals", [])
+
+
+async def bridge_create_terminal(name: str = "Khalil", cwd: str = None, command: str = None) -> dict:
+    """Create a new terminal in Cursor."""
+    body = {"name": name}
+    if cwd:
+        body["cwd"] = cwd
+    if command:
+        body["command"] = command
+    return await _bridge_request("POST", "/terminals", body)
+
+
+async def bridge_send_command(target: str | int, command: str, show: bool = True) -> dict:
+    """Send a command to a Cursor terminal.
+
+    Args:
+        target: Terminal name or index.
+        command: The command text to send.
+        show: Whether to focus the terminal.
+    """
+    encoded = quote(str(target), safe="")
+    return await _bridge_request("POST", f"/terminals/{encoded}/send", {
+        "command": command,
+        "show": show,
+    })
+
+
+async def bridge_close_terminal(target: str | int) -> dict:
+    """Close a Cursor terminal."""
+    encoded = quote(str(target), safe="")
+    return await _bridge_request("DELETE", f"/terminals/{encoded}")
+
+
+async def bridge_get_output(target: str, lines: int = 50) -> dict:
+    """Get buffered output from a Cursor terminal."""
+    encoded = quote(str(target), safe="")
+    return await _bridge_request("GET", f"/output/{encoded}?lines={lines}")
+
+
+async def bridge_workspace() -> dict:
+    """Get current workspace info from Cursor."""
+    return await _bridge_request("GET", "/workspace")
+
+
+async def get_cursor_terminal_status() -> dict:
+    """Get combined Cursor terminal status via the bridge.
+
+    Returns a formatted dict with terminal list and workspace info.
+    Falls back gracefully if bridge is not running.
+    """
+    status = await bridge_status()
+    if status.get("error"):
+        return {"error": status["error"], "terminals": [], "workspace": None}
+
+    terminals = await bridge_list_terminals()
+    workspace = await bridge_workspace()
+
+    return {
+        "terminals": terminals,
+        "workspace": workspace,
+        "count": len(terminals),
+    }
+
+
+def format_cursor_terminal_status(status: dict) -> str:
+    """Format Cursor terminal status for Telegram."""
+    if status.get("error"):
+        return f"⚠️ Cursor Terminal Bridge: {status['error']}"
+
+    lines = [f"🖥 Cursor Terminals ({status.get('count', 0)})"]
+
+    ws = status.get("workspace")
+    if ws and ws.get("folders"):
+        lines.append(f"  Workspace: {ws['folders'][0]['name']}")
+    if ws and ws.get("activeFile"):
+        f = ws["activeFile"]
+        lines.append(f"  Editing: {f['path']} (line {f['line']})")
+
+    if not status.get("terminals"):
+        lines.append("  No terminals open")
+    else:
+        for t in status["terminals"]:
+            active = " ◀" if t.get("isActive") else ""
+            pid = f" PID {t['pid']}" if t.get("pid") else ""
+            lines.append(f"  [{t.get('id', '?')}] {t['name']}{pid}{active}")
+
+    return "\n".join(lines)
