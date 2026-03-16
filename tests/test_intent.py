@@ -31,7 +31,7 @@ for mod_name in _STUBS:
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from server import _try_direct_shell_intent
+from server import _try_direct_shell_intent, _extract_shell_from_response
 
 
 class TestOpenApp:
@@ -145,3 +145,39 @@ class TestDirectShellTemplates:
         result = _try_direct_shell_intent("how long has my mac been running")
         assert result is not None
         assert "uptime" in result["command"]
+
+
+class TestExtractShellFromResponse:
+    """Detect shell commands the LLM suggests instead of executing."""
+
+    def test_extracts_from_sh_block(self):
+        response = (
+            "I can help with that. Run this command:\n"
+            "```sh\n"
+            "osascript -e 'tell application \"System Events\" to get the name of every window of process \"Cursor\"'\n"
+            "```\n"
+            "This will list all windows."
+        )
+        cmd = _extract_shell_from_response(response)
+        assert cmd is not None
+        assert "osascript" in cmd
+
+    def test_extracts_from_bare_block(self):
+        response = "Try:\n```\ndf -h\n```"
+        assert _extract_shell_from_response(response) == "df -h"
+
+    def test_ignores_multiline_scripts(self):
+        response = "```sh\ncd /tmp\nls -la\nrm file\n```"
+        assert _extract_shell_from_response(response) is None
+
+    def test_ignores_no_code_block(self):
+        response = "You have 5 Cursor windows open on your machine."
+        assert _extract_shell_from_response(response) is None
+
+    def test_ignores_comment_only_blocks(self):
+        response = "```sh\n# This is just a comment\n```"
+        assert _extract_shell_from_response(response) is None
+
+    def test_extracts_from_bash_block(self):
+        response = "```bash\npmset -g batt\n```"
+        assert _extract_shell_from_response(response) == "pmset -g batt"
