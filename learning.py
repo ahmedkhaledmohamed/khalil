@@ -9,7 +9,7 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta
 
-from config import DB_PATH, HARD_GUARDRAILS
+from config import DB_PATH, GOALS_DIR, HARD_GUARDRAILS
 
 log = logging.getLogger("khalil.learning")
 
@@ -1246,3 +1246,127 @@ def decay_preferences():
     conn.execute("DELETE FROM learned_preferences WHERE confidence <= 0")
     conn.commit()
     log.info("Preference confidence decay applied")
+
+
+# --- #94: Goal Progress Auto-Check ---
+
+def check_goal_progress(days: int = 7) -> list[dict]:
+    """Check progress on goals by correlating with recent activity signals.
+
+    Reads goal files from GOALS_DIR, then queries recent audit_log entries
+    and conversations mentioning goal keywords.
+
+    Returns list of {goal, activity_count, status} where status is
+    "active", "stale", or "no_activity".
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Read goals from the goals directory
+    goals: list[str] = []
+    if GOALS_DIR and GOALS_DIR.exists():
+        for f in GOALS_DIR.iterdir():
+            if f.suffix in (".md", ".txt"):
+                try:
+                    content = f.read_text(errors="replace")
+                    # Extract goal lines — lines starting with "- " or "* " or "## "
+                    for line in content.splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith(("- ", "* ", "## ")) and len(stripped) > 4:
+                            goal_text = stripped.lstrip("-*# ").strip()
+                            if goal_text:
+                                goals.append(goal_text)
+                except Exception:
+                    continue
+
+    if not goals:
+        return []
+
+    results = []
+    for goal in goals[:20]:  # Cap at 20 goals
+        # Extract keywords (words > 3 chars, lowered)
+        keywords = [w.lower() for w in goal.split() if len(w) > 3]
+        if not keywords:
+            continue
+
+        # Search audit_log and conversations for keyword mentions
+        activity_count = 0
+        for keyword in keywords[:5]:
+            # Audit log mentions
+            count = conn.execute(
+                "SELECT COUNT(*) FROM audit_log WHERE LOWER(description) LIKE ? AND timestamp > ?",
+                (f"%{keyword}%", cutoff),
+            ).fetchone()[0]
+            activity_count += count
+
+            # Conversation mentions
+            count = conn.execute(
+                "SELECT COUNT(*) FROM conversations WHERE LOWER(content) LIKE ? AND timestamp > ?",
+                (f"%{keyword}%", cutoff),
+            ).fetchone()[0]
+            activity_count += count
+
+        if activity_count >= 5:
+            status = "active"
+        elif activity_count >= 1:
+            status = "stale"
+        else:
+            status = "no_activity"
+
+        results.append({"goal": goal, "activity_count": activity_count, "status": status})
+
+    return results
+
+
+# --- #6: Multi-turn Coherence Analysis ---
+
+_COHERENCE_ISSUE_PATTERNS = [
+    (r"\bi\s+already\s+(?:told|said|mentioned)\b", "repeated_info"),
+    (r"\bthat'?s\s+not\s+what\s+i\s+(?:asked|meant|said)\b", "misunderstanding"),
+    (r"\bno,?\s+i\s+(?:said|meant|want)\b", "correction"),
+    (r"\byou\s+(?:forgot|missed|ignored)\b", "lost_context"),
+    (r"\bi\s+just\s+(?:told|said)\s+you\b", "repeated_info"),
+    (r"\bwrong\b.*\bi\s+(?:said|asked|want)\b", "correction"),
+    (r"\bcan\s+you\s+re-?read\b", "lost_context"),
+    (r"\bas\s+i\s+(?:said|mentioned)\s+(?:before|earlier)\b", "repeated_info"),
+]
+
+
+def detect_coherence_issues(days: int = 7) -> list[dict]:
+    """Detect multi-turn coherence issues from conversation patterns.
+
+    Queries user follow-up messages for patterns suggesting lost context,
+    corrections, or repeated questions.
+
+    Returns list of {chat_id, timestamp, issue_type, context}.
+    """
+    import re as _re
+
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Get user messages (potential follow-ups that indicate coherence issues)
+    rows = conn.execute(
+        "SELECT chat_id, content, timestamp FROM conversations "
+        "WHERE role = 'user' AND timestamp > ? ORDER BY timestamp",
+        (cutoff,),
+    ).fetchall()
+
+    issues = []
+    for row in rows:
+        content = row["content"] if isinstance(row, dict) else row[1]
+        chat_id = row["chat_id"] if isinstance(row, dict) else row[0]
+        timestamp = row["timestamp"] if isinstance(row, dict) else row[2]
+        content_lower = (content or "").lower()
+
+        for pattern, issue_type in _COHERENCE_ISSUE_PATTERNS:
+            if _re.search(pattern, content_lower):
+                issues.append({
+                    "chat_id": chat_id,
+                    "timestamp": timestamp,
+                    "issue_type": issue_type,
+                    "context": content[:200] if content else "",
+                })
+                break  # One issue per message
+
+    return issues
