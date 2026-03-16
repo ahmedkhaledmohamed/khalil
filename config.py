@@ -50,7 +50,7 @@ EMBED_PROVIDER = "ollama"  # #68: "ollama" (default) — abstraction for future 
 
 # LLM config — "ollama" (free, local) or "claude" (paid, cloud)
 LLM_BACKEND = "ollama"  # switch to "claude" if you have an API key
-OLLAMA_LLM_MODEL = "qwen2.5:14b"
+OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
