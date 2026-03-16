@@ -95,6 +95,46 @@ class TestDiskSpace:
         assert result["command"] == "df -h"
 
 
+class TestCountWindows:
+    def test_how_many_cursor_windows(self):
+        result = _try_direct_shell_intent("how many cursor windows open on my machine")
+        assert result is not None
+        assert "osascript" in result["command"]
+        assert "Cursor" in result["command"]
+
+    def test_count_safari_windows(self):
+        result = _try_direct_shell_intent("count safari windows")
+        assert result is not None
+        assert "Safari" in result["command"]
+
+    def test_how_many_chrome_instances(self):
+        result = _try_direct_shell_intent("how many chrome instances are there")
+        assert result is not None
+        assert "Google Chrome" in result["command"]
+
+
+class TestSystemQueries:
+    def test_running_apps(self):
+        result = _try_direct_shell_intent("what apps are running")
+        assert result is not None
+        assert result["action"] == "shell"
+
+    def test_battery_level(self):
+        result = _try_direct_shell_intent("what's my battery level")
+        assert result is not None
+        assert "pmset" in result["command"]
+
+    def test_whats_my_ip(self):
+        result = _try_direct_shell_intent("what's my ip")
+        assert result is not None
+        assert "ipconfig" in result["command"]
+
+    def test_uptime(self):
+        result = _try_direct_shell_intent("how long has my machine been running")
+        assert result is not None
+        assert "uptime" in result["command"]
+
+
 class TestNoMatch:
     @pytest.mark.parametrize("text", [
         "what's the weather",

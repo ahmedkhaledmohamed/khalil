@@ -325,6 +325,34 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\bcheck\s+(?:disk\s+)?(?:space|storage)\b", text_lower):
         return {"action": "shell", "command": "df -h", "description": "Check disk space"}
 
+    # "how many <app> windows open" / "count <app> windows"
+    m = re.search(r"\b(?:how\s+many|count)\s+(\w+)\s+(?:windows?|instances?)\b", text_lower)
+    if m:
+        app_name = m.group(1)
+        # Normalize to proper app name
+        app = _APP_NAMES.get(app_name, app_name.title())
+        return {
+            "action": "shell",
+            "command": f"osascript -e 'tell application \"System Events\" to count windows of process \"{app}\"'",
+            "description": f"Count {app} windows",
+        }
+
+    # "what apps/processes are running"
+    if re.search(r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", text_lower):
+        return {"action": "shell", "command": "ps -eo comm= | sort -u | grep -v '^$'", "description": "List running processes"}
+
+    # "what's my battery" / "battery level"
+    if re.search(r"\b(?:battery|charge)\s*(?:level|status|life)?\b", text_lower) and re.search(r"\b(?:what|check|how|battery)\b", text_lower):
+        return {"action": "shell", "command": "pmset -g batt", "description": "Check battery status"}
+
+    # "what's my ip"
+    if re.search(r"\b(?:what'?s?\s+)?my\s+ip\b", text_lower):
+        return {"action": "shell", "command": "ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1", "description": "Get local IP address"}
+
+    # "uptime"
+    if re.search(r"\b(?:how\s+long|when).*\b(?:running|up|uptime|reboot)\b", text_lower) or text_lower.strip() == "uptime":
+        return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
+
     return None
 
 
