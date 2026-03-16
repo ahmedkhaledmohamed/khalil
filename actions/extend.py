@@ -15,6 +15,7 @@ import logging
 import py_compile
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from datetime import datetime
@@ -33,32 +34,38 @@ GENERATION_COOLDOWN_SECONDS = 3600
 
 # --- Stage 1: Phrase-based capability gap detection ---
 
+# Semantic gate patterns — broader than exact phrases, catches novel refusal variants
+# These are cheap regex checks; if any match, the Stage 2 LLM classifier runs.
+GAP_GATE_PATTERNS = [
+    r"\bi\s+(?:can'?t|cannot|don'?t|do\s+not|couldn'?t|won'?t)\b",
+    r"\b(?:not\s+(?:able|something|possible)|unable)\b",
+    r"\b(?:beyond|outside)\s+(?:my|the)\s+(?:current|capabilities)\b",
+    r"\bcheck\s+(?:your|the)\s+\w+\s+manually\b",
+    r"\bneed\s+direct\s+access\b",
+    r"\bdon'?t\s+have\s+(?:access|the\s+ability|a\s+feature|that\s+capability|real-time|monitoring)\b",
+    r"\bno\s+built-in\s+support\b",
+    r"\bisn'?t\s+(?:available|possible|supported)\b",
+]
+
+# Keep the old phrase list for backward compatibility in tests
 CAPABILITY_GAP_PHRASES = [
-    "i can't do that",
-    "i don't have the ability",
-    "that capability isn't available",
-    "i can't currently",
-    "not something i can do yet",
-    "i don't have a feature for",
-    "i don't have that capability",
-    "that's not something i support",
-    "i'm not able to",
-    "no built-in support for",
-    "i would need direct access",
-    "i don't have real-time",
-    "i can't determine",
-    "i don't have access to your",
-    "i can't access your",
-    "i'm unable to",
-    "that's beyond my current",
-    "check your mac manually",
+    "i can't do that", "i don't have the ability", "that capability isn't available",
+    "i can't currently", "not something i can do yet", "i don't have a feature for",
+    "i don't have that capability", "that's not something i support", "i'm not able to",
+    "no built-in support for", "i would need direct access", "i don't have real-time",
+    "i can't determine", "i don't have access to your", "i can't access your",
+    "i'm unable to", "that's beyond my current", "check your mac manually",
 ]
 
 
 def detect_capability_gap(response: str) -> bool:
-    """Stage 1: cheap phrase match on LLM response."""
+    """Stage 1: cheap semantic gate on LLM response.
+
+    Uses broad regex patterns instead of exact phrase matching.
+    If triggered, Stage 2 LLM classifier should confirm.
+    """
     response_lower = response.lower()
-    return any(phrase in response_lower for phrase in CAPABILITY_GAP_PHRASES)
+    return any(re.search(p, response_lower) for p in GAP_GATE_PATTERNS)
 
 
 # --- Stage 2: LLM classification ---
@@ -571,6 +578,35 @@ def validate_generated_code(source: str) -> tuple[bool, str]:
             Path(f.name).unlink(missing_ok=True)
 
     return True, ""
+
+
+def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
+    """Import the module in a subprocess and verify the handler function exists.
+
+    Returns (passed, error_message).
+    """
+    handler_name = f"cmd_{command_name}"
+    test_script = (
+        f"import sys; sys.path.insert(0, {str(module_path.parent)!r}); "
+        f"mod = __import__({module_path.stem!r}); "
+        f"assert hasattr(mod, {handler_name!r}), "
+        f"'Missing handler: {handler_name}'; "
+        f"assert callable(getattr(mod, {handler_name!r})), "
+        f"'{handler_name} is not callable'"
+    )
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", test_script],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode != 0:
+            error = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
+            return False, f"Smoke test failed: {error}"
+        return True, ""
+    except subprocess.TimeoutExpired:
+        return False, "Smoke test timed out (10s)"
+    except Exception as e:
+        return False, f"Smoke test error: {e}"
 
 
 def _get_call_name(node: ast.Call) -> str | None:

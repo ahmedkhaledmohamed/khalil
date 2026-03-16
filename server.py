@@ -225,6 +225,8 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
             return response.content[0].text
         except Exception as e:
             log.error("Claude API call failed: %s", e)
+            from learning import record_signal
+            record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
             return f"⚠️ LLM unavailable (Claude error: {type(e).__name__}). Try again later."
 
     # Default: Ollama local LLM
@@ -245,12 +247,18 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
             return response.json()["message"]["content"]
     except httpx.TimeoutException:
         log.error("Ollama LLM call timed out after %.0fs", LLM_TIMEOUT)
+        from learning import record_signal
+        record_signal("llm_failure", {"backend": "ollama", "error": "timeout"})
         return "⚠️ LLM timed out. Ollama may be overloaded — try again in a moment."
     except httpx.ConnectError:
         log.error("Cannot connect to Ollama at %s", OLLAMA_URL)
+        from learning import record_signal
+        record_signal("llm_failure", {"backend": "ollama", "error": "connection_refused"})
         return "⚠️ LLM unavailable — Ollama is not running. Start it with: ollama serve"
     except (httpx.HTTPError, KeyError) as e:
         log.error("Ollama LLM call failed: %s", e)
+        from learning import record_signal
+        record_signal("llm_failure", {"backend": "ollama", "error": f"{type(e).__name__}: {e}"[:200]})
         return f"⚠️ LLM error: {type(e).__name__}. Check Ollama logs."
 
 
@@ -377,6 +385,56 @@ async def detect_intent(query: str) -> dict | None:
         return None
 
 
+async def _execute_with_retry(cmd: str, description: str, update, max_retries: int = 1):
+    """Execute a shell command with LLM-based retry on correctable errors.
+
+    Returns (result_dict, final_cmd) — the command may have been corrected.
+    """
+    from actions.shell import execute_shell, classify_error, would_escalate, classify_command, format_output
+    from learning import record_signal
+
+    result = await execute_shell(cmd)
+    if result["returncode"] == 0:
+        return result, cmd
+
+    error_class = classify_error(result["returncode"], result["stderr"])
+
+    if error_class == "transient":
+        await asyncio.sleep(2)
+        result = await execute_shell(cmd)
+        return result, cmd
+
+    if error_class == "correctable" and max_retries > 0:
+        correction_prompt = (
+            f"This macOS shell command failed:\n$ {cmd}\n"
+            f"Error: {result['stderr'][:500]}\n\n"
+            "Generate a corrected command that achieves the same goal. "
+            "Output ONLY the shell command, nothing else."
+        )
+        corrected = (await ask_llm(correction_prompt, "", system_extra="Output a single shell command. No explanation.")).strip()
+        # Strip markdown code fences if present
+        if corrected.startswith("```"):
+            lines = corrected.split("\n")
+            corrected = "\n".join(l for l in lines if not l.startswith("```")).strip()
+
+        if not corrected or would_escalate(cmd, corrected):
+            record_signal("shell_retry", {
+                "original_cmd": cmd, "corrected_cmd": corrected,
+                "error": result["stderr"][:200], "error_class": error_class,
+                "rejected": True, "reason": "escalation" if corrected else "empty",
+            })
+            return result, cmd
+
+        record_signal("shell_retry", {
+            "original_cmd": cmd, "corrected_cmd": corrected,
+            "error": result["stderr"][:200], "error_class": error_class,
+        })
+        return await _execute_with_retry(corrected, description, update, max_retries=0)
+
+    # permanent — return as-is
+    return result, cmd
+
+
 async def handle_action_intent(intent: dict, update: Update) -> bool:
     """Handle a detected action intent. Returns True if handled."""
     action = intent.get("action")
@@ -447,6 +505,10 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             events = await get_today_events()
             await update.message.reply_text(format_events_text(events))
         except Exception as e:
+            from learning import record_signal
+            record_signal("action_execution_failure", {
+                "action": "calendar", "error": str(e)[:200],
+            })
             await update.message.reply_text(f"❌ Calendar fetch failed: {e}")
         return True
 
@@ -469,17 +531,17 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         if not llm_generated:
             action_name = f"shell_{classification.value}"  # shell_read or shell_write
             if not autonomy.needs_approval(action_name):
-                result = await execute_shell(cmd)
-                autonomy.log_audit(action_name, f"Executed: {cmd}", {"command": cmd}, f"exit={result['returncode']}")
+                result, final_cmd = await _execute_with_retry(cmd, description, update)
+                autonomy.log_audit(action_name, f"Executed: {final_cmd}", {"command": final_cmd}, f"exit={result['returncode']}")
                 if result["returncode"] != 0:
                     from learning import record_signal
                     record_signal("action_execution_failure", {
-                        "action": "shell", "command": cmd,
+                        "action": "shell", "command": final_cmd,
                         "exit_code": result["returncode"],
                         "stderr": result["stderr"][:200],
                     })
                     await _try_inline_healing(update)
-                await update.message.reply_text(f"```\n{format_output(result, cmd)}\n```", parse_mode="Markdown")
+                await update.message.reply_text(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
                 return True
 
         # Needs approval — show Approve/Deny
@@ -595,10 +657,32 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Approved: {result['description']}\nExecuting...")
 
     try:
-        status_msg = await autonomy.execute_action(result)
-        await update.message.reply_text(status_msg)
+        # Shell actions get retry support
+        if result["action_type"] in ("shell_write", "shell_read"):
+            import json as _json
+            payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+            cmd = payload["command"]
+            from actions.shell import format_output
+            shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
+            autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
+            if shell_result["returncode"] != 0:
+                from learning import record_signal
+                record_signal("action_execution_failure", {
+                    "action": "shell", "command": final_cmd,
+                    "exit_code": shell_result["returncode"],
+                    "stderr": shell_result["stderr"][:200],
+                })
+            await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+        else:
+            status_msg = await autonomy.execute_action(result)
+            await update.message.reply_text(status_msg)
     except Exception as e:
         log.error(f"Action execution failed: {e}")
+        from learning import record_signal
+        record_signal("action_execution_failure", {
+            "action": result.get("action_type", "unknown"),
+            "error": str(e)[:200],
+        })
         await update.message.reply_text(f"❌ Execution failed: {e}")
 
 
@@ -669,10 +753,31 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(f"✅ Approved: {result['description']}\nExecuting...")
         try:
-            status_msg = await autonomy.execute_action(result)
-            await query.message.reply_text(status_msg)
+            if result["action_type"] in ("shell_write", "shell_read"):
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                cmd = payload["command"]
+                from actions.shell import format_output
+                shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
+                autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
+                if shell_result["returncode"] != 0:
+                    from learning import record_signal
+                    record_signal("action_execution_failure", {
+                        "action": "shell", "command": final_cmd,
+                        "exit_code": shell_result["returncode"],
+                        "stderr": shell_result["stderr"][:200],
+                    })
+                await query.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+            else:
+                status_msg = await autonomy.execute_action(result)
+                await query.message.reply_text(status_msg)
         except Exception as e:
             log.error(f"Action execution failed: {e}")
+            from learning import record_signal
+            record_signal("action_execution_failure", {
+                "action": result.get("action_type", "unknown"),
+                "error": str(e)[:200],
+            })
             await query.message.reply_text(f"❌ Execution failed: {e}")
 
     elif query.data == "action_deny":

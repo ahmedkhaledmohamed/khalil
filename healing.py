@@ -37,7 +37,12 @@ FAILURE_CODE_MAP = {
     "intent_detection_failure:email": [("server.py", "detect_intent")],
     "intent_detection_failure:calendar": [("server.py", "detect_intent")],
     "action_execution_failure:shell": [("actions/shell.py", "execute_shell"), ("actions/shell.py", "classify_command")],
+    "action_execution_failure:calendar": [("actions/calendar.py", "get_today_events")],
+    "action_execution_failure:email": [("actions/gmail.py", "draft_email"), ("actions/gmail.py", "send_draft")],
 }
+
+# Errors that are deterministic — trigger healing after just 1 occurrence
+CRITICAL_ERROR_PATTERNS = ["ImportError", "ModuleNotFoundError", "AttributeError", "SyntaxError"]
 
 
 # --- Failure Detection ---
@@ -51,7 +56,7 @@ def detect_recurring_failures() -> list[dict]:
     from datetime import datetime, timedelta
     cutoff = (datetime.utcnow() - timedelta(hours=48)).strftime("%Y-%m-%d %H:%M:%S")
 
-    failure_types = ("intent_detection_failure", "action_execution_failure", "user_correction")
+    failure_types = ("intent_detection_failure", "action_execution_failure", "user_correction", "extension_runtime_failure")
     placeholders = ",".join("?" for _ in failure_types)
     rows = conn.execute(
         f"SELECT signal_type, context, created_at FROM interaction_signals "
@@ -77,15 +82,22 @@ def detect_recurring_failures() -> list[dict]:
 
     triggers = []
     for fingerprint, signals in groups.items():
-        if len(signals) < HEALING_FAILURE_THRESHOLD:
+        # Critical errors (ImportError, etc.) trigger after just 1 occurrence
+        has_critical = any(
+            any(pat in str(s["context"].get("error", "")) for pat in CRITICAL_ERROR_PATTERNS)
+            for s in signals
+        )
+        threshold = 1 if has_critical else HEALING_FAILURE_THRESHOLD
+        if len(signals) < threshold:
             continue
 
         # Dedup: skip if we already created a self_heal insight for this fingerprint recently
+        # BUT allow re-triggering if the previous heal failed
         recent_heals = conn.execute(
-            "SELECT id FROM insights WHERE category = 'self_heal' AND evidence LIKE ? AND created_at > ?",
+            "SELECT id, summary FROM insights WHERE category = 'self_heal' AND evidence LIKE ? AND created_at > ?",
             (f"%{fingerprint}%", (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")),
         ).fetchall()
-        if recent_heals:
+        if recent_heals and not any("failed_heal" in (h["summary"] or "") for h in recent_heals):
             log.debug("Skipping %s — already healed recently (insight #%d)", fingerprint, recent_heals[0]["id"])
             continue
 
@@ -100,6 +112,64 @@ def detect_recurring_failures() -> list[dict]:
         log.info("Detected %d recurring failure pattern(s): %s",
                  len(triggers), [t["fingerprint"] for t in triggers])
     return triggers
+
+
+def check_heal_outcomes() -> list[dict]:
+    """Check if previous heals actually fixed the problem.
+
+    Returns list of fingerprints where healing failed (signals recurred after heal).
+    Marks those insights as 'failed_heal' so they can be re-triggered.
+    """
+    conn = _get_conn()
+    from datetime import datetime, timedelta
+
+    # Find recent self_heal insights
+    recent_heals = conn.execute(
+        "SELECT id, evidence, summary, created_at FROM insights "
+        "WHERE category = 'self_heal' AND created_at > ? AND summary NOT LIKE '%failed_heal%'",
+        ((datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"),),
+    ).fetchall()
+
+    failed = []
+    for heal in recent_heals:
+        # Extract fingerprint from evidence
+        evidence = heal["evidence"] or ""
+        # Evidence contains the fingerprint — extract it
+        import re as _re
+        fp_match = _re.search(r"([\w_]+:[\w_]+)", evidence)
+        if not fp_match:
+            continue
+        fingerprint = fp_match.group(1)
+
+        # Check if new failures with same fingerprint appeared AFTER the heal
+        recurrences = conn.execute(
+            "SELECT COUNT(*) as cnt FROM interaction_signals "
+            "WHERE signal_type || ':' || json_extract(context, '$.action') = ? "
+            "AND created_at > ?",
+            (fingerprint, heal["created_at"]),
+        ).fetchone()
+
+        # Also try with action_hint for intent failures
+        recurrences2 = conn.execute(
+            "SELECT COUNT(*) as cnt FROM interaction_signals "
+            "WHERE signal_type || ':' || json_extract(context, '$.action_hint') = ? "
+            "AND created_at > ?",
+            (fingerprint, heal["created_at"]),
+        ).fetchone()
+
+        total = (recurrences["cnt"] if recurrences else 0) + (recurrences2["cnt"] if recurrences2 else 0)
+        if total > 0:
+            # Mark as failed heal
+            conn.execute(
+                "UPDATE insights SET summary = ? WHERE id = ?",
+                (f"[failed_heal] {heal['summary'] or ''}", heal["id"]),
+            )
+            conn.commit()
+            failed.append({"fingerprint": fingerprint, "insight_id": heal["id"], "recurrences": total})
+            log.warning("Heal for %s failed — %d recurrences after fix (insight #%d)",
+                        fingerprint, total, heal["id"])
+
+    return failed
 
 
 # --- Diagnosis ---
@@ -125,6 +195,27 @@ def extract_function_source(file_path: Path, function_name: str) -> tuple[str, i
     return None
 
 
+def _extract_targets_from_traceback(signals: list[dict]) -> list[tuple[str, str]] | None:
+    """Extract (file, function) targets from traceback strings in signal context."""
+    import re as _re
+    for signal in signals:
+        error = signal.get("context", {}).get("error", "")
+        # Match Python traceback frames: File "path/to/file.py", line N, in func_name
+        frames = _re.findall(r'File "([^"]+)", line \d+, in (\w+)', error)
+        if frames:
+            # Use the last frame that's inside the khalil directory
+            khalil_frames = [
+                (f, func) for f, func in frames
+                if "khalil" in f and func not in ("wrapper", "<module>")
+            ]
+            if khalil_frames:
+                filepath, func = khalil_frames[-1]
+                # Convert absolute path to relative
+                rel = filepath.split("khalil/")[-1] if "khalil/" in filepath else filepath
+                return [(rel, func)]
+    return None
+
+
 def build_diagnosis(trigger: dict) -> dict | None:
     """Assemble diagnosis context for Claude Opus."""
     fingerprint = trigger["fingerprint"]
@@ -141,8 +232,11 @@ def build_diagnosis(trigger: dict) -> dict | None:
                 break
 
     if not code_targets:
-        log.warning("No code mapping for fingerprint: %s", fingerprint)
-        return None
+        # Dynamic fallback: extract file/function from traceback in signal context
+        code_targets = _extract_targets_from_traceback(signals)
+        if not code_targets:
+            log.warning("No code mapping for fingerprint: %s", fingerprint)
+            return None
 
     # Extract function source code
     source_context = []
