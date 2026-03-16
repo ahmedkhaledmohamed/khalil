@@ -182,7 +182,8 @@ def approve_deny_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-CONVERSATION_CONTEXT_WINDOW = 10  # messages sent to LLM for context
+CONVERSATION_CONTEXT_WINDOW = 10  # max messages sent to LLM for context
+CONVERSATION_MIN_WINDOW = 4      # minimum messages to include
 
 
 def save_message(chat_id: int, role: str, content: str):
@@ -194,16 +195,51 @@ def save_message(chat_id: int, role: str, content: str):
     db_conn.commit()
 
 
+def _compute_topic_similarity(text_a: str, text_b: str) -> float:
+    """#66: Simple word-overlap similarity between two texts. Returns 0.0-1.0."""
+    words_a = set(text_a.lower().split())
+    words_b = set(text_b.lower().split())
+    # Remove common stopwords
+    stopwords = {"the", "a", "an", "is", "are", "was", "were", "i", "you", "my", "your",
+                 "it", "this", "that", "to", "of", "in", "for", "on", "with", "and", "or"}
+    words_a -= stopwords
+    words_b -= stopwords
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union) if union else 0.0
+
+
 def get_conversation_history(chat_id: int) -> str:
-    """Get recent conversation history formatted for LLM context (windowed)."""
+    """Get recent conversation history formatted for LLM context.
+
+    #66: Dynamic context window — includes more messages when topic is coherent,
+    fewer when the topic has shifted.
+    """
     rows = db_conn.execute(
         "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT ?",
         (chat_id, CONVERSATION_CONTEXT_WINDOW),
     ).fetchall()
     if not rows:
         return ""
+
     # Reverse to chronological order
     rows = list(reversed(rows))
+
+    # Dynamic windowing: walk backward from newest, stop when topic diverges
+    if len(rows) > CONVERSATION_MIN_WINDOW:
+        latest_text = rows[-1][1]
+        window_size = CONVERSATION_MIN_WINDOW
+        for i in range(len(rows) - CONVERSATION_MIN_WINDOW - 1, -1, -1):
+            sim = _compute_topic_similarity(latest_text, rows[i][1])
+            if sim >= 0.1:  # Even slight topical overlap = include
+                window_size = len(rows) - i
+            else:
+                break
+        window_size = max(CONVERSATION_MIN_WINDOW, min(window_size, len(rows)))
+        rows = rows[-window_size:]
+
     lines = [f"{r[0].title()}: {r[1]}" for r in rows]
     return "Recent conversation:\n" + "\n".join(lines)
 
@@ -215,11 +251,18 @@ def clear_conversation(chat_id: int):
 
 
 def truncate_context(results: list[dict], max_chars: int = MAX_CONTEXT_TOKENS * 4) -> str:
-    """Format search results into context string, respecting token limits."""
+    """Format search results into context string, respecting token limits.
+
+    #67: Each result is tagged with a [Source: ...] citation for cross-source fusion.
+    """
     lines = []
     total = 0
     for r in results:
-        entry = f"[{r.get('category', '')}] {r['title']}\n{r['content']}\n"
+        category = r.get('category', '')
+        title = r['title']
+        # #67: Build a source citation tag from category and title
+        source_tag = f"[Source: {category} — {title}]" if category else f"[Source: {title}]"
+        entry = f"{source_tag}\n{r['content']}\n"
         if total + len(entry) > max_chars:
             break
         lines.append(entry)
@@ -285,40 +328,60 @@ async def _try_recover_ollama() -> bool:
     return False
 
 
+# #18: Graceful degradation chain — Ollama → Claude Sonnet → Claude Haiku → cached
+_FALLBACK_MODELS = [CLAUDE_MODEL, "claude-haiku-4-5-20251001"]
+
 async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
-    """Fall back to Claude API when Ollama is down. Returns None if Claude unavailable."""
-    if not claude:
-        # Try to initialize Claude on-the-fly
+    """Fall back through Claude model chain when Ollama is down.
+
+    Tries: Claude Sonnet → Claude Haiku → last cached response.
+    """
+    client = claude
+    if not client:
         api_key = get_secret("anthropic-api-key")
         if not api_key:
-            return None
+            return _get_cached_response(query)
         try:
-            temp_claude = anthropic.AsyncAnthropic(api_key=api_key)
-            response = await temp_claude.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            log.info("Fell back to Claude API (Ollama unavailable)")
-            return response.content[0].text
-        except Exception as e:
-            log.error("Claude fallback also failed: %s", e)
-            return None
-    else:
-        try:
-            response = await claude.messages.create(
-                model=CLAUDE_MODEL,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            log.info("Fell back to Claude API (Ollama unavailable)")
-            return response.content[0].text
+            client = anthropic.AsyncAnthropic(api_key=api_key)
         except Exception:
-            return None
+            return _get_cached_response(query)
+
+    for model in _FALLBACK_MODELS:
+        try:
+            response = await client.messages.create(
+                model=model,
+                max_tokens=1500,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                timeout=CLAUDE_TIMEOUT,
+            )
+            text = response.content[0].text
+            log.info("Fell back to %s (Ollama unavailable)", model)
+            return text
+        except Exception as e:
+            log.warning("Fallback model %s failed: %s", model, e)
+            continue
+
+    # All models failed — try cached response
+    return _get_cached_response(query)
+
+
+def _get_cached_response(query: str) -> str | None:
+    """Return a recent cached response for a similar query, or None."""
+    if not db_conn:
+        return None
+    try:
+        # Find recent assistant response where user asked something similar
+        rows = db_conn.execute(
+            "SELECT content FROM conversations WHERE role = 'assistant' "
+            "ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if rows:
+            log.info("Using cached response (all LLM backends unavailable)")
+            return f"⚠️ LLM unavailable — here's my last response (may not be relevant):\n\n{rows[0][:500]}"
+    except Exception:
+        pass
+    return None
 
 
 async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
@@ -501,6 +564,30 @@ _ACTION_PATTERNS = [
     # Email labeling / categorization
     (r"\b(?:categoriz|label|organiz|sort)\w*\s+(?:my\s+)?(?:email|inbox|mail)\b", "label"),
     (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),
+    # #36: Clipboard integration
+    (r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", "clipboard_read"),
+    (r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", "clipboard_process"),
+    (r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", "clipboard_read"),
+    # #40: Spotlight file search
+    (r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?file\b", "spotlight"),
+    (r"\bfind\s+(?:all\s+)?(?:my\s+)?\w+\s+files?\b", "spotlight"),
+    (r"\bwhere\s+is\s+(?:my\s+|the\s+)?\w+\b.*\bfile\b", "spotlight"),
+    # #52: GitHub issue creation
+    (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bfile\s+(?:an?\s+)?(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bnew\s+(?:github\s+)?issue\b", "gh_issue"),
+    # #53: GitHub PR status monitoring
+    (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    (r"\b(?:pr|pull\s+request)\s+status\b", "gh_pr_status"),
+    (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    # #41: Brew package management
+    (r"\bbrew\s+(?:list|info|search|install|upgrade|uninstall|cleanup)\b", "shell"),
+    (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
+    (r"\binstall\s+(?:via\s+)?brew\b", "shell"),
+    (r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", "shell"),
+    # #1: Explicit feedback
+    (r"^/feedback\b", "feedback"),
 ]
 
 
@@ -511,6 +598,38 @@ def _looks_like_action(text: str) -> str | None:
         if re.search(pattern, text_lower):
             return hint
     return None
+
+
+# --- #65: Conversation Topic Detection ---
+
+_TOPIC_KEYWORDS = {
+    "work": {"meeting", "sprint", "jira", "standup", "project", "deadline", "team", "slack",
+             "manager", "review", "deploy", "release", "roadmap", "okr", "backlog", "ticket"},
+    "finance": {"money", "investment", "stock", "tax", "budget", "expense", "salary", "bank",
+                "portfolio", "crypto", "dividend", "savings", "mortgage", "rrsp", "tfsa"},
+    "health": {"exercise", "gym", "workout", "diet", "sleep", "doctor", "weight", "run",
+               "meditation", "calories", "steps", "health", "medical", "prescription"},
+    "tech": {"code", "python", "javascript", "api", "database", "server", "bug", "git",
+             "docker", "deploy", "framework", "library", "debug", "refactor", "algorithm"},
+    "family": {"kids", "wife", "husband", "family", "school", "daycare", "children", "parent",
+               "birthday", "vacation", "home", "weekend", "dinner", "park"},
+}
+
+
+def classify_message_topic(text: str) -> str:
+    """#65: Classify a message into a topic using keyword matching.
+
+    Returns one of: 'work', 'finance', 'health', 'tech', 'family', 'general'.
+    """
+    words = set(re.findall(r'\b\w+\b', text.lower()))
+    best_topic = "general"
+    best_score = 0
+    for topic, keywords in _TOPIC_KEYWORDS.items():
+        score = len(words & keywords)
+        if score > best_score:
+            best_score = score
+            best_topic = topic
+    return best_topic
 
 
 # App name normalization for open -a
@@ -598,6 +717,69 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     # "uptime"
     if re.search(r"\b(?:uptime|how\s+long.*(?:running|been\s+on|up))\b", text_lower):
         return {"action": "shell", "command": "uptime", "description": "Check system uptime"}
+
+    # #36: Clipboard — "what's on my clipboard", "read clipboard"
+    if re.search(r"\b(?:what'?s|show|read|get|check)\s+(?:on\s+)?(?:my\s+)?clipboard\b", text_lower) or \
+       re.search(r"\bpaste\b.*\b(?:clipboard|what\s+i\s+copied)\b", text_lower):
+        return {"action": "shell", "command": "pbpaste", "description": "Read clipboard contents"}
+
+    # #36: Clipboard — "process/summarize my clipboard"
+    if re.search(r"\b(?:process|summarize|analyze|translate)\s+(?:my\s+)?clipboard\b", text_lower):
+        return {"action": "shell", "command": "pbpaste", "description": "Read clipboard for processing"}
+
+    # #40: Spotlight file search — "find file X", "locate my .py files"
+    m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
+    if m:
+        search_term = m.group(1).strip()
+        if search_term:
+            return {"action": "shell", "command": f"mdfind 'kMDItemFSName == \"{search_term}\"'", "description": f"Search for file: {search_term}"}
+
+    # #53: GitHub PR status — "check my PRs", "PR status"
+    if re.search(r"\b(?:check\s+(?:my\s+)?(?:pull\s+requests?|prs?)|(?:pr|pull\s+request)\s+status|list\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?))\b", text_lower):
+        return {"action": "shell", "command": "gh pr list --author=@me --state=open", "description": "List your open pull requests"}
+
+    # #41: Brew package management
+    if re.search(r"\blist\s+(?:my\s+)?brew\s+packages?\b", text_lower) or \
+       re.search(r"\bwhat\s+(?:brew\s+)?packages?\s+(?:do\s+i\s+have|are\s+installed)\b", text_lower) or \
+       text_lower.strip() == "brew list":
+        return {"action": "shell", "command": "brew list", "description": "List installed Homebrew packages"}
+
+    m = re.search(r"\bbrew\s+info\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew info {pkg}", "description": f"Get info for brew package: {pkg}"}
+
+    m = re.search(r"\bbrew\s+search\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew search {pkg}", "description": f"Search brew for: {pkg}"}
+
+    m = re.search(r"\bbrew\s+install\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew install {pkg}", "description": f"Install brew package: {pkg}"}
+
+    m = re.search(r"\bbrew\s+upgrade(?:\s+(\S+))?", text_lower)
+    if m:
+        pkg = m.group(1)
+        cmd = f"brew upgrade {pkg}" if pkg else "brew upgrade"
+        desc = f"Upgrade brew package: {pkg}" if pkg else "Upgrade all brew packages"
+        return {"action": "shell", "command": cmd, "description": desc}
+
+    m = re.search(r"\bbrew\s+uninstall\s+(\S+)", text_lower)
+    if m:
+        pkg = m.group(1)
+        return {"action": "shell", "command": f"brew uninstall {pkg}", "description": f"Uninstall brew package: {pkg}"}
+
+    if re.search(r"\bbrew\s+cleanup\b", text_lower):
+        return {"action": "shell", "command": "brew cleanup", "description": "Clean up old brew package versions"}
+
+    # #52: GitHub issue creation — "create issue <title>"
+    m = re.search(r"\b(?:create|open|file|new)\s+(?:a\s+)?(?:github\s+)?issue\s+(?:for\s+|about\s+|titled?\s+)?['\"]?(.+?)['\"]?\s*$", text_lower)
+    if m:
+        title = text_stripped[m.start(1):m.end(1)].strip().strip("'\"")
+        if title:
+            return {"action": "shell", "command": f"gh issue create --title '{title}'", "description": f"Create GitHub issue: {title}"}
 
     return None
 
@@ -1977,6 +2159,9 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
+    import time as _time
+    _msg_start = _time.monotonic()
+
     global OWNER_CHAT_ID
     if OWNER_CHAT_ID is None:
         OWNER_CHAT_ID = update.effective_chat.id
@@ -2007,6 +2192,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         record_signal("user_correction", {"query": query[:200]})
         await _try_inline_healing(update)
 
+    # #61: Implicit preference detection — detect preferences in messages
+    _PREFERENCE_PATTERNS = [
+        (r"\bi\s+prefer\s+(.+?)(?:\.|$)", "general_preference"),
+        (r"\b(?:always|never)\s+(.+?)(?:\.|$)", "behavioral_preference"),
+        (r"\b(?:i\s+like|i\s+want)\s+(?:it\s+)?(?:when\s+)?(?:you\s+)?(.+?)(?:\.|$)", "style_preference"),
+        (r"\b(?:don'?t|stop|quit)\s+(.+?)(?:\.|$)", "negative_preference"),
+        (r"\buse\s+(?:bullet\s+points?|lists?|markdown|short\s+(?:answers?|responses?))\b", "format_preference"),
+    ]
+    for p, ptype in _PREFERENCE_PATTERNS:
+        pm = re.search(p, query.lower())
+        if pm:
+            try:
+                from learning import record_signal
+                record_signal("implicit_preference", {
+                    "type": ptype, "text": query[:200], "match": pm.group(0)[:100],
+                })
+            except Exception:
+                pass
+            break
+
     # Try natural language action detection
     # 0. Check if query matches an extension command — route directly
     action_hint = _looks_like_action(query)
@@ -2030,6 +2235,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action_hint:
         intent = await detect_intent(query)
         if intent:
+            # #3: Track intent detection accuracy — pattern hint vs LLM result
+            try:
+                llm_action = intent.get("action", "unknown")
+                record_signal("intent_accuracy", {
+                    "pattern_hint": action_hint,
+                    "llm_action": llm_action,
+                    "match": action_hint == llm_action,
+                    "query": query[:100],
+                })
+            except Exception:
+                pass
             intent["user_query"] = query
             handled = await handle_action_intent(intent, update)
             if handled:
@@ -2057,10 +2273,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get conversation history for multi-turn context
     conversation = get_conversation_history(chat_id)
 
-    # Combine context
-    full_context = f"Personal Profile:\n{personal_context}\n\nArchive Results:\n{archive_context}"
+    # #67: Combine context with source citations for cross-source fusion
+    full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
     if conversation:
-        full_context = f"{conversation}\n\n{full_context}"
+        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
 
     # Ask LLM
     response = await ask_claude(query, full_context)
@@ -2157,6 +2373,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await progress_msg.delete()
         await update.message.reply_text(display_response)
 
+    # #2: Record response latency
+    _latency_ms = (_time.monotonic() - _msg_start) * 1000
+    try:
+        record_signal("response_latency", {"latency_ms": round(_latency_ms, 1), "query_len": len(query)})
+    except Exception:
+        pass
+
+    # #1: Conversation success scoring — record completion signal
+    try:
+        topic = classify_message_topic(query)
+        record_signal("conversation_success", {
+            "query": query[:200],
+            "topic": topic,
+            "latency_ms": round(_latency_ms, 1),
+            "had_correction": any(re.search(p, query.lower()) for p in _CORRECTION_PATTERNS),
+        })
+    except Exception:
+        pass
+
+
+async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """#1: Record explicit user feedback on conversation quality."""
+    from learning import record_signal
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "Usage: /feedback <positive|negative> [comment]\n"
+            "Example: /feedback positive Great answer!\n"
+            "Example: /feedback negative Didn't understand my question"
+        )
+        return
+    sentiment = args[0].lower()
+    if sentiment not in ("positive", "negative"):
+        await update.message.reply_text("Feedback must be 'positive' or 'negative'.")
+        return
+    comment = " ".join(args[1:]) if len(args) > 1 else ""
+    score = 1.0 if sentiment == "positive" else -1.0
+    record_signal("explicit_feedback", {
+        "sentiment": sentiment,
+        "comment": comment[:500],
+    }, value=score)
+    await update.message.reply_text(f"Thanks for the feedback! Recorded as {sentiment}.")
+
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -2168,12 +2427,28 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def _wrap_extension_handler(handler_fn, extension_name: str):
-    """Wrap extension handler to record failures for self-healing."""
+    """Wrap extension handler to record usage and failures for monitoring (#31)."""
     async def wrapper(update, context):
         try:
-            return await handler_fn(update, context)
+            from learning import record_signal
+            record_signal("extension_usage", {"extension": extension_name, "status": "invoked"})
+        except Exception:
+            pass
+        try:
+            result = await handler_fn(update, context)
+            try:
+                from learning import record_signal
+                record_signal("extension_usage", {"extension": extension_name, "status": "success"})
+            except Exception:
+                pass
+            return result
         except Exception as e:
             log.error("Extension %s failed: %s", extension_name, e)
+            try:
+                from learning import record_signal
+                record_signal("extension_usage", {"extension": extension_name, "status": "error", "error": str(e)[:200]})
+            except Exception:
+                pass
             try:
                 from learning import record_signal
                 record_signal("extension_runtime_failure", {
@@ -2256,6 +2531,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("backup", cmd_backup))
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
+    application.add_handler(CommandHandler("feedback", cmd_feedback))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -2435,27 +2711,45 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
-    # Weekly reflection — Sunday 5 PM (before weekly summary at 6 PM)
+    # #4: Configurable reflection cadence — read from settings, default to existing schedule
+    _refl_weekly_day = "sun"
+    _refl_weekly_hour = 17
+    _refl_micro_hour = 23
+    if db_conn:
+        try:
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_weekly_day'").fetchone()
+            if row:
+                _refl_weekly_day = row[0]
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_weekly_hour'").fetchone()
+            if row:
+                _refl_weekly_hour = int(row[0])
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'reflection_micro_hour'").fetchone()
+            if row:
+                _refl_micro_hour = int(row[0])
+        except Exception:
+            pass
+
+    # Weekly reflection (configurable day/hour)
     async def _weekly_reflection_job():
         if _can_send():
             await run_reflection(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
 
     scheduler.add_job(
         _weekly_reflection_job,
-        CronTrigger(day_of_week="sun", hour=17, minute=0, timezone=TIMEZONE),
+        CronTrigger(day_of_week=_refl_weekly_day, hour=_refl_weekly_hour, minute=0, timezone=TIMEZONE),
         id="weekly_reflection",
         name="Weekly Reflection",
         replace_existing=True,
     )
 
-    # Daily micro-reflection + self-healing check — 11 PM
+    # Daily micro-reflection + self-healing check (configurable hour)
     async def _micro_reflection_job():
         bot = telegram_app.bot if telegram_app else None
         await run_micro_reflection(ask_claude, bot=bot, chat_id=OWNER_CHAT_ID)
 
     scheduler.add_job(
         _micro_reflection_job,
-        CronTrigger(hour=23, minute=0, timezone=TIMEZONE),
+        CronTrigger(hour=_refl_micro_hour, minute=0, timezone=TIMEZONE),
         id="micro_reflection",
         name="Daily Micro-Reflection",
         replace_existing=True,

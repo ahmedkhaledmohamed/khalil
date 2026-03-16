@@ -116,6 +116,81 @@ def get_capability_heatmap(days: int = 7) -> list[dict]:
     return [{"action": r[0], "count": r[1]} for r in rows]
 
 
+# --- Intent Detection Accuracy (#3) ---
+
+def get_intent_accuracy(days: int = 7) -> dict:
+    """Compute intent detection accuracy over the last N days.
+
+    Returns {total, matches, accuracy_pct, mismatches: [{pattern_hint, llm_action, count}]}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'intent_accuracy' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    total = len(rows)
+    matches = 0
+    mismatch_counts: dict[tuple, int] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        if ctx.get("match"):
+            matches += 1
+        else:
+            key = (ctx.get("pattern_hint", "?"), ctx.get("llm_action", "?"))
+            mismatch_counts[key] = mismatch_counts.get(key, 0) + 1
+
+    mismatches = [
+        {"pattern_hint": k[0], "llm_action": k[1], "count": v}
+        for k, v in sorted(mismatch_counts.items(), key=lambda x: -x[1])
+    ]
+
+    return {
+        "total": total,
+        "matches": matches,
+        "accuracy_pct": round(matches / total * 100, 1) if total else 0.0,
+        "mismatches": mismatches,
+    }
+
+
+# --- Extension Usage Monitoring (#31) ---
+
+def get_extension_health(days: int = 7) -> list[dict]:
+    """Return per-extension usage stats: invocations, successes, errors, error_rate."""
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'extension_usage' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    stats: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        ext = ctx.get("extension", "unknown")
+        status = ctx.get("status", "unknown")
+        if ext not in stats:
+            stats[ext] = {"invoked": 0, "success": 0, "error": 0}
+        if status in stats[ext]:
+            stats[ext][status] += 1
+
+    result = []
+    for ext, s in sorted(stats.items()):
+        total = s["invoked"]
+        error_rate = round(s["error"] / total * 100, 1) if total else 0.0
+        result.append({
+            "extension": ext,
+            "invocations": total,
+            "successes": s["success"],
+            "errors": s["error"],
+            "error_rate_pct": error_rate,
+        })
+    return result
+
+
 # --- Insight Management ---
 
 def store_insight(category: str, summary: str, evidence: str, recommendation: str) -> int:
@@ -308,6 +383,56 @@ Respond with ONLY a JSON array. No markdown, no explanation."""
     return prompt
 
 
+def generate_reflection_diff() -> str:
+    """#5: Generate a diff report showing what changed since last reflection.
+
+    Returns a human-readable summary of new/decayed preferences and new insights.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    lines = []
+
+    # New or updated preferences
+    new_prefs = conn.execute(
+        "SELECT key, value, confidence FROM learned_preferences WHERE updated_at > ?",
+        (cutoff,),
+    ).fetchall()
+    if new_prefs:
+        lines.append("📊 Preferences changed this week:")
+        for p in new_prefs:
+            lines.append(f"  • {p[0]}: {p[1]} (confidence={p[2]})")
+
+    # Decayed preferences (low confidence)
+    decayed = conn.execute(
+        "SELECT key, value, confidence FROM learned_preferences WHERE confidence < 0.3"
+    ).fetchall()
+    if decayed:
+        lines.append("📉 Decaying preferences (low confidence):")
+        for p in decayed:
+            lines.append(f"  • {p[0]}: {p[1]} (confidence={p[2]})")
+
+    # New insights this week
+    new_insights = conn.execute(
+        "SELECT category, summary, status FROM insights WHERE created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+    if new_insights:
+        lines.append(f"💡 {len(new_insights)} new insight(s) this week:")
+        for i in new_insights[:5]:
+            status_icon = "✅" if i[2] == "applied" else "⏳"
+            lines.append(f"  {status_icon} [{i[0]}] {i[1]}")
+
+    # Capability heatmap summary
+    heatmap = get_capability_heatmap(days=7)
+    if heatmap:
+        top3 = heatmap[:3]
+        lines.append("🔥 Most used capabilities:")
+        for h in top3:
+            lines.append(f"  • {h['action']}: {h['count']}x")
+
+    return "\n".join(lines) if lines else "No significant changes since last reflection."
+
+
 async def run_weekly_reflection(ask_llm_fn) -> list[dict]:
     """Run the weekly reflection — analyze signals and generate insights.
 
@@ -486,6 +611,625 @@ def detect_recurring_failures() -> list[dict]:
     except Exception as e:
         log.debug("Healing detection unavailable: %s", e)
         return []
+
+
+# --- #57: Conversation Summarization ---
+
+async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[dict]:
+    """Summarize long conversation threads into knowledge base entries.
+
+    Finds conversation threads with >= min_messages and compresses them
+    into document entries for the knowledge base.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Find chat_ids with enough messages
+    chats = conn.execute(
+        "SELECT chat_id, COUNT(*) as cnt FROM conversations "
+        "WHERE timestamp > ? GROUP BY chat_id HAVING cnt >= ?",
+        (cutoff, min_messages),
+    ).fetchall()
+
+    summaries = []
+    for chat in chats:
+        chat_id = chat[0]
+        messages = conn.execute(
+            "SELECT role, content, timestamp FROM conversations "
+            "WHERE chat_id = ? AND timestamp > ? ORDER BY timestamp",
+            (chat_id, cutoff),
+        ).fetchall()
+
+        # Build conversation text for summarization
+        conv_text = "\n".join(f"{m[0]}: {m[1][:200]}" for m in messages[:50])
+
+        try:
+            summary = await ask_llm_fn(
+                f"Summarize this conversation into key topics, decisions, and action items:\n\n{conv_text}",
+                "",
+                system_extra="Create a concise summary with bullet points. Focus on decisions made, tasks assigned, and key information exchanged.",
+            )
+            if summary and not summary.startswith("⚠️"):
+                # Store in documents table for knowledge base
+                conn.execute(
+                    "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
+                    ("conversation_summary", "conversation",
+                     f"Conversation summary ({messages[0][2][:10]})", summary),
+                )
+                conn.commit()
+                summaries.append({"chat_id": chat_id, "message_count": len(messages), "summary": summary[:200]})
+                log.info("Summarized conversation for chat %d (%d messages)", chat_id, len(messages))
+        except Exception as e:
+            log.warning("Conversation summarization failed for chat %d: %s", chat_id, e)
+
+    return summaries
+
+
+# --- #1: Conversation Success Scoring ---
+
+def get_conversation_scores(days: int = 7) -> dict:
+    """Aggregate conversation success scores over the last N days.
+
+    Returns {total, positive, negative, corrections, score_pct, by_topic: {topic: {count, corrections}}}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Success signals
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'conversation_success' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    # Explicit feedback
+    feedback_rows = conn.execute(
+        "SELECT value FROM interaction_signals "
+        "WHERE signal_type = 'explicit_feedback' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    total = len(rows)
+    corrections = 0
+    by_topic: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        topic = ctx.get("topic", "general")
+        had_correction = ctx.get("had_correction", False)
+        if topic not in by_topic:
+            by_topic[topic] = {"count": 0, "corrections": 0}
+        by_topic[topic]["count"] += 1
+        if had_correction:
+            corrections += 1
+            by_topic[topic]["corrections"] += 1
+
+    positive_feedback = sum(1 for r in feedback_rows if r[0] > 0)
+    negative_feedback = sum(1 for r in feedback_rows if r[0] < 0)
+
+    # Score: conversations without corrections + positive feedback - negative feedback
+    success_count = (total - corrections) + positive_feedback - negative_feedback
+    score_pct = round(success_count / total * 100, 1) if total else 0.0
+
+    return {
+        "total": total,
+        "positive_feedback": positive_feedback,
+        "negative_feedback": negative_feedback,
+        "corrections": corrections,
+        "score_pct": score_pct,
+        "by_topic": by_topic,
+    }
+
+
+# --- #9: Monthly Meta-Reflection ---
+
+async def run_monthly_meta_reflection(ask_llm_fn) -> list[dict]:
+    """Run monthly meta-reflection — analyze whether weekly insights are actionable.
+
+    Args:
+        ask_llm_fn: async callable(query, context, system_extra) -> str
+
+    Returns:
+        List of meta-insight dicts.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Gather last 30 days of insights
+    insights = conn.execute(
+        "SELECT category, summary, evidence, recommendation, status, created_at "
+        "FROM insights WHERE created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    if len(insights) < 2:
+        log.info("Monthly meta-reflection skipped — insufficient insights (%d)", len(insights))
+        return []
+
+    # Check which applied insights actually stuck (preferences still active)
+    applied_insights = [i for i in insights if i["status"] == "applied"]
+    current_prefs = list_preferences()
+    active_pref_keys = {p["key"] for p in current_prefs if p["confidence"] >= 0.3}
+
+    stuck_count = 0
+    for ai in applied_insights:
+        # Simple heuristic: if any preference key relates to the insight category, it stuck
+        for key in active_pref_keys:
+            if ai["category"] in key or key in ai["summary"].lower():
+                stuck_count += 1
+                break
+
+    insight_data = [
+        {
+            "category": i["category"],
+            "summary": i["summary"],
+            "status": i["status"],
+            "created_at": i["created_at"],
+        }
+        for i in insights
+    ]
+
+    prompt = f"""Analyze the last 30 days of Khalil's self-improvement insights for meta-patterns.
+
+## Insights Generated ({len(insights)} total)
+{json.dumps(insight_data, indent=2)}
+
+## Applied Insights That Stuck: {stuck_count}/{len(applied_insights)}
+## Active Preferences: {len(current_prefs)}
+
+Questions to answer:
+1. Are the weekly insights actually actionable, or too vague?
+2. Are there recurring themes that suggest a systemic issue?
+3. Which categories produce the most useful insights?
+4. What should change about the reflection process itself?
+
+Respond with ONLY a JSON array of meta-insights. Each must have:
+- "category": "meta"
+- "summary": one-sentence finding
+- "recommendation": concrete change to make
+Maximum 3 meta-insights."""
+
+    response = await ask_llm_fn(
+        prompt,
+        "",
+        system_extra="You are analyzing AI self-improvement data. Respond with ONLY a JSON array.",
+    )
+
+    if not response or response.startswith("⚠️"):
+        log.error("Monthly meta-reflection LLM call failed: %s", response[:200] if response else "empty")
+        return []
+
+    try:
+        if "```" in response:
+            response = response.split("```")[1]
+            if response.startswith("json"):
+                response = response[4:]
+        meta_insights = json.loads(response.strip())
+    except (json.JSONDecodeError, IndexError):
+        log.error("Monthly meta-reflection returned invalid JSON: %s", response[:200])
+        return []
+
+    if not isinstance(meta_insights, list):
+        return []
+
+    stored = []
+    for mi in meta_insights[:3]:
+        summary = mi.get("summary", "")
+        recommendation = mi.get("recommendation", "")
+        if not summary:
+            continue
+        insight_id = store_insight("meta", summary, "Monthly meta-reflection", recommendation)
+        mi["id"] = insight_id
+        stored.append(mi)
+
+    log.info("Monthly meta-reflection complete: %d meta-insights generated", len(stored))
+    return stored
+
+
+def infer_sleep_schedule(days: int = 14) -> dict:
+    """#96: Infer sleep schedule from conversation timestamps.
+
+    Queries the last N days of conversations, groups by date,
+    finds first and last message per day.
+
+    Returns {wake_time, sleep_time, confidence, days_analyzed, days_with_data}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT timestamp FROM conversations WHERE role = 'user' AND timestamp > ? ORDER BY timestamp",
+        (cutoff,),
+    ).fetchall()
+
+    if not rows:
+        return {"wake_time": None, "sleep_time": None, "confidence": 0.0, "days_analyzed": days, "days_with_data": 0}
+
+    # Group timestamps by date
+    by_date: dict[str, list[str]] = {}
+    for r in rows:
+        ts = r[0] if isinstance(r, tuple) else r["timestamp"]
+        date_str = ts[:10]  # "YYYY-MM-DD"
+        by_date.setdefault(date_str, []).append(ts)
+
+    wake_hours = []
+    sleep_hours = []
+    for date_str, timestamps in by_date.items():
+        timestamps.sort()
+        first = timestamps[0]
+        last = timestamps[-1]
+        try:
+            first_dt = datetime.strptime(first, "%Y-%m-%d %H:%M:%S")
+            last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            wake_hours.append(first_dt.hour + first_dt.minute / 60.0)
+            sleep_hours.append(last_dt.hour + last_dt.minute / 60.0)
+        except (ValueError, IndexError):
+            continue
+
+    if not wake_hours:
+        return {"wake_time": None, "sleep_time": None, "confidence": 0.0, "days_analyzed": days, "days_with_data": 0}
+
+    avg_wake = sum(wake_hours) / len(wake_hours)
+    avg_sleep = sum(sleep_hours) / len(sleep_hours)
+
+    # Confidence based on data coverage
+    coverage = len(wake_hours) / days
+    confidence = min(1.0, coverage * 1.5)  # 67%+ coverage -> full confidence
+
+    def _fmt_time(h: float) -> str:
+        hours = int(h)
+        minutes = int((h - hours) * 60)
+        return f"{hours:02d}:{minutes:02d}"
+
+    return {
+        "wake_time": _fmt_time(avg_wake),
+        "sleep_time": _fmt_time(avg_sleep),
+        "confidence": round(confidence, 2),
+        "days_analyzed": days,
+        "days_with_data": len(wake_hours),
+    }
+
+
+# --- #95: Subscription Renewal Alerts ---
+
+_RENEWAL_KEYWORDS = ["renewal", "subscription", "recurring charge", "auto-renew", "billing cycle"]
+
+
+def detect_subscription_renewals(days_ahead: int = 7) -> list[dict]:
+    """Detect upcoming subscription renewals from indexed emails.
+
+    Searches the documents table for emails containing renewal/subscription keywords,
+    then extracts estimated dates and amounts.
+
+    Returns list of dicts with keys: source, title, snippet, estimated_date, amount.
+    """
+    conn = _get_conn()
+    now = datetime.utcnow()
+    results = []
+
+    for keyword in _RENEWAL_KEYWORDS:
+        rows = conn.execute(
+            "SELECT source, title, content FROM documents "
+            "WHERE content LIKE ? ORDER BY rowid DESC LIMIT 50",
+            (f"%{keyword}%",),
+        ).fetchall()
+        seen_titles = {r["title"] for r in results}
+        for row in rows:
+            title = row["title"] if isinstance(row, sqlite3.Row) else row[1]
+            if title in seen_titles:
+                continue
+            seen_titles.add(title)
+            content = row["content"] if isinstance(row, sqlite3.Row) else row[2]
+            source = row["source"] if isinstance(row, sqlite3.Row) else row[0]
+            snippet = content[:200] if content else ""
+
+            # Try to extract a dollar amount
+            import re as _re
+            amount_match = _re.search(r"\$[\d,]+\.?\d*", content or "")
+            amount = amount_match.group(0) if amount_match else None
+
+            # Try to extract a date (simple patterns)
+            date_match = _re.search(
+                r"(\d{4}-\d{2}-\d{2}|\w+ \d{1,2},? \d{4}|\d{1,2}/\d{1,2}/\d{4})",
+                content or "",
+            )
+            estimated_date = date_match.group(0) if date_match else None
+
+            results.append({
+                "source": source,
+                "title": title,
+                "snippet": snippet,
+                "estimated_date": estimated_date,
+                "amount": amount,
+            })
+
+    return results
+
+
+# --- #7: Prompt Effectiveness Scoring ---
+
+def get_prompt_effectiveness(days: int = 7) -> dict:
+    """Correlate conversation success scores with topics to identify effective prompt patterns.
+
+    Uses conversation_success and conversation_topic signals recorded by #1 and #65.
+
+    Returns {by_topic: {topic: {total, successes, success_rate_pct}}, best_topic, worst_topic}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Get conversation success signals with topic info
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type = 'conversation_success' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    by_topic: dict[str, dict] = {}
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        topic = ctx.get("topic", "general")
+        had_correction = ctx.get("had_correction", False)
+        if topic not in by_topic:
+            by_topic[topic] = {"total": 0, "successes": 0}
+        by_topic[topic]["total"] += 1
+        if not had_correction:
+            by_topic[topic]["successes"] += 1
+
+    # Calculate success rates
+    for topic, stats in by_topic.items():
+        stats["success_rate_pct"] = (
+            round(stats["successes"] / stats["total"] * 100, 1) if stats["total"] else 0.0
+        )
+
+    # Identify best and worst topics
+    best_topic = None
+    worst_topic = None
+    if by_topic:
+        sorted_topics = sorted(
+            by_topic.items(),
+            key=lambda x: x[1]["success_rate_pct"],
+            reverse=True,
+        )
+        # Only consider topics with at least 2 data points
+        qualified = [(t, s) for t, s in sorted_topics if s["total"] >= 2]
+        if qualified:
+            best_topic = qualified[0][0]
+            worst_topic = qualified[-1][0]
+
+    return {
+        "by_topic": by_topic,
+        "best_topic": best_topic,
+        "worst_topic": worst_topic,
+    }
+
+
+# --- #98: Proactive Knowledge Gap Filling ---
+
+def fill_knowledge_gaps(ask_llm_fn=None) -> list[dict]:
+    """Detect recurring knowledge gaps and attempt to fill them from existing archives.
+
+    Queries interaction_signals for capability_gap_detected and search_miss signals
+    from the last 7 days, clusters similar queries, and searches the documents table
+    for answers.
+
+    Returns list of {query, results_found, indexed} dicts.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT context FROM interaction_signals "
+        "WHERE signal_type IN ('capability_gap_detected', 'search_miss') AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    # Extract queries
+    queries: list[str] = []
+    for r in rows:
+        ctx = json.loads(r[0]) if r[0] else {}
+        q = ctx.get("query", "").strip()
+        if q:
+            queries.append(q)
+
+    # Group by simple word overlap — cluster queries sharing >= 2 non-stopword tokens
+    stopwords = {"the", "a", "an", "is", "it", "to", "in", "for", "of", "and", "on", "my", "me", "i", "what", "how"}
+    clusters: dict[str, list[str]] = {}
+    for q in queries:
+        tokens = {w.lower() for w in q.split() if w.lower() not in stopwords and len(w) > 2}
+        matched = False
+        for key, members in clusters.items():
+            key_tokens = {w.lower() for w in key.split() if w.lower() not in stopwords and len(w) > 2}
+            if len(tokens & key_tokens) >= 2:
+                members.append(q)
+                matched = True
+                break
+        if not matched:
+            clusters[q] = [q]
+
+    results = []
+    for representative, members in clusters.items():
+        if len(members) < 3:
+            continue
+
+        # Search existing documents for answers
+        terms = representative.lower().split()[:5]
+        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in terms])
+        params = [f"%{t}%" for t in terms if len(t) > 2]
+        if not params:
+            continue
+        conditions = " OR ".join(["LOWER(content) LIKE ?" for _ in params])
+
+        found = conn.execute(
+            f"SELECT id, title FROM documents WHERE {conditions} LIMIT 5",
+            params,
+        ).fetchall()
+
+        results.append({
+            "query": representative,
+            "results_found": len(found),
+            "indexed": len(found) > 0,
+        })
+
+    return results
+
+
+# --- #12: Causal Insight Validation ---
+
+def validate_applied_insights(days: int = 14) -> list[dict]:
+    """Validate whether recently applied insights actually improved outcomes.
+
+    For each insight applied in the last N days, checks:
+    - preference insights: is the preference still active (confidence not decayed)?
+    - knowledge_gap insights: did the same gap queries decrease?
+    - response_quality insights: did user corrections decrease?
+
+    Returns list of {insight_id, summary, validated: bool, reason}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    applied = conn.execute(
+        "SELECT id, category, summary, evidence, resolved_at FROM insights "
+        "WHERE status = 'applied' AND resolved_at > ? ORDER BY resolved_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    results = []
+    for row in applied:
+        insight_id = row["id"]
+        category = row["category"]
+        summary = row["summary"] or ""
+        resolved_at = row["resolved_at"]
+
+        if category == "preference":
+            # Check if a related preference is still active
+            prefs = conn.execute(
+                "SELECT confidence FROM learned_preferences WHERE source_insight_id = ?",
+                (insight_id,),
+            ).fetchall()
+            if prefs:
+                active = any(p["confidence"] >= 0.3 for p in prefs)
+                results.append({
+                    "insight_id": insight_id,
+                    "summary": summary,
+                    "validated": active,
+                    "reason": "preference still active" if active else "preference decayed below threshold",
+                })
+            else:
+                results.append({
+                    "insight_id": insight_id,
+                    "summary": summary,
+                    "validated": False,
+                    "reason": "no linked preference found",
+                })
+
+        elif category == "knowledge_gap":
+            # Check if search_miss signals decreased after the insight was applied
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'search_miss' AND created_at < ? AND created_at > ?",
+                (resolved_at, (datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S") - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")),
+            ).fetchone()[0]
+            after_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'search_miss' AND created_at > ?",
+                (resolved_at,),
+            ).fetchone()[0]
+            improved = after_count < before_count or after_count == 0
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": improved,
+                "reason": f"search misses {'decreased' if improved else 'did not decrease'} ({before_count} -> {after_count})",
+            })
+
+        elif category == "response_quality":
+            # Check if user corrections decreased after the insight was applied
+            before_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'user_correction' AND created_at < ? AND created_at > ?",
+                (resolved_at, (datetime.strptime(resolved_at, "%Y-%m-%d %H:%M:%S") - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")),
+            ).fetchone()[0]
+            after_count = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'user_correction' AND created_at > ?",
+                (resolved_at,),
+            ).fetchone()[0]
+            improved = after_count < before_count or after_count == 0
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": improved,
+                "reason": f"corrections {'decreased' if improved else 'did not decrease'} ({before_count} -> {after_count})",
+            })
+
+        else:
+            results.append({
+                "insight_id": insight_id,
+                "summary": summary,
+                "validated": True,
+                "reason": f"no validation logic for category '{category}'",
+            })
+
+    return results
+
+
+# --- #90: Email Follow-up Detector ---
+
+def detect_email_followups(days: int = 7) -> list[dict]:
+    """Detect sent emails that may be awaiting replies.
+
+    Searches documents for sent emails and checks for matching replies.
+    Best-effort heuristic using the knowledge base.
+
+    Returns list of {subject, sent_date, awaiting_reply: bool, days_waiting}.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Find sent emails
+    sent_rows = conn.execute(
+        "SELECT title, created_at FROM documents "
+        "WHERE (LOWER(category) LIKE '%sent%' OR LOWER(source) LIKE '%sent%') "
+        "AND created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+
+    results = []
+    for row in sent_rows:
+        subject = row["title"] or ""
+        sent_date = row["created_at"] or ""
+
+        # Search for replies — look for "Re: <subject>" in the documents table
+        clean_subject = subject.replace("Re: ", "").replace("RE: ", "").strip()
+        if not clean_subject:
+            continue
+
+        reply = conn.execute(
+            "SELECT id FROM documents WHERE title LIKE ? AND created_at > ? LIMIT 1",
+            (f"%Re: {clean_subject}%", sent_date),
+        ).fetchone()
+
+        awaiting = reply is None
+        days_waiting = 0
+        if awaiting and sent_date:
+            try:
+                sent_dt = datetime.strptime(sent_date[:19], "%Y-%m-%d %H:%M:%S")
+                days_waiting = (datetime.utcnow() - sent_dt).days
+            except (ValueError, TypeError):
+                pass
+
+        results.append({
+            "subject": subject,
+            "sent_date": sent_date,
+            "awaiting_reply": awaiting,
+            "days_waiting": days_waiting,
+        })
+
+    return results
 
 
 def decay_preferences():

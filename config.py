@@ -36,11 +36,13 @@ CREDENTIALS_FILE = SCRIPTS_DIR / "credentials.json"
 TOKEN_FILE = SCRIPTS_DIR / "token.json"  # gmail.readonly + drive.readonly
 TOKEN_FILE_COMPOSE = SCRIPTS_DIR / "token_khalil.json"  # gmail.compose for send
 TOKEN_FILE_CALENDAR = SCRIPTS_DIR / "token_calendar.json"  # calendar.readonly
+TOKEN_FILE_MODIFY = SCRIPTS_DIR / "token_modify.json"  # gmail.modify for label management (#46)
 
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"
 EMBED_MODEL = "nomic-embed-text"
 EMBED_DIM = 768  # nomic-embed-text dimension
+EMBED_PROVIDER = "ollama"  # #68: "ollama" (default) — abstraction for future providers
 
 # LLM config — "ollama" (free, local) or "claude" (paid, cloud)
 LLM_BACKEND = "ollama"  # switch to "claude" if you have an API key
