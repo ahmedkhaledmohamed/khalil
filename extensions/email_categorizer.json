@@ -1,0 +1,9 @@
+{
+    "name": "email_categorizer",
+    "command": "label",
+    "description": "Categorize and label inbox emails based on content",
+    "action_module": "actions.email_categorizer",
+    "handler_function": "handle_label",
+    "generated_at": "2026-03-15T22:00:00",
+    "generated_for": "Go through my personal emails and categories all the inbox emails with appropriate labels"
+}
