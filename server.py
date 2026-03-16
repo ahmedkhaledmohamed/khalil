@@ -3198,6 +3198,22 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Dev environment state polling — every 60 seconds
+    async def _dev_state_poll_job():
+        if not _can_send():
+            return
+        from scheduler.tasks import poll_dev_state
+        await poll_dev_state(telegram_app.bot, OWNER_CHAT_ID)
+
+    scheduler.add_job(
+        _dev_state_poll_job,
+        "interval",
+        seconds=60,
+        id="dev_state_poll",
+        name="Dev State Poll",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
