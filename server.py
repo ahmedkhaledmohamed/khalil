@@ -3845,7 +3845,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message_generic(ctx: MessageContext):
-    """Channel-agnostic message handler for non-Telegram channels."""
+    """Channel-agnostic message handler for non-Telegram channels (Slack, Discord, etc.)."""
     import time as _time
     _msg_start = _time.monotonic()
 
@@ -3864,6 +3864,7 @@ async def handle_message_generic(ctx: MessageContext):
 
     save_message(chat_id, "user", query)
 
+    # Direct shell intent mapping (no LLM needed)
     direct_intent = _try_direct_shell_intent(query)
     if direct_intent:
         direct_intent["llm_generated"] = False
@@ -3872,10 +3873,9 @@ async def handle_message_generic(ctx: MessageContext):
         if handled:
             return
 
+    # LLM-based intent detection
     action_hint = _looks_like_action(query)
-    if action_hint and action_hint not in ("reminder", "email", "calendar", "shell"):
-        pass  # Extension commands rely on Telegram Update -- skip on other channels
-    elif action_hint:
+    if action_hint:
         intent = await detect_intent(query)
         if intent:
             intent["user_query"] = query
@@ -3883,6 +3883,7 @@ async def handle_message_generic(ctx: MessageContext):
             if handled:
                 return
 
+    # Fall through to conversational LLM flow
     progress_msg = await ctx.reply("Thinking...")
 
     results = await hybrid_search(query, limit=6)
@@ -4824,6 +4825,21 @@ async def startup():
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
 
+    # Start Slack channel if configured
+    try:
+        slack_bot_token = get_secret("slack-bot-token")
+        slack_app_token = get_secret("slack-app-token")
+        if slack_bot_token and slack_app_token:
+            from channels.slack import SlackChannel
+            slack_ch = SlackChannel(slack_bot_token, slack_app_token)
+            channel_registry.register("slack", slack_ch)
+            asyncio.create_task(slack_ch.start_socket_mode(handle_message_generic))
+            log.info("Slack channel started")
+        else:
+            log.info("Slack tokens not configured — skipping Slack channel")
+    except Exception as e:
+        log.warning("Slack channel not started: %s", e)
+
     # Start WhatsApp channel if configured
     try:
         wa_token = keyring.get_password(KEYRING_SERVICE, "whatsapp-access-token")
@@ -4837,7 +4853,6 @@ async def startup():
             log.info("WhatsApp tokens not configured — skipping WhatsApp channel")
     except Exception as e:
         log.warning("Failed to register WhatsApp channel: %s", e)
-
 
     # Start Discord channel if configured
     try:
