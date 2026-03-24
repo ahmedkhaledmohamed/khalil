@@ -24,6 +24,10 @@ DRIVE_DIR = ARCHIVES_DIR / "drive"
 TIMELINE_FILE = ARCHIVES_DIR / "timeline.md"
 CONTEXT_FILE = PERSONAL_REPO_PATH / "CONTEXT.md"
 
+# Cursor conversation transcripts
+CURSOR_TRANSCRIPTS_DIR = Path.home() / ".cursor" / "projects"
+CURSOR_CATALOG_FILE = PERSONAL_REPO_PATH / "archives" / "cursor-conversations.md"
+
 # Content directories (in Personal repo)
 WORK_DIR = PERSONAL_REPO_PATH / "work"
 CAREER_DIR = PERSONAL_REPO_PATH / "career"

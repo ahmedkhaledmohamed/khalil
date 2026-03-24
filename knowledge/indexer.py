@@ -10,6 +10,7 @@ from pathlib import Path
 from config import (
     DB_PATH, DATA_DIR, GMAIL_DIR, DRIVE_DIR, TIMELINE_FILE, CONTEXT_FILE, EMBED_DIM,
     WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR,
+    CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE,
 )
 from knowledge.embedder import embed_batch
 
@@ -362,6 +363,124 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
     return "repo", f"repo:{dirname}"
 
 
+def load_cursor_catalog(catalog_path: Path) -> dict[str, dict]:
+    """Parse the cursor-conversations.md catalog to map conversation IDs to metadata.
+
+    Returns {short_id: {title, workspace, date}} where short_id is the first 8 chars
+    of the conversation UUID.
+    """
+    if not catalog_path.exists():
+        return {}
+
+    catalog = {}
+    content = catalog_path.read_text(encoding="utf-8")
+    current_date = ""
+
+    for line in content.splitlines():
+        # Date headers like "#### 2026-03-14"
+        date_match = re.match(r"####\s+(\d{4}-\d{2}-\d{2})", line)
+        if date_match:
+            current_date = date_match.group(1)
+            continue
+
+        # Table rows with conversation data: | # | **Title** | Workspace | Msgs | Size | `id` |
+        row_match = re.match(
+            r"\|\s*\d+\s*\|\s*\*\*(.+?)\*\*\s*\|\s*(\w+)\s*\|.*\|\s*`(\w+)`\s*\|",
+            line,
+        )
+        if row_match:
+            title = row_match.group(1).strip()
+            workspace = row_match.group(2).strip()
+            short_id = row_match.group(3).strip()
+            catalog[short_id] = {
+                "title": title,
+                "workspace": workspace,
+                "date": current_date,
+            }
+
+    return catalog
+
+
+def parse_cursor_transcript(
+    filepath: Path, title: str, workspace: str, date: str,
+) -> list[dict]:
+    """Parse a Cursor agent transcript JSONL into conversation-segment chunks.
+
+    Groups consecutive messages into ~2000-char segments that preserve
+    conversational coherence (user question + assistant answer together).
+    Filters out short noise messages (<50 chars).
+    """
+    import json as _json
+
+    messages = []
+    with open(filepath, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                msg = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+
+            role = msg.get("role", "")
+            content_parts = msg.get("message", {}).get("content", [])
+            text_parts = []
+            for part in content_parts:
+                if isinstance(part, dict) and part.get("type") == "text":
+                    text_parts.append(part.get("text", ""))
+
+            text = "\n".join(text_parts).strip()
+            if not text:
+                continue
+
+            # Strip <user_query> tags
+            text = re.sub(r"</?user_query>", "", text).strip()
+
+            # Skip noise: very short messages
+            if len(text) < 50:
+                continue
+
+            prefix = "User" if role == "user" else "Assistant"
+            messages.append(f"{prefix}: {text}")
+
+    if not messages:
+        return []
+
+    # Group into ~2000-char segments respecting message boundaries
+    entries = []
+    segment = []
+    segment_len = 0
+    part_num = 1
+    conv_id = filepath.stem[:8]
+
+    for msg in messages:
+        msg_len = len(msg)
+        if segment and segment_len + msg_len > 2000:
+            # Flush current segment
+            entries.append({
+                "title": f"{title} (part {part_num})" if len(messages) > 5 else title,
+                "content": "\n\n".join(segment),
+                "metadata": f"workspace={workspace}; date={date}; conversation_id={conv_id}",
+            })
+            segment = []
+            segment_len = 0
+            part_num += 1
+
+        segment.append(msg)
+        segment_len += msg_len
+
+    # Flush remaining
+    if segment:
+        entries.append({
+            "title": f"{title} (part {part_num})" if part_num > 1 else title,
+            "content": "\n\n".join(segment),
+            "metadata": f"workspace={workspace}; date={date}; conversation_id={conv_id}",
+        })
+
+    return entries
+
+
 async def index_source(conn: sqlite3.Connection, source: str, category: str, entries: list[dict]):
     """Index entries: store in documents table and generate embeddings."""
     if not entries:
@@ -456,6 +575,21 @@ async def index_all(force: bool = False):
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries")
             total += n
 
+    # Index Cursor conversation transcripts
+    if CURSOR_TRANSCRIPTS_DIR.exists():
+        catalog = load_cursor_catalog(CURSOR_CATALOG_FILE)
+        for jsonl in sorted(CURSOR_TRANSCRIPTS_DIR.rglob("*/agent-transcripts/*/*.jsonl")):
+            conv_id = jsonl.stem[:8]
+            meta = catalog.get(conv_id, {})
+            conv_title = meta.get("title", conv_id)
+            ws = meta.get("workspace", "unknown")
+            dt = meta.get("date", "")
+            entries = parse_cursor_transcript(jsonl, conv_title, ws, dt)
+            category = f"cursor:{ws.lower()}"
+            n = await index_source(conn, "cursor", category, entries)
+            print(f"  cursor/{ws}/{conv_id}: {n} entries")
+            total += n
+
     print(f"\nTotal indexed: {total} documents")
     return conn
 
@@ -533,6 +667,23 @@ async def index_incremental():
             entries = parse_csv_file(csv_file)
             n = await index_source(conn, dirname, "work:planning", entries)
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries (updated)")
+            total += n
+
+    # Index Cursor conversation transcripts (only modified files)
+    if CURSOR_TRANSCRIPTS_DIR.exists():
+        catalog = load_cursor_catalog(CURSOR_CATALOG_FILE)
+        for jsonl in sorted(CURSOR_TRANSCRIPTS_DIR.rglob("*/agent-transcripts/*/*.jsonl")):
+            if not _should_index(jsonl):
+                continue
+            conv_id = jsonl.stem[:8]
+            meta = catalog.get(conv_id, {})
+            conv_title = meta.get("title", conv_id)
+            ws = meta.get("workspace", "unknown")
+            dt = meta.get("date", "")
+            entries = parse_cursor_transcript(jsonl, conv_title, ws, dt)
+            category = f"cursor:{ws.lower()}"
+            n = await index_source(conn, "cursor", category, entries)
+            print(f"  cursor/{ws}/{conv_id}: {n} entries (updated)")
             total += n
 
     # Update last index timestamp
