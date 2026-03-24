@@ -48,6 +48,8 @@ ACTION_RULES = {
     "cursor_terminal_status": ActionType.READ,
     "cursor_terminal_exec": ActionType.WRITE,   # injects command into Cursor terminal
     "cursor_terminal_new": ActionType.WRITE,
+    # Multi-step task plans
+    "task_plan": ActionType.WRITE,
 }
 
 # Safe writes: auto-approved in GUIDED mode (low risk, easily reversible)

@@ -3003,6 +3003,67 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Try immediate self-healing if this is a recurring failure
             await _try_inline_healing(update)
 
+    # Multi-step task orchestration: if the query looks compound, try decomposing
+    from orchestrator import looks_like_multi_step, decompose_request, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
+    if looks_like_multi_step(query):
+        try:
+            ensure_plans_table()
+            steps = await decompose_request(query, "", ask_llm)
+            if len(steps) >= 2:
+                # Show plan to user
+                plan_lines = [f"I'll handle this in {len(steps)} steps:"]
+                for i, step in enumerate(steps, 1):
+                    plan_lines.append(f"{i}. {step.description}")
+                plan_text = "\n".join(plan_lines)
+
+                async def _execute_single_step(step):
+                    """Execute a single TaskStep by routing through detect_intent + handle_action_intent."""
+                    from orchestrator import TaskStep
+                    # Map orchestrator action types to intent dicts
+                    intent = None
+                    if step.action == "reminder":
+                        intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
+                    elif step.action == "email":
+                        intent = {"action": "email", "to": step.params.get("to", ""), "subject": step.params.get("subject", ""), "context_query": step.params.get("context_query", "")}
+                    elif step.action == "calendar":
+                        intent = {"action": "calendar"}
+                    elif step.action == "shell":
+                        intent = {"action": "shell", "command": step.params.get("command", ""), "description": step.description, "llm_generated": True}
+                    else:
+                        # Fallback: use detect_intent on the step description
+                        intent = await detect_intent(step.description)
+                    if intent:
+                        intent["user_query"] = step.description
+                        # Execute via handle_action_intent — but we need to capture the result
+                        # Since handle_action_intent sends messages directly, we treat success as no exception
+                        handled = await handle_action_intent(intent, update)
+                        if handled:
+                            return f"Completed: {step.description}"
+                    return f"Executed: {step.description}"
+
+                if autonomy.needs_approval("shell_write"):
+                    # GUIDED/SUPERVISED: ask for confirmation
+                    action_id = autonomy.create_pending_action(
+                        "task_plan",
+                        f"Execute {len(steps)}-step plan: {query[:100]}",
+                        {"query": query, "steps": [s.to_dict() for s in steps]},
+                    )
+                    await update.message.reply_text(
+                        f"📋 {plan_text}\n\n{autonomy.format_level()}",
+                        reply_markup=approve_deny_keyboard(),
+                    )
+                    return
+                else:
+                    # AUTONOMOUS: execute immediately
+                    await update.message.reply_text(f"📋 {plan_text}\n\nExecuting...")
+                    plan_result = await execute_task_plan(
+                        steps, query, channel, chat_id, _execute_single_step,
+                    )
+                    await update.message.reply_text(format_plan_summary(plan_result))
+                    return
+        except Exception as e:
+            log.warning("Multi-step orchestration failed, falling through: %s", e)
+
     # Show progress indicator — uses channel abstraction
     progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
