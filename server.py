@@ -30,6 +30,7 @@ from telegram.ext import (
 
 import channels.registry as channel_registry
 from channels import ActionButton, Channel, SentMessage
+from channels.message_context import MessageContext
 from channels.telegram import TelegramChannel
 
 from config import (
@@ -185,6 +186,27 @@ def approve_deny_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton("❌ Deny", callback_data="action_deny"),
         ]
     ])
+
+
+def _ctx_from_update(update: Update) -> MessageContext:
+    """Build a MessageContext from a Telegram Update."""
+    ch = channel_registry.get("telegram")
+    incoming = TelegramChannel.extract_incoming(update) if update.message else None
+    return MessageContext(
+        channel=ch,
+        chat_id=update.effective_chat.id if update.effective_chat else 0,
+        user_id=update.effective_user.id if update.effective_user else None,
+        incoming=incoming,
+        _raw_update=update,
+    )
+
+
+async def _reply_with_keyboard(ctx: MessageContext, text: str, reply_markup, parse_mode=None):
+    """Reply with Telegram-specific keyboard markup. Falls back to plain text on other channels."""
+    if ctx._raw_update and ctx._raw_update.message:
+        await ctx._raw_update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    else:
+        await ctx.reply(text, parse_mode=parse_mode)
 
 
 CONVERSATION_CONTEXT_WINDOW = 10  # max messages sent to LLM for context
@@ -1321,7 +1343,7 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     return None
 
 
-async def _try_inline_healing(update: Update):
+async def _try_inline_healing(ctx: MessageContext):
     """Check for recurring failures and trigger self-healing immediately if threshold met."""
     try:
         from healing import detect_recurring_failures, run_self_healing
@@ -1461,7 +1483,7 @@ async def _interpret_shell_output(user_query: str, cmd: str, result: dict) -> st
     return None
 
 
-async def handle_action_intent(intent: dict, update: Update) -> bool:
+async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
     """Handle a detected action intent. Returns True if handled."""
     action = intent.get("action")
 
@@ -1496,7 +1518,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
 
         due_at = _parse_relative_time(time_str) if time_str else None
         if not due_at:
-            await update.message.reply_text(
+            await ctx.reply(
                 f"I understood you want a reminder for: {text}\n"
                 f"But I couldn't parse the time \"{time_str}\".\n"
                 "Try: /remind in 2 hours {text}"
@@ -1504,7 +1526,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             return True
 
         result = create_reminder(text, due_at)
-        await update.message.reply_text(
+        await ctx.reply(
             f"⏰ Reminder set!\n\n"
             f"#{result['id']}: {result['text']}\n"
             f"Due: {result['due_at']}"
@@ -1517,13 +1539,13 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         context_query = intent.get("context_query", subject)
 
         if not to_addr or not subject:
-            await update.message.reply_text(
+            await ctx.reply(
                 "I understood you want to send an email, but I need more detail.\n"
                 "Try: /email draft <to> <subject>"
             )
             return True
 
-        await update.message.reply_text(f"📝 Drafting email to {to_addr} about: {subject}...")
+        await ctx.reply(f"📝 Drafting email to {to_addr} about: {subject}...")
 
         personal_context = get_relevant_context(context_query, max_chars=1500)
         body = await ask_claude(
@@ -1539,31 +1561,30 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             {"to": to_addr, "subject": subject, "body": body},
         )
 
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"📝 Draft ready:\n\nTo: {to_addr}\nSubject: {subject}\n\n{body}\n\n"
             f"---\n{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-        )
+            approve_deny_keyboard())
         return True
 
     elif action == "calendar":
         try:
             from actions.calendar import get_today_events, format_events_text
             events = await get_today_events()
-            await update.message.reply_text(format_events_text(events))
+            await ctx.reply(format_events_text(events))
         except Exception as e:
             from learning import record_signal
             record_signal("action_execution_failure", {
                 "action": "calendar", "error": str(e)[:200],
             })
-            await update.message.reply_text(f"❌ Calendar fetch failed: {e}")
+            await ctx.reply(f"❌ Calendar fetch failed: {e}")
         return True
 
     elif action == "cursor_status":
         from actions.terminal import get_cursor_status, format_cursor_status
         status = await get_cursor_status()
         autonomy.log_audit("cursor_status", "Checked Cursor IDE status", result="ok")
-        await update.message.reply_text(format_cursor_status(status))
+        await ctx.reply(format_cursor_status(status))
         return True
 
     elif action == "cursor_extensions":
@@ -1574,14 +1595,14 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             text = f"🧩 Cursor Extensions ({len(extensions)}):\n" + "\n".join(f"  • {e}" for e in extensions)
         else:
             text = "🧩 No Cursor extensions found (or Cursor not running)"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
         return True
 
     elif action == "terminal_status":
         from actions.terminal import get_terminal_status, format_terminal_status
         status = await get_terminal_status()
         autonomy.log_audit("terminal_status", "Checked terminal sessions", result="ok")
-        await update.message.reply_text(format_terminal_status(status))
+        await ctx.reply(format_terminal_status(status))
         return True
 
     elif action == "terminal_exec":
@@ -1596,11 +1617,9 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             f"Run in terminal: {cmd}",
             {"command": cmd, "session": session},
         )
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"📟 Send to iTerm ({session}):\n\n`{cmd}`\n\n{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-            parse_mode="Markdown",
-        )
+            approve_deny_keyboard(), parse_mode="Markdown")
         return True
 
     elif action == "terminal_new_tab":
@@ -1611,18 +1630,15 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             action_id = autonomy.create_pending_action(
                 "terminal_new_tab", desc, {"command": cmd},
             )
-            await update.message.reply_text(
-                f"📟 {desc}\n\n{autonomy.format_level()}",
-                reply_markup=approve_deny_keyboard(),
-                parse_mode="Markdown",
-            )
+            await _reply_with_keyboard(ctx, 
+                f"📟 {desc}\n\n{autonomy.format_level()}", approve_deny_keyboard(), parse_mode="Markdown")
         else:
             result = await create_iterm_tab(cmd)
             if result["success"]:
                 autonomy.log_audit("terminal_new_tab", "Created new terminal tab", result="ok")
-                await update.message.reply_text("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+                await ctx.reply("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
             else:
-                await update.message.reply_text(f"⚠️ Failed to create tab: {result['error']}")
+                await ctx.reply(f"⚠️ Failed to create tab: {result['error']}")
         return True
 
     elif action == "cursor_open":
@@ -1640,18 +1656,16 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             action_id = autonomy.create_pending_action(
                 action_name, desc, {"path": path, "line": line},
             )
-            await update.message.reply_text(
-                f"🖥 {desc}\n\n{autonomy.format_level()}",
-                reply_markup=approve_deny_keyboard(),
-                parse_mode="Markdown",
-            )
+            await _reply_with_keyboard(ctx,
+            f"🖥 {desc}\n\n{autonomy.format_level()}",
+            approve_deny_keyboard(), parse_mode="Markdown")
         else:
             result = await cursor_open(path, line)
             if result["success"]:
                 autonomy.log_audit(action_name, f"Opened {path}" + (f":{line}" if line else ""), result="ok")
-                await update.message.reply_text(f"🖥 Opened in Cursor: {path}" + (f":{line}" if line else ""))
+                await ctx.reply(f"🖥 Opened in Cursor: {path}" + (f":{line}" if line else ""))
             else:
-                await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+                await ctx.reply(f"⚠️ Failed: {result['error']}")
         return True
 
     elif action == "cursor_diff":
@@ -1663,16 +1677,16 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         result = await cursor_diff(f1, f2)
         if result["success"]:
             autonomy.log_audit("cursor_diff", f"Diff: {f1} vs {f2}", result="ok")
-            await update.message.reply_text(f"🖥 Diff opened in Cursor: {f1} vs {f2}")
+            await ctx.reply(f"🖥 Diff opened in Cursor: {f1} vs {f2}")
         else:
-            await update.message.reply_text(f"⚠️ Failed: {result['error']}")
+            await ctx.reply(f"⚠️ Failed: {result['error']}")
         return True
 
     elif action == "cursor_terminal_status":
         from actions.terminal import get_cursor_terminal_status, format_cursor_terminal_status
         status = await get_cursor_terminal_status()
         autonomy.log_audit("cursor_terminal_status", "Checked Cursor terminals", result="ok")
-        await update.message.reply_text(format_cursor_terminal_status(status))
+        await ctx.reply(format_cursor_terminal_status(status))
         return True
 
     elif action == "cursor_terminal_exec":
@@ -1686,11 +1700,9 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             f"Run in Cursor terminal: {cmd}",
             {"command": cmd, "target": target},
         )
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"🖥 Send to Cursor terminal:\n\n`{cmd}`\n\n{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-            parse_mode="Markdown",
-        )
+            approve_deny_keyboard(), parse_mode="Markdown")
         return True
 
     elif action == "cursor_terminal_new":
@@ -1701,21 +1713,18 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             action_id = autonomy.create_pending_action(
                 "cursor_terminal_new", desc, {"command": cmd},
             )
-            await update.message.reply_text(
-                f"🖥 {desc}\n\n{autonomy.format_level()}",
-                reply_markup=approve_deny_keyboard(),
-                parse_mode="Markdown",
-            )
+            await _reply_with_keyboard(ctx, 
+                f"🖥 {desc}\n\n{autonomy.format_level()}", approve_deny_keyboard(), parse_mode="Markdown")
         else:
             result = await bridge_create_terminal(command=cmd)
             if result.get("error"):
-                await update.message.reply_text(f"⚠️ {result['error']}")
+                await ctx.reply(f"⚠️ {result['error']}")
             else:
                 autonomy.log_audit("cursor_terminal_new", "Created Cursor terminal", result="ok")
                 msg = "🖥 New Cursor terminal created"
                 if cmd:
                     msg += f"\nRunning: `{cmd}`"
-                await update.message.reply_text(msg, parse_mode="Markdown")
+                await ctx.reply(msg, parse_mode="Markdown")
         return True
 
     elif action == "shell":
@@ -1730,7 +1739,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         classification = classify_command(cmd)
         if classification == ActionType.DANGEROUS:
             autonomy.log_audit("shell_dangerous", f"BLOCKED: {cmd}", result="blocked")
-            await update.message.reply_text(f"🚫 Command blocked (dangerous):\n`{cmd}`", parse_mode="Markdown")
+            await ctx.reply(f"🚫 Command blocked (dangerous):\n`{cmd}`", parse_mode="Markdown")
             return True
 
         # Direct pattern-matched commands: respect normal classification
@@ -1747,14 +1756,14 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                         "exit_code": result["returncode"],
                         "stderr": result["stderr"][:200],
                     })
-                    await _try_inline_healing(update)
+                    await _try_inline_healing(ctx)
                 # Interpret output as natural language answer when triggered by a user question
                 if result["returncode"] == 0 and user_query:
                     interpretation = await _interpret_shell_output(user_query, final_cmd, result)
                     if interpretation:
-                        await update.message.reply_text(interpretation)
+                        await ctx.reply(interpretation)
                         return True
-                await update.message.reply_text(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
+                await ctx.reply(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
                 return True
 
         # Guardian review for RISKY / uncategorized shell actions
@@ -1769,7 +1778,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                 record_signal("guardian_blocked", {"action": "shell_write", "command": cmd, "reason": guardian_result.reason})
             except Exception:
                 pass
-            await update.message.reply_text(
+            await ctx.reply(
                 f"🛡 Guardian blocked this command:\n\n`{cmd}`\n\n"
                 f"Reason: {guardian_result.reason}",
                 parse_mode="Markdown",
@@ -1786,12 +1795,10 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             f"Run: {cmd}",
             {"command": cmd, "llm_generated": llm_generated, "user_query": user_query},
         )
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}{guardian_note}\n\n"
             f"{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-            parse_mode="Markdown",
-        )
+            approve_deny_keyboard(), parse_mode="Markdown")
         return True
 
     # --- macOS awareness ---
@@ -1803,7 +1810,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             text = f"🖥 Running Apps ({len(apps)}):\n" + "\n".join(f"  • {a}" for a in sorted(apps))
         else:
             text = "⚠️ Couldn't retrieve running apps."
-        await update.message.reply_text(text)
+        await ctx.reply(text)
         return True
 
     elif action == "macos_frontmost":
@@ -1816,7 +1823,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                 text += f"\n📄 Window: {title}"
         else:
             text = "⚠️ Couldn't determine frontmost app."
-        await update.message.reply_text(text)
+        await ctx.reply(text)
         return True
 
     elif action == "macos_system_info":
@@ -1832,7 +1839,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             lines.append(f"  Memory: {info['memory_total_gb']} GB")
         if "cpu_brand" in info:
             lines.append(f"  CPU: {info['cpu_brand']}")
-        await update.message.reply_text("\n".join(lines) if len(lines) > 1 else "⚠️ Couldn't retrieve system info.")
+        await ctx.reply("\n".join(lines) if len(lines) > 1 else "⚠️ Couldn't retrieve system info.")
         return True
 
     elif action == "macos_spotlight":
@@ -1852,7 +1859,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             text = "\n".join(lines)
         else:
             text = f"🔍 No files found for \"{query}\"."
-        await update.message.reply_text(text[:4000])
+        await ctx.reply(text[:4000])
         return True
 
     elif action == "macos_browser_tabs":
@@ -1866,7 +1873,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             text = "\n".join(lines)
         else:
             text = f"🌐 No tabs found in {browser} (or {browser} not running)."
-        await update.message.reply_text(text[:4000])
+        await ctx.reply(text[:4000])
         return True
 
     # --- Web search ---
@@ -1876,9 +1883,9 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         query = intent.get("query", "")
         if not query:
             return False
-        await update.message.reply_text(f"🔍 Searching: {query}...")
+        await ctx.reply(f"🔍 Searching: {query}...")
         results = await web_search(query)
-        await update.message.reply_text(
+        await ctx.reply(
             format_search_results(results),
             parse_mode="HTML",
             disable_web_page_preview=True,
@@ -1892,7 +1899,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         contact = intent.get("contact")
         messages = await get_recent_messages(contact=contact, limit=15)
         header = f"💬 Messages from {contact}:" if contact else "💬 Recent messages:"
-        await update.message.reply_text(f"{header}\n\n{format_messages(messages)}")
+        await ctx.reply(f"{header}\n\n{format_messages(messages)}")
         return True
 
     elif action == "imessage_recent":
@@ -1902,7 +1909,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             text = "💬 Recent contacts:\n" + "\n".join(f"  • {c}" for c in contacts)
         else:
             text = "💬 No recent contacts found (check Full Disk Access permission)."
-        await update.message.reply_text(text)
+        await ctx.reply(text)
         return True
 
     elif action == "imessage_search":
@@ -1911,7 +1918,7 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         if not query:
             return False
         messages = await search_messages(query, limit=10)
-        await update.message.reply_text(f"💬 Messages matching \"{query}\":\n\n{format_messages(messages)}")
+        await ctx.reply(f"💬 Messages matching \"{query}\":\n\n{format_messages(messages)}")
         return True
 
     return False
@@ -1921,10 +1928,11 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     global OWNER_CHAT_ID
-    OWNER_CHAT_ID = update.effective_chat.id
+    OWNER_CHAT_ID = ctx.chat_id
     _persist_owner_chat_id(OWNER_CHAT_ID)
-    await update.message.reply_text(
+    await ctx.reply(
         "Khalil is online.\n\n"
         "Send me any question about your life, work, finances, or projects.\n\n"
         "Commands:\n"
@@ -1957,20 +1965,22 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     await cmd_start(update, context)
 
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     query = " ".join(context.args) if context.args else ""
     if not query:
-        await update.message.reply_text("Usage: /search <query>")
+        await ctx.reply("Usage: /search <query>")
         return
 
-    await update.message.reply_text(f"🔍 Searching: {query}")
+    await ctx.reply(f"🔍 Searching: {query}")
     results = await hybrid_search(query, limit=5)
 
     if not results:
-        await update.message.reply_text("No results found.")
+        await ctx.reply("No results found.")
         return
 
     text = f"📋 Found {len(results)} results:\n\n"
@@ -1979,16 +1989,17 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"{match_icon} **{r['title'][:60]}**\n"
         text += f"   [{r['category']}] {r['content'][:300]}...\n\n"
 
-    await update.message.reply_text(text, parse_mode=None)
+    await ctx.reply(text, parse_mode=None)
 
 
 async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     if context.args:
         mode_name = context.args[0].lower()
 
         # M9: /mode patterns — show learned approval patterns
         if mode_name == "patterns":
-            await update.message.reply_text(autonomy.format_patterns())
+            await ctx.reply(autonomy.format_patterns())
             return
 
         level_map = {
@@ -1997,28 +2008,29 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "autonomous": AutonomyLevel.AUTONOMOUS,
         }
         if mode_name not in level_map:
-            await update.message.reply_text(
+            await ctx.reply(
                 f"Unknown mode. Options: {', '.join(level_map.keys())}, patterns"
             )
             return
         autonomy.set_level(level_map[mode_name])
-        await update.message.reply_text(f"Mode changed to: {autonomy.format_level()}")
+        await ctx.reply(f"Mode changed to: {autonomy.format_level()}")
     else:
-        await update.message.reply_text(f"Current mode: {autonomy.format_level()}")
+        await ctx.reply(f"Current mode: {autonomy.format_level()}")
 
 
 async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     action = autonomy.get_latest_pending()
     if not action:
-        await update.message.reply_text("No pending actions.")
+        await ctx.reply("No pending actions.")
         return
 
     result = autonomy.approve_action(action["id"])
     if not result:
-        await update.message.reply_text("Failed to approve action.")
+        await ctx.reply("Failed to approve action.")
         return
 
-    await update.message.reply_text(f"✅ Approved: {result['description']}\nExecuting...")
+    await ctx.reply(f"✅ Approved: {result['description']}\nExecuting...")
 
     try:
         # Shell actions get retry support
@@ -2040,14 +2052,14 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if shell_result["returncode"] == 0 and user_query:
                 interpretation = await _interpret_shell_output(user_query, final_cmd, shell_result)
                 if interpretation:
-                    await update.message.reply_text(interpretation)
+                    await ctx.reply(interpretation)
                 else:
-                    await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+                    await ctx.reply(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
             else:
-                await update.message.reply_text(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
+                await ctx.reply(f"```\n{format_output(shell_result, final_cmd)}\n```", parse_mode="Markdown")
         else:
             status_msg = await autonomy.execute_action(result)
-            await update.message.reply_text(status_msg)
+            await ctx.reply(status_msg)
     except Exception as e:
         log.error(f"Action execution failed: {e}")
         from learning import record_signal
@@ -2055,22 +2067,23 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "action": result.get("action_type", "unknown"),
             "error": str(e)[:200],
         })
-        await update.message.reply_text(f"❌ Execution failed: {e}")
+        await ctx.reply(f"❌ Execution failed: {e}")
 
 
 async def cmd_deny(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     action = autonomy.get_latest_pending()
     if not action:
-        await update.message.reply_text("No pending actions.")
+        await ctx.reply("No pending actions.")
         return
 
     if autonomy.deny_action(action["id"]):
-        await update.message.reply_text(f"❌ Denied: {action['description']}")
+        await ctx.reply(f"❌ Denied: {action['description']}")
     else:
-        await update.message.reply_text("Failed to deny action.")
+        await ctx.reply("Failed to deny action.")
 
 
-async def _handle_self_extend_with_spec(spec: dict, update):
+async def _handle_self_extend_with_spec(spec: dict, ctx: MessageContext):
     """Offer to build a capability from a structured gap spec."""
     from actions.extend import classify_complexity, _pending_extensions
 
@@ -2087,12 +2100,10 @@ async def _handle_self_extend_with_spec(spec: dict, update):
         ]
     ])
     _pending_extensions[spec["name"]] = spec
-    await update.message.reply_text(
+    await _reply_with_keyboard(ctx,
         f"I detected a capability gap: **{spec['description']}**\n"
         f"I can build a `/{spec.get('command', spec['name'])}` command for this.",
-        reply_markup=keyboard,
-        parse_mode="Markdown",
-    )
+        keyboard, parse_mode="Markdown")
 
 
 async def _run_extension_build(spec: dict, ch: Channel, chat_id: int):
@@ -2109,6 +2120,7 @@ async def _run_extension_build(spec: dict, ch: Channel, chat_id: int):
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle inline keyboard button presses."""
+    ctx = _ctx_from_update(update)
     query = update.callback_query
     await query.answer()
 
@@ -2233,7 +2245,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         intent = await detect_intent(step.description)
                     if intent:
                         intent["user_query"] = step.description
-                        handled = await handle_action_intent(intent, update)
+                        handled = await handle_action_intent(intent, ctx)
                         if handled:
                             return f"Completed: {step.description}"
                     return f"Executed: {step.description}"
@@ -2289,23 +2301,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    progress = await update.message.reply_text("📰 Generating brief...")
+    ctx = _ctx_from_update(update)
+    progress = await ctx.reply("📰 Generating brief...")
 
     from scheduler.digests import generate_morning_brief
 
     brief = await generate_morning_brief(ask_claude)
     try:
-        await progress.edit_text(brief)
+        await progress.edit(brief)
     except Exception:
         await progress.delete()
-        await update.message.reply_text(brief)
+        await ctx.reply(brief)
 
 
 async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /email command: /email search <query> or /email draft <to> <subject>"""
+    ctx = _ctx_from_update(update)
     args = context.args or []
     if not args:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /email search <query> — Search live Gmail\n"
             "  /email draft <to> <subject> — Draft an email"
@@ -2317,19 +2331,19 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "search":
         query = " ".join(args[1:])
         if not query:
-            await update.message.reply_text("Usage: /email search <query>")
+            await ctx.reply("Usage: /email search <query>")
             return
 
-        await update.message.reply_text(f"📧 Searching Gmail: {query}")
+        await ctx.reply(f"📧 Searching Gmail: {query}")
         try:
             from actions.gmail import search_emails
             emails = await search_emails(query, max_results=5)
         except Exception as e:
-            await update.message.reply_text(f"Gmail search failed: {e}")
+            await ctx.reply(f"Gmail search failed: {e}")
             return
 
         if not emails:
-            await update.message.reply_text("No emails found.")
+            await ctx.reply("No emails found.")
             return
 
         text = f"📧 Found {len(emails)} emails:\n\n"
@@ -2340,11 +2354,11 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             preview = e.get('body', '')[:300] or e['snippet'][:200]
             text += f"{preview}...\n\n"
 
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     elif subcommand == "draft":
         if len(args) < 3:
-            await update.message.reply_text("Usage: /email draft <to> <subject words...>")
+            await ctx.reply("Usage: /email draft <to> <subject words...>")
             return
 
         # Strip optional "to" keyword: "/email draft to ahmed@gmail.com ..." → skip "to"
@@ -2353,7 +2367,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             remaining = remaining[1:]
 
         if not remaining:
-            await update.message.reply_text("Usage: /email draft [to] <email> <subject words...>")
+            await ctx.reply("Usage: /email draft [to] <email> <subject words...>")
             return
 
         to_addr = remaining[0]
@@ -2364,7 +2378,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             subject_parts = subject_parts[1:]
 
         if not subject_parts:
-            await update.message.reply_text("Usage: /email draft [to] <email> <subject words...>")
+            await ctx.reply("Usage: /email draft [to] <email> <subject words...>")
             return
 
         # Split subject and body on "body" keyword if present
@@ -2378,7 +2392,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not subject_str:
-            await update.message.reply_text("Usage: /email draft [to] <email> <subject words...> [body <text>]")
+            await ctx.reply("Usage: /email draft [to] <email> <subject words...> [body <text>]")
             return
 
         subject = subject_str
@@ -2387,14 +2401,14 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             body = user_body
         elif len(subject.split()) <= 2:
             # Subject too vague for LLM to generate a meaningful body
-            await update.message.reply_text(
+            await ctx.reply(
                 "Subject is too short to generate a body. Either:\n"
                 "- Add more detail to the subject\n"
                 "- Provide the body directly: /email draft <to> <subject> body <your message>"
             )
             return
         else:
-            await update.message.reply_text(f"📝 Drafting email to {to_addr}...")
+            await ctx.reply(f"📝 Drafting email to {to_addr}...")
 
             # Use LLM to generate the email body from a descriptive subject
             personal_context = get_relevant_context(subject, max_chars=1500)
@@ -2414,7 +2428,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"to": to_addr, "subject": subject, "body": body},
         )
 
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"📝 Draft ready:\n\n"
             f"To: {to_addr}\n"
             f"Subject: {subject}\n\n"
@@ -2422,20 +2436,20 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"---\n"
             f"⚡ Action: Send email via Gmail\n"
             f"{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-        )
+            approve_deny_keyboard())
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Unknown subcommand. Use: /email search <query> or /email draft <to> <subject>"
         )
 
 
 async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /drive command: /drive search <query> or /drive recent"""
+    ctx = _ctx_from_update(update)
     args = context.args or []
     if not args:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /drive search <query> — Search Google Drive\n"
             "  /drive recent [days] — Recently modified files"
@@ -2447,19 +2461,19 @@ async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "search":
         query = " ".join(args[1:])
         if not query:
-            await update.message.reply_text("Usage: /drive search <query>")
+            await ctx.reply("Usage: /drive search <query>")
             return
 
-        await update.message.reply_text(f"📁 Searching Drive: {query}")
+        await ctx.reply(f"📁 Searching Drive: {query}")
         try:
             from actions.drive import search_files
             files = await search_files(query, max_results=8)
         except Exception as e:
-            await update.message.reply_text(f"Drive search failed: {e}")
+            await ctx.reply(f"Drive search failed: {e}")
             return
 
         if not files:
-            await update.message.reply_text("No files found.")
+            await ctx.reply("No files found.")
             return
 
         text = f"📁 Found {len(files)} files:\n\n"
@@ -2467,36 +2481,37 @@ async def cmd_drive(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text += f"📄 {f['name']}\n"
             text += f"   Modified: {f['modified']} | {f['link']}\n\n"
 
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     elif subcommand == "recent":
         days = int(args[1]) if len(args) > 1 and args[1].isdigit() else 7
-        await update.message.reply_text(f"📁 Files modified in last {days} days...")
+        await ctx.reply(f"📁 Files modified in last {days} days...")
         try:
             from actions.drive import list_recent
             files = await list_recent(days=days, max_results=10)
         except Exception as e:
-            await update.message.reply_text(f"Drive query failed: {e}")
+            await ctx.reply(f"Drive query failed: {e}")
             return
 
         if not files:
-            await update.message.reply_text("No recent files found.")
+            await ctx.reply("No recent files found.")
             return
 
         text = f"📁 {len(files)} files modified in last {days} days:\n\n"
         for f in files:
             text += f"📄 {f['name']} ({f['modified']})\n"
 
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Unknown subcommand. Use: /drive search <query> or /drive recent"
         )
 
 
 async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /remind command: /remind list, /remind cancel <id>, /remind <time> <text>, /remind recurring ..."""
+    ctx = _ctx_from_update(update)
     from actions.reminders import (
         _parse_relative_time, create_reminder, list_reminders, cancel_reminder,
         _parse_natural_cron, create_recurring, list_recurring, cancel_recurring,
@@ -2504,7 +2519,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = context.args or []
     if not args:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /remind in 2 hours Buy groceries\n"
             "  /remind tomorrow 9am Review PR\n"
@@ -2520,7 +2535,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if subcommand == "recurring":
         if len(args) < 2:
-            await update.message.reply_text(
+            await ctx.reply(
                 "Usage:\n"
                 "  /remind recurring every Monday 9am Review sprint\n"
                 "  /remind recurring every day Check email\n"
@@ -2535,21 +2550,21 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if recur_sub == "list":
             recurring = list_recurring()
             if not recurring:
-                await update.message.reply_text("No active recurring reminders.")
+                await ctx.reply("No active recurring reminders.")
                 return
             text = f"🔄 {len(recurring)} recurring reminders:\n\n"
             for r in recurring:
                 text += f"#{r['id']} — {r['text']}\n   Cron: {r['cron_expression']} | Next: {r['next_fire_at'][:16]}\n\n"
-            await update.message.reply_text(text)
+            await ctx.reply(text)
 
         elif recur_sub == "cancel":
             if len(args) < 3 or not args[2].isdigit():
-                await update.message.reply_text("Usage: /remind recurring cancel <id>")
+                await ctx.reply("Usage: /remind recurring cancel <id>")
                 return
             if cancel_recurring(int(args[2])):
-                await update.message.reply_text(f"✅ Recurring reminder #{args[2]} cancelled.")
+                await ctx.reply(f"✅ Recurring reminder #{args[2]} cancelled.")
             else:
-                await update.message.reply_text(f"Recurring #{args[2]} not found or already cancelled.")
+                await ctx.reply(f"Recurring #{args[2]} not found or already cancelled.")
 
         else:
             # Parse: /remind recurring <schedule> <text>
@@ -2565,7 +2580,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     break
 
             if not cron_expr or not reminder_text:
-                await update.message.reply_text(
+                await ctx.reply(
                     "Couldn't parse schedule. Try:\n"
                     "  /remind recurring every monday 9am Review sprint\n"
                     "  /remind recurring every day Check email\n"
@@ -2574,7 +2589,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             result = create_recurring(reminder_text, cron_expr)
-            await update.message.reply_text(
+            await ctx.reply(
                 f"🔄 Recurring reminder set!\n\n"
                 f"#{result['id']}: {result['text']}\n"
                 f"Schedule: {result['cron_expression']}\n"
@@ -2585,21 +2600,21 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif subcommand == "list":
         reminders = list_reminders()
         if not reminders:
-            await update.message.reply_text("No active reminders.")
+            await ctx.reply("No active reminders.")
             return
         text = f"⏰ {len(reminders)} active reminders:\n\n"
         for r in reminders:
             text += f"#{r['id']} — {r['text']}\n   Due: {r['due_at']}\n\n"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     elif subcommand == "cancel":
         if len(args) < 2 or not args[1].isdigit():
-            await update.message.reply_text("Usage: /remind cancel <id>")
+            await ctx.reply("Usage: /remind cancel <id>")
             return
         if cancel_reminder(int(args[1])):
-            await update.message.reply_text(f"✅ Reminder #{args[1]} cancelled.")
+            await ctx.reply(f"✅ Reminder #{args[1]} cancelled.")
         else:
-            await update.message.reply_text(f"Reminder #{args[1]} not found or already done.")
+            await ctx.reply(f"Reminder #{args[1]} not found or already done.")
 
     else:
         # Parse time expression + reminder text
@@ -2616,7 +2631,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 break
 
         if not due_at or not reminder_text:
-            await update.message.reply_text(
+            await ctx.reply(
                 "Couldn't parse time. Try:\n"
                 "  /remind in 30 minutes Call dentist\n"
                 "  /remind tomorrow 9am Review PR"
@@ -2624,7 +2639,7 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         result = create_reminder(reminder_text, due_at)
-        await update.message.reply_text(
+        await ctx.reply(
             f"⏰ Reminder set!\n\n"
             f"#{result['id']}: {result['text']}\n"
             f"Due: {result['due_at']}\n\n"
@@ -2633,42 +2648,46 @@ async def cmd_remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    clear_conversation(update.effective_chat.id)
-    await update.message.reply_text("🧹 Conversation history cleared.")
+    ctx = _ctx_from_update(update)
+    clear_conversation(ctx.chat_id)
+    await ctx.reply("🧹 Conversation history cleared.")
 
 
 async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📧 Syncing emails...")
+    ctx = _ctx_from_update(update)
+    await ctx.reply("📧 Syncing emails...")
     try:
         from actions.gmail_sync import sync_new_emails
         result = await sync_new_emails()
-        await update.message.reply_text(
+        await ctx.reply(
             f"✅ Email sync complete: {result['fetched']} fetched, {result['indexed']} indexed."
         )
     except Exception as e:
         log.error("Email sync failed: %s", e)
-        await update.message.reply_text(f"❌ Email sync failed: {e}")
+        await ctx.reply(f"❌ Email sync failed: {e}")
 
 
 async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("💼 Checking for new job matches...")
+    ctx = _ctx_from_update(update)
+    await ctx.reply("💼 Checking for new job matches...")
     try:
         from actions.jobs import fetch_new_jobs, format_jobs_text
         jobs = await fetch_new_jobs()
-        await update.message.reply_text(format_jobs_text(jobs))
+        await ctx.reply(format_jobs_text(jobs))
     except Exception as e:
         log.error("Job scraper failed: %s", e)
-        await update.message.reply_text(f"❌ Job scraper failed: {e}")
+        await ctx.reply(f"❌ Job scraper failed: {e}")
 
 
 async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /project command: view project status."""
+    ctx = _ctx_from_update(update)
     from actions.projects import resolve_project, get_project_status, list_projects, get_open_tasks
 
     args = context.args or []
     if not args:
         projects = list_projects()
-        await update.message.reply_text(
+        await ctx.reply(
             f"📋 Projects\n\n{projects}\n\n"
             "Usage: /project <name> — detailed status\n"
             "       /project <name> tasks — open tasks"
@@ -2678,7 +2697,7 @@ async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     name = args[0]
     key = resolve_project(name)
     if not key:
-        await update.message.reply_text(
+        await ctx.reply(
             f"Unknown project: {name}\n\nKnown: zia, tiny-grounds, bezier, khalil"
         )
         return
@@ -2688,39 +2707,41 @@ async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "tasks":
         tasks = get_open_tasks(key)
         if not tasks:
-            await update.message.reply_text(f"No open tasks for {key}.")
+            await ctx.reply(f"No open tasks for {key}.")
         else:
             text = f"📝 Open tasks for {key}:\n\n" + "\n".join(f"- [ ] {t}" for t in tasks)
-            await update.message.reply_text(text)
+            await ctx.reply(text)
     else:
         status = get_project_status(key)
-        await update.message.reply_text(status)
+        await ctx.reply(status)
 
 
 async def cmd_calendar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /calendar command: show today's or upcoming events."""
+    ctx = _ctx_from_update(update)
     args = context.args or []
     days = 1
     if args and args[0].isdigit():
         days = min(int(args[0]), 30)
 
-    await update.message.reply_text(f"📅 Fetching calendar events ({days} day{'s' if days > 1 else ''})...")
+    await ctx.reply(f"📅 Fetching calendar events ({days} day{'s' if days > 1 else ''})...")
     try:
         from actions.calendar import get_today_events, get_upcoming_events, format_events_text
         if days == 1:
             events = await get_today_events()
         else:
             events = await get_upcoming_events(days=days)
-        await update.message.reply_text(format_events_text(events))
+        await ctx.reply(format_events_text(events))
     except FileNotFoundError as e:
-        await update.message.reply_text(f"⚠️ Calendar not configured: {e}")
+        await ctx.reply(f"⚠️ Calendar not configured: {e}")
     except Exception as e:
         log.error("Calendar fetch failed: %s", e)
-        await update.message.reply_text(f"❌ Calendar fetch failed: {e}")
+        await ctx.reply(f"❌ Calendar fetch failed: {e}")
 
 
 async def cmd_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /finance command: show financial dashboard or detailed views."""
+    ctx = _ctx_from_update(update)
     from actions.finance import (
         format_dashboard_text,
         get_deadlines,
@@ -2734,28 +2755,28 @@ async def cmd_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if subcommand == "deadlines":
         deadlines = get_deadlines()
-        await update.message.reply_text(
+        await ctx.reply(
             f"📅 Financial Deadlines\n\n{format_deadlines_text(deadlines)}"
         )
 
     elif subcommand == "portfolio":
         portfolio = get_portfolio_summary()
         if not portfolio:
-            await update.message.reply_text("No portfolio data found.")
+            await ctx.reply("No portfolio data found.")
             return
         # Truncate for Telegram (4096 char limit)
-        await update.message.reply_text(f"📊 Portfolio\n\n{portfolio[:3500]}")
+        await ctx.reply(f"📊 Portfolio\n\n{portfolio[:3500]}")
 
     elif subcommand == "rsu":
         rsu = get_rsu_summary()
         if not rsu:
-            await update.message.reply_text("No RSU data found.")
+            await ctx.reply("No RSU data found.")
             return
-        await update.message.reply_text(f"📈 RSU Summary\n\n{rsu[:3500]}")
+        await ctx.reply(f"📈 RSU Summary\n\n{rsu[:3500]}")
 
     elif subcommand == "ask" and len(args) > 1:
         query = " ".join(args[1:])
-        await update.message.reply_text(f"🔍 Analyzing: {query}")
+        await ctx.reply(f"🔍 Analyzing: {query}")
         personal_context = get_relevant_context("finance investment rrsp tfsa rsu", max_chars=3000)
         results = await hybrid_search(query, limit=5, category="email:finance")
         archive_context = truncate_context(results) if results else ""
@@ -2765,11 +2786,11 @@ async def cmd_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
             full_context,
             system_extra=f"Today's date: {date.today().isoformat()}",
         )
-        await update.message.reply_text(answer)
+        await ctx.reply(answer)
 
     else:
         dashboard = format_dashboard_text()
-        await update.message.reply_text(
+        await ctx.reply(
             f"💰 Financial Dashboard\n\n{dashboard}\n\n"
             "Sub-commands:\n"
             "  /finance deadlines — All deadlines\n"
@@ -2781,6 +2802,7 @@ async def cmd_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /work command: sprint dashboard, P0s, filter by theme/owner."""
+    ctx = _ctx_from_update(update)
     from actions.work import (
         get_sprint_summary, get_p0_epics, get_epics_by_theme,
         get_epics_by_owner, get_in_progress,
@@ -2788,28 +2810,28 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     args = context.args or []
     if not args:
-        await update.message.reply_text(get_sprint_summary())
+        await ctx.reply(get_sprint_summary())
         return
 
     subcommand = args[0].lower()
 
     if subcommand == "p0":
-        await update.message.reply_text(get_p0_epics())
+        await ctx.reply(get_p0_epics())
 
     elif subcommand == "progress":
-        await update.message.reply_text(get_in_progress())
+        await ctx.reply(get_in_progress())
 
     elif subcommand == "theme" and len(args) > 1:
         theme = " ".join(args[1:])
-        await update.message.reply_text(get_epics_by_theme(theme))
+        await ctx.reply(get_epics_by_theme(theme))
 
     elif subcommand == "owner" and len(args) > 1:
         name = " ".join(args[1:])
-        await update.message.reply_text(get_epics_by_owner(name))
+        await ctx.reply(get_epics_by_owner(name))
 
     elif subcommand == "ask" and len(args) > 1:
         query = " ".join(args[1:])
-        await update.message.reply_text(f"🔍 Analyzing: {query}")
+        await ctx.reply(f"🔍 Analyzing: {query}")
         work_context = get_sprint_summary() + "\n\n" + get_p0_epics()
         results = await hybrid_search(query, limit=5, category="work:planning")
         if results:
@@ -2819,10 +2841,10 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
             work_context,
             system_extra=f"Today's date: {date.today().isoformat()}",
         )
-        await update.message.reply_text(answer)
+        await ctx.reply(answer)
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /work — Sprint dashboard\n"
             "  /work p0 — P0 epics\n"
@@ -2835,36 +2857,37 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /goals command: view, add, complete goals."""
+    ctx = _ctx_from_update(update)
     from actions.goals import (
         get_current_goals, get_all_goals, add_goal, complete_goal, get_goal_summary,
     )
 
     args = context.args or []
     if not args:
-        await update.message.reply_text(get_current_goals())
+        await ctx.reply(get_current_goals())
         return
 
     subcommand = args[0].lower()
 
     if subcommand == "all":
-        await update.message.reply_text(get_all_goals())
+        await ctx.reply(get_all_goals())
 
     elif subcommand == "add" and len(args) >= 3:
         category = args[1]
         text = " ".join(args[2:])
-        await update.message.reply_text(add_goal(category, text))
+        await ctx.reply(add_goal(category, text))
 
     elif subcommand == "done" and len(args) >= 3:
         category = args[1]
         try:
             index = int(args[2])
         except ValueError:
-            await update.message.reply_text("Usage: /goals done <category> <number>")
+            await ctx.reply("Usage: /goals done <category> <number>")
             return
-        await update.message.reply_text(complete_goal(category, index))
+        await ctx.reply(complete_goal(category, index))
 
     elif subcommand == "review":
-        await update.message.reply_text("🔍 Reviewing goals...")
+        await ctx.reply("🔍 Reviewing goals...")
         from actions.work import get_sprint_summary
         goal_text = get_current_goals()
         work_text = get_sprint_summary()
@@ -2875,7 +2898,7 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
             review_context,
             system_extra=f"Today's date: {date.today().isoformat()}",
         )
-        await update.message.reply_text(answer)
+        await ctx.reply(answer)
 
     elif subcommand == "progress":
         # M12: Goal progress summary with signals
@@ -2887,25 +2910,25 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
             summary += "\n\nRecent activity:"
             for s in signals[:5]:
                 summary += f"\n  - {s['description']} (x{s['count']})"
-        await update.message.reply_text(summary)
+        await ctx.reply(summary)
 
     elif subcommand == "plan":
         # M12: Trigger quarterly planning prompt on demand
-        await update.message.reply_text("📋 Generating quarterly plan...")
+        await ctx.reply("📋 Generating quarterly plan...")
         from scheduler.planning import generate_planning_prompt
         prompt = await generate_planning_prompt(ask_claude)
-        await update.message.reply_text(prompt)
+        await ctx.reply(prompt)
 
     elif subcommand == "midreview":
         # M12: Trigger mid-quarter review on demand
-        await update.message.reply_text("📊 Generating mid-quarter review...")
+        await ctx.reply("📊 Generating mid-quarter review...")
         from scheduler.planning import generate_mid_quarter_review
         review = await generate_mid_quarter_review(ask_claude)
-        await update.message.reply_text(review)
+        await ctx.reply(review)
 
     elif subcommand == "align":
         # M12: Check goal-domain alignment and conflicts
-        await update.message.reply_text("🔗 Checking goal alignment...")
+        await ctx.reply("🔗 Checking goal alignment...")
         from scheduler.planning import map_goal_to_domain, detect_goal_conflicts, _estimate_weekly_hours
         from actions.goals import GOALS_FILE, _parse_goals, _current_quarter as _cq
         quarter = _cq()
@@ -2930,7 +2953,7 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         if not goal_list:
-            await update.message.reply_text(f"No active goals in {quarter} to analyze.")
+            await ctx.reply(f"No active goals in {quarter} to analyze.")
             return
 
         lines = [f"Goal-Domain Alignment ({quarter}):\n"]
@@ -2945,10 +2968,10 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             lines.append("\nNo capacity conflicts detected.")
 
-        await update.message.reply_text("\n".join(lines))
+        await ctx.reply("\n".join(lines))
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /goals — Current quarter goals\n"
             "  /goals all — All quarters\n"
@@ -2965,6 +2988,7 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /commitments command: view, add, complete commitments from meetings."""
+    ctx = _ctx_from_update(update)
     from actions.meetings import (
         list_commitments, complete_commitment, add_commitment, format_commitments,
     )
@@ -2973,10 +2997,10 @@ async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not args:
         commitments = list_commitments("open")
         if not commitments:
-            await update.message.reply_text("No open commitments.")
+            await ctx.reply("No open commitments.")
             return
         text = f"Open Commitments ({len(commitments)}):\n\n{format_commitments(commitments)}"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
         return
 
     subcommand = args[0].lower()
@@ -2985,19 +3009,19 @@ async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             cid = int(args[1])
         except ValueError:
-            await update.message.reply_text("Usage: /commitments done <id>")
+            await ctx.reply("Usage: /commitments done <id>")
             return
         if complete_commitment(cid):
-            await update.message.reply_text(f"Commitment #{cid} marked as done.")
+            await ctx.reply(f"Commitment #{cid} marked as done.")
         else:
-            await update.message.reply_text(f"Commitment #{cid} not found or already done.")
+            await ctx.reply(f"Commitment #{cid} not found or already done.")
 
     elif subcommand == "add" and len(args) >= 3:
         # /commitments add <person> <commitment text>
         person = args[1]
         commitment = " ".join(args[2:])
         result = add_commitment("(manual)", person, commitment)
-        await update.message.reply_text(
+        await ctx.reply(
             f"Commitment #{result['id']} added: {person} -> {commitment}"
         )
 
@@ -3007,10 +3031,10 @@ async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = f"Open ({len(open_c)}):\n{format_commitments(open_c)}"
         if done_c:
             text += f"\n\nDone ({len(done_c)}):\n{format_commitments(done_c)}"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "  /commitments — Open commitments\n"
             "  /commitments all — All commitments\n"
@@ -3021,16 +3045,17 @@ async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /tasks command: list active and recent task plans from the orchestrator."""
+    ctx = _ctx_from_update(update)
     from orchestrator import list_active_plans, ensure_table as ensure_plans_table
     try:
         ensure_plans_table()
         plans = list_active_plans()
     except Exception as e:
-        await update.message.reply_text(f"Failed to load plans: {e}")
+        await ctx.reply(f"Failed to load plans: {e}")
         return
 
     if not plans:
-        await update.message.reply_text("No task plans found.")
+        await ctx.reply("No task plans found.")
         return
 
     status_icons = {
@@ -3052,11 +3077,12 @@ async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if p.get("completed_at"):
             lines.append(f"   Completed: {p['completed_at'][:16]}")
 
-    await update.message.reply_text("\n".join(lines))
+    await ctx.reply("\n".join(lines))
 
 
 async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Synthesis-driven nudge — capacity score, top risks, top actions."""
+    ctx = _ctx_from_update(update)
     try:
         from synthesis.aggregator import aggregate_all_domains
         from synthesis.capacity import detect_overcommitment, capacity_report_to_text
@@ -3092,7 +3118,7 @@ async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not report.risk_areas and not report.recommendations:
             lines.append("All clear — no immediate risks detected.")
 
-        await update.message.reply_text("\n".join(lines))
+        await ctx.reply("\n".join(lines))
 
     except Exception as e:
         # Fallback to legacy proactive checks
@@ -3101,18 +3127,19 @@ async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         findings = run_proactive_checks()
         if not findings:
-            await update.message.reply_text("All clear — nothing needs attention.")
+            await ctx.reply("All clear — nothing needs attention.")
             return
 
         text = "Proactive Check — things that need attention:\n\n" + "\n\n".join(findings)
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
 
 async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Execute a shell command on the local machine."""
+    ctx = _ctx_from_update(update)
     cmd = " ".join(context.args) if context.args else ""
     if not cmd:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage: /run <command>\n\n"
             "Examples:\n"
             "  /run open -a Safari\n"
@@ -3128,7 +3155,7 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if classification == ActionType.DANGEROUS:
         autonomy.log_audit("shell_dangerous", f"BLOCKED: {cmd}", result="blocked")
-        await update.message.reply_text(f"🚫 Command blocked (dangerous):\n`{cmd}`", parse_mode="Markdown")
+        await ctx.reply(f"🚫 Command blocked (dangerous):\n`{cmd}`", parse_mode="Markdown")
         return
 
     action_name = "shell_read" if classification == ActionType.READ else "shell_write"
@@ -3140,12 +3167,10 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
             {"command": cmd},
         )
         label = "safe" if classification == ActionType.READ else "risky"
-        await update.message.reply_text(
+        await _reply_with_keyboard(ctx,
             f"🖥 Shell command requires approval:\n\n`{cmd}`\n\n"
             f"Classification: {label}\n{autonomy.format_level()}",
-            reply_markup=approve_deny_keyboard(),
-            parse_mode="Markdown",
-        )
+            approve_deny_keyboard(), parse_mode="Markdown")
         return
 
     # Auto-execute (safe command in GUIDED/AUTONOMOUS mode)
@@ -3153,24 +3178,26 @@ async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = await execute_shell(cmd)
     autonomy.log_audit(action_name, f"Completed: {cmd}", result=f"exit={result['returncode']}")
     output = format_output(result, cmd)
-    await update.message.reply_text(output)
+    await ctx.reply(output)
 
 
 async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     entries = autonomy.get_audit_log(limit=10)
     if not entries:
-        await update.message.reply_text("No audit log entries yet.")
+        await ctx.reply("No audit log entries yet.")
         return
     text = f"📋 Last {len(entries)} actions:\n\n"
     for e in entries:
         text += f"#{e['id']} [{e['autonomy_level']}] {e['action_type']}\n"
         text += f"   {e['description'][:60]}\n"
         text += f"   Result: {e['result'] or '—'} | {e['timestamp'][:16]}\n\n"
-    await update.message.reply_text(text)
+    await ctx.reply(text)
 
 
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show system health status."""
+    ctx = _ctx_from_update(update)
     from monitoring import run_health_check
 
     report = await run_health_check()
@@ -3204,11 +3231,12 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = scheduler.get_jobs()
     lines.append(f"\n📅 Scheduler: {len(jobs)} jobs")
 
-    await update.message.reply_text("\n".join(lines))
+    await ctx.reply("\n".join(lines))
 
 
 async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show dev environment status — Cursor windows + terminal sessions + bridge."""
+    ctx = _ctx_from_update(update)
     from actions.terminal import (
         get_cursor_status, format_cursor_status,
         get_terminal_status, format_terminal_status,
@@ -3234,11 +3262,12 @@ async def cmd_dev(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if frontmost:
         lines.append(f"\n🔍 Frontmost: {frontmost}")
 
-    await update.message.reply_text("\n".join(lines))
+    await ctx.reply("\n".join(lines))
 
 
 async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /backup command: export or list backups."""
+    ctx = _ctx_from_update(update)
     from actions.backup import export_backup, list_backups, format_backup_summary
 
     args = context.args or []
@@ -3247,35 +3276,37 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "list":
         backups = list_backups()
         if not backups:
-            await update.message.reply_text("No backups found.")
+            await ctx.reply("No backups found.")
             return
         text = f"📦 {len(backups)} backup(s):\n\n"
         for b in backups[:10]:
             text += f"  {b['filename']} ({b['size_kb']} KB)\n  Created: {b['created']}\n\n"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     else:
-        await update.message.reply_text("📦 Creating backup...")
+        await ctx.reply("📦 Creating backup...")
         try:
             path = export_backup()
             summary = format_backup_summary(path)
-            await update.message.reply_text(f"✅ Backup created!\n\n{summary}")
+            await ctx.reply(f"✅ Backup created!\n\n{summary}")
         except Exception as e:
             log.error("Backup failed: %s", e)
-            await update.message.reply_text(f"❌ Backup failed: {e}")
+            await ctx.reply(f"❌ Backup failed: {e}")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    ctx = _ctx_from_update(update)
     stats = get_stats()
     text = f"📊 Knowledge Base\n\nTotal documents: {stats['total_documents']}\n\n"
     for cat, count in list(stats["by_category"].items())[:15]:
         text += f"  {cat}: {count}\n"
     text += f"\nMode: {autonomy.format_level()}"
-    await update.message.reply_text(text)
+    await ctx.reply(text)
 
 
 async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /learn command — view and manage self-improvement insights."""
+    ctx = _ctx_from_update(update)
     from learning import get_insights, list_preferences, apply_insight, dismiss_insight, reset_preferences
 
     args = context.args or []
@@ -3284,46 +3315,46 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "preferences":
         prefs = list_preferences()
         if not prefs:
-            await update.message.reply_text("No learned preferences yet. Khalil will start learning from your interactions over time.")
+            await ctx.reply("No learned preferences yet. Khalil will start learning from your interactions over time.")
             return
         text = f"🧠 {len(prefs)} Learned Preferences:\n\n"
         for p in prefs:
             conf_bar = "●" * int(p["confidence"] * 10) + "○" * (10 - int(p["confidence"] * 10))
             text += f"  {p['key']}: {p['value']}\n  Confidence: [{conf_bar}] {p['confidence']:.1f}\n\n"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     elif subcommand == "apply" and len(args) > 1 and args[1].isdigit():
         if apply_insight(int(args[1])):
-            await update.message.reply_text(f"✅ Insight #{args[1]} applied.")
+            await ctx.reply(f"✅ Insight #{args[1]} applied.")
         else:
-            await update.message.reply_text(f"Insight #{args[1]} not found or not pending.")
+            await ctx.reply(f"Insight #{args[1]} not found or not pending.")
 
     elif subcommand == "dismiss" and len(args) > 1 and args[1].isdigit():
         if dismiss_insight(int(args[1])):
-            await update.message.reply_text(f"❌ Insight #{args[1]} dismissed.")
+            await ctx.reply(f"❌ Insight #{args[1]} dismissed.")
         else:
-            await update.message.reply_text(f"Insight #{args[1]} not found or not pending.")
+            await ctx.reply(f"Insight #{args[1]} not found or not pending.")
 
     elif subcommand == "reset":
         reset_preferences()
-        await update.message.reply_text("🧹 All learned preferences cleared.")
+        await ctx.reply("🧹 All learned preferences cleared.")
 
     elif subcommand == "history":
         insights = get_insights(limit=15)
         if not insights:
-            await update.message.reply_text("No insights yet. Khalil generates insights from weekly reflection.")
+            await ctx.reply("No insights yet. Khalil generates insights from weekly reflection.")
             return
         text = f"🧠 Insight History ({len(insights)}):\n\n"
         for i in insights:
             status_icon = {"pending": "⏳", "applied": "✅", "dismissed": "❌", "superseded": "🔄"}.get(i["status"], "?")
             text += f"#{i['id']} {status_icon} [{i['category']}]\n  {i['summary']}\n  {i['recommendation'][:80]}\n\n"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
     else:
         # Default: show last 5 insights
         insights = get_insights(limit=5)
         if not insights:
-            await update.message.reply_text(
+            await ctx.reply(
                 "🧠 Khalil Self-Improvement\n\n"
                 "No insights yet. Khalil analyzes your interactions weekly to learn your preferences.\n\n"
                 "Commands:\n"
@@ -3342,32 +3373,33 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if i["status"] == "pending":
                 text += f"  → /learn apply {i['id']} | /learn dismiss {i['id']}\n"
             text += "\n"
-        await update.message.reply_text(text)
+        await ctx.reply(text)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
+    ctx = _ctx_from_update(update)
     import time as _time
     _msg_start = _time.monotonic()
 
     global OWNER_CHAT_ID
     if OWNER_CHAT_ID is None:
-        OWNER_CHAT_ID = update.effective_chat.id
+        OWNER_CHAT_ID = ctx.chat_id
         _persist_owner_chat_id(OWNER_CHAT_ID)
 
-    query = update.message.text
+    query = update.message.text if update.message else None
     if not query:
         return
 
     # Check for sensitive data in query
     if contains_sensitive_data(query):
-        await update.message.reply_text(
+        await ctx.reply(
             "⚠️ Your message appears to contain sensitive data. "
             "I'll proceed but won't include raw sensitive values in API calls."
         )
 
     # Save user message to conversation history
-    chat_id = update.effective_chat.id
+    chat_id = ctx.chat_id
     save_message(chat_id, "user", query)
 
     # M9: Record activity timing for smart proactive alerts
@@ -3385,7 +3417,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if any(re.search(p, query.lower()) for p in _CORRECTION_PATTERNS):
         from learning import record_signal
         record_signal("user_correction", {"query": query[:200]})
-        await _try_inline_healing(update)
+        await _try_inline_healing(ctx)
 
     # #61: Implicit preference detection — detect preferences in messages
     _PREFERENCE_PATTERNS = [
@@ -3421,7 +3453,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if direct_intent:
         direct_intent["llm_generated"] = False  # safe — pattern-matched, not LLM
         direct_intent["user_query"] = query
-        handled = await handle_action_intent(direct_intent, update)
+        handled = await handle_action_intent(direct_intent, ctx)
         if handled:
             return
     # 2. LLM-based detection for ambiguous patterns
@@ -3442,7 +3474,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             intent["user_query"] = query
-            handled = await handle_action_intent(intent, update)
+            handled = await handle_action_intent(intent, ctx)
             if handled:
                 return
         else:
@@ -3453,7 +3485,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "action_hint": action_hint,
             })
             # Try immediate self-healing if this is a recurring failure
-            await _try_inline_healing(update)
+            await _try_inline_healing(ctx)
 
     # Multi-step task orchestration: if the query looks compound, try decomposing
     from orchestrator import looks_like_multi_step, decompose_request, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
@@ -3488,7 +3520,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         intent["user_query"] = step.description
                         # Execute via handle_action_intent — but we need to capture the result
                         # Since handle_action_intent sends messages directly, we treat success as no exception
-                        handled = await handle_action_intent(intent, update)
+                        handled = await handle_action_intent(intent, ctx)
                         if handled:
                             return f"Completed: {step.description}"
                     return f"Executed: {step.description}"
@@ -3500,18 +3532,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         f"Execute {len(steps)}-step plan: {query[:100]}",
                         {"query": query, "steps": [s.to_dict() for s in steps]},
                     )
-                    await update.message.reply_text(
-                        f"📋 {plan_text}\n\n{autonomy.format_level()}",
-                        reply_markup=approve_deny_keyboard(),
-                    )
+                    await _reply_with_keyboard(ctx,
+            f"📋 {plan_text}\n\n{autonomy.format_level()}",
+            approve_deny_keyboard())
                     return
                 else:
                     # AUTONOMOUS: execute immediately
-                    await update.message.reply_text(f"📋 {plan_text}\n\nExecuting...")
+                    await ctx.reply(f"📋 {plan_text}\n\nExecuting...")
                     plan_result = await execute_task_plan(
                         steps, query, channel, chat_id, _execute_single_step,
                     )
-                    await update.message.reply_text(format_plan_summary(plan_result))
+                    await ctx.reply(format_plan_summary(plan_result))
                     return
         except Exception as e:
             log.warning("Multi-step orchestration failed, falling through: %s", e)
@@ -3608,7 +3639,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         record_signal("response_suggests_manual_action", {
             "query": query[:200], "suggested_cmd": suggested_cmd,
         })
-        await _try_inline_healing(update)
+        await _try_inline_healing(ctx)
         from actions.shell import classify_command, format_output
         classification = classify_command(suggested_cmd)
         if classification != ActionType.DANGEROUS:
@@ -3620,7 +3651,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "llm_generated": True,
             }
             await progress_msg.delete()
-            handled = await handle_action_intent(intent, update, channel)
+            handled = await handle_action_intent(intent, ctx)
             if handled:
                 return
 
@@ -3647,7 +3678,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 await progress_msg.delete()
                 await channel.send_message(chat_id, display_response)
-            await _handle_self_extend_with_spec(spec, update)
+            await _handle_self_extend_with_spec(spec, ctx)
             return
     # 2. Fallback: phrase-based detection
     try:
@@ -3662,12 +3693,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "llm_response_snippet": display_response[:200],
                 })
                 log.info("Intent pattern miss: query=%r matched=%s", query[:80], matched_action)
-                await _try_inline_healing(update)
+                await _try_inline_healing(ctx)
                 # Skip self-extension — this is a pattern miss, not a capability gap
             else:
                 record_signal("capability_gap_detected", {"query": query[:200]})
-                await _try_inline_healing(update)
-                await handle_self_extend(query, update, ask_claude)
+                await _try_inline_healing(ctx)
+                await handle_self_extend(query, ctx._raw_update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)
 
@@ -3701,10 +3732,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """#1: Record explicit user feedback on conversation quality."""
+    ctx = _ctx_from_update(update)
     from learning import record_signal
     args = context.args
     if not args:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage: /feedback <positive|negative> [comment]\n"
             "Example: /feedback positive Great answer!\n"
             "Example: /feedback negative Didn't understand my question"
@@ -3712,7 +3744,7 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     sentiment = args[0].lower()
     if sentiment not in ("positive", "negative"):
-        await update.message.reply_text("Feedback must be 'positive' or 'negative'.")
+        await ctx.reply("Feedback must be 'positive' or 'negative'.")
         return
     comment = " ".join(args[1:]) if len(args) > 1 else ""
     score = 1.0 if sentiment == "positive" else -1.0
@@ -3720,11 +3752,12 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "sentiment": sentiment,
         "comment": comment[:500],
     }, value=score)
-    await update.message.reply_text(f"Thanks for the feedback! Recorded as {sentiment}.")
+    await ctx.reply(f"Thanks for the feedback! Recorded as {sentiment}.")
 
 
 async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manage MCP server connections: list, add, remove, tools, test."""
+    ctx = _ctx_from_update(update)
     from mcp_client import MCPClientManager, MCPServerConfig
 
     manager = MCPClientManager.get_instance()
@@ -3734,7 +3767,7 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sub == "list":
         statuses = manager.get_server_status()
         if not statuses:
-            await update.message.reply_text(
+            await ctx.reply(
                 "No MCP servers configured.\n"
                 "Add one with: /mcp add <name> <command> [args...]"
             )
@@ -3743,7 +3776,7 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for s in statuses:
             icon = "+" if s["status"] == "connected" else "-"
             lines.append(f"[{icon}] {s['name']} — {s['command']} ({s['status']})")
-        await update.message.reply_text("\n".join(lines))
+        await ctx.reply("\n".join(lines))
 
     elif sub == "add" and len(args) >= 3:
         name = args[1]
@@ -3756,12 +3789,12 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if client and client.is_connected:
             tools = await client.list_tools()
             manager._cached_tools = await manager.get_all_tools()
-            await update.message.reply_text(
+            await ctx.reply(
                 f"MCP server '{name}' added and connected.\n"
                 f"Available tools: {len(tools)}"
             )
         else:
-            await update.message.reply_text(
+            await ctx.reply(
                 f"MCP server '{name}' added but connection failed.\n"
                 f"Check that '{command}' is installed and working."
             )
@@ -3774,29 +3807,29 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             del manager._clients[name]
         if manager.remove_config(name):
             manager._cached_tools = await manager.get_all_tools()
-            await update.message.reply_text(f"Removed MCP server '{name}'.")
+            await ctx.reply(f"Removed MCP server '{name}'.")
         else:
-            await update.message.reply_text(f"MCP server '{name}' not found.")
+            await ctx.reply(f"MCP server '{name}' not found.")
 
     elif sub == "tools":
         tools = await manager.get_all_tools()
         if not tools:
-            await update.message.reply_text("No MCP tools available. Connect a server first.")
+            await ctx.reply("No MCP tools available. Connect a server first.")
             return
         lines = ["MCP Tools\n"]
         for t in tools:
             lines.append(f"  {t['server']}.{t['name']} — {t['description'][:80]}")
-        await update.message.reply_text("\n".join(lines))
+        await ctx.reply("\n".join(lines))
 
     elif sub == "test" and len(args) >= 2:
         name = args[1]
         client = await manager.get_client(name)
         if not client:
-            await update.message.reply_text(f"MCP server '{name}' not found.")
+            await ctx.reply(f"MCP server '{name}' not found.")
             return
         if client.is_connected:
             tools = await client.list_tools()
-            await update.message.reply_text(
+            await ctx.reply(
                 f"'{name}' is connected.\nTools: {len(tools)}"
             )
         else:
@@ -3804,14 +3837,14 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if client.is_connected:
                 tools = await client.list_tools()
                 manager._cached_tools = await manager.get_all_tools()
-                await update.message.reply_text(
+                await ctx.reply(
                     f"'{name}' reconnected.\nTools: {len(tools)}"
                 )
             else:
-                await update.message.reply_text(f"'{name}' connection failed.")
+                await ctx.reply(f"'{name}' connection failed.")
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "/mcp — list configured servers\n"
             "/mcp add <name> <command> [args...]\n"
@@ -3823,6 +3856,7 @@ async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Manage extensions: list, enable, disable, info."""
+    ctx = _ctx_from_update(update)
     from extensions.manifest import (
         list_extensions, set_extension_enabled, load_manifest,
     )
@@ -3833,34 +3867,34 @@ async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if sub == "list":
         exts = list_extensions()
         if not exts:
-            await update.message.reply_text("No extensions registered.")
+            await ctx.reply("No extensions registered.")
             return
         lines = ["📦 Extensions\n"]
         for ext in exts:
             status = "✅" if ext.get("enabled") else "❌"
             lines.append(f"{status} **{ext['name']}** — {ext.get('description', 'no description')}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply("\n".join(lines), parse_mode="Markdown")
 
     elif sub == "enable" and len(args) >= 2:
         name = args[1]
         if set_extension_enabled(name, True):
-            await update.message.reply_text(f"✅ Extension '{name}' enabled. Restart to apply.")
+            await ctx.reply(f"✅ Extension '{name}' enabled. Restart to apply.")
         else:
-            await update.message.reply_text(f"Extension '{name}' not found in manifest.")
+            await ctx.reply(f"Extension '{name}' not found in manifest.")
 
     elif sub == "disable" and len(args) >= 2:
         name = args[1]
         if set_extension_enabled(name, False):
-            await update.message.reply_text(f"❌ Extension '{name}' disabled. Restart to apply.")
+            await ctx.reply(f"❌ Extension '{name}' disabled. Restart to apply.")
         else:
-            await update.message.reply_text(f"Extension '{name}' not found in manifest.")
+            await ctx.reply(f"Extension '{name}' not found in manifest.")
 
     elif sub == "info" and len(args) >= 2:
         name = args[1]
         manifest = load_manifest()
         entry = manifest["extensions"].get(name)
         if not entry:
-            await update.message.reply_text(f"Extension '{name}' not found.")
+            await ctx.reply(f"Extension '{name}' not found.")
             return
         status = "enabled" if entry.get("enabled") else "disabled"
         lines = [
@@ -3875,10 +3909,10 @@ async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         patterns = entry.get("intent_patterns", [])
         if patterns:
             lines.append(f"Patterns: {', '.join(patterns)}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        await ctx.reply("\n".join(lines), parse_mode="Markdown")
 
     else:
-        await update.message.reply_text(
+        await ctx.reply(
             "Usage:\n"
             "/extensions — list all extensions\n"
             "/extensions enable <name>\n"
@@ -3888,7 +3922,8 @@ async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
+    ctx = _ctx_from_update(update)
+    await ctx.reply(
         "Unknown command. Send /help to see available commands."
     )
 

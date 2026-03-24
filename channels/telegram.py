@@ -105,6 +105,21 @@ class TelegramChannel(Channel):
     async def send_typing(self, chat_id: int | str) -> None:
         await self._bot.send_chat_action(chat_id=chat_id, action="typing")
 
+    async def send_photo(self, chat_id: int | str, photo_path: str, caption: str = "") -> SentMessage:
+        with open(photo_path, "rb") as f:
+            msg = await self._bot.send_photo(chat_id=chat_id, photo=f, caption=caption)
+        return SentMessage(chat_id=chat_id, message_id=msg.message_id, channel=self)
+
+    async def send_voice(self, chat_id: int | str, audio_path: str) -> SentMessage:
+        with open(audio_path, "rb") as f:
+            msg = await self._bot.send_voice(chat_id=chat_id, voice=f)
+        return SentMessage(chat_id=chat_id, message_id=msg.message_id, channel=self)
+
+    async def download_file(self, file_id: str, dest_path: str) -> str | None:
+        tg_file = await self._bot.get_file(file_id)
+        await tg_file.download_to_drive(dest_path)
+        return dest_path
+
     # --- Telegram-specific helpers ---
 
     @staticmethod

@@ -99,3 +99,15 @@ class Channel(ABC):
     async def send_typing(self, chat_id: int | str) -> None:
         """Show typing/processing indicator."""
         ...
+
+    async def send_photo(self, chat_id: int | str, photo_path: str, caption: str = "") -> "SentMessage | None":
+        """Send a photo. Override in channels that support it."""
+        return None
+
+    async def send_voice(self, chat_id: int | str, audio_path: str) -> "SentMessage | None":
+        """Send a voice message. Override in channels that support it."""
+        return None
+
+    async def download_file(self, file_id: str, dest_path: str) -> str | None:
+        """Download a file by ID. Override in channels that support it."""
+        return None
