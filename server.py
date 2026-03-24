@@ -1340,6 +1340,26 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         search_q = query_match.group(1).strip() if query_match else text_stripped
         return {"action": "imessage_search", "query": search_q, "description": f"Search messages: {search_q}"}
 
+    # --- Browser automation ---
+
+    # "go to <url> and screenshot" / "navigate to <url> and capture"
+    m = re.search(r'\b(?:go\s+to|navigate\s+to|open)\s+(https?://\S+)\s+and\s+(?:screenshot|capture)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_screenshot", "url": url, "description": "Screenshot webpage"}
+
+    # "extract text from <url>" / "scrape <url>"
+    m = re.search(r'\b(?:extract|scrape|get)\s+(?:text|data|content)\s+(?:from|at)\s+(https?://\S+)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_extract", "url": url, "description": "Extract page text"}
+
+    # "screenshot the page at <url>"
+    m = re.search(r'\bscreenshot\s+(?:the\s+)?(?:page|site|website)\s+(?:at\s+)?(https?://\S+)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_screenshot", "url": url, "description": "Screenshot webpage"}
+
     return None
 
 
@@ -1799,6 +1819,39 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}{guardian_note}\n\n"
             f"{autonomy.format_level()}",
             approve_deny_keyboard(), parse_mode="Markdown")
+        return True
+
+    # --- Browser automation ---
+
+    elif action == "browser_screenshot":
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        url = intent.get("url", "")
+        if not url:
+            return False
+        if is_financial_url(url):
+            await ctx.reply("Browser access to financial sites is blocked.")
+            return True
+        await ctx.reply(f"Capturing screenshot of {url}...")
+        screenshot = await navigate_and_screenshot(url)
+        if screenshot:
+            await ctx.reply_photo(screenshot, caption=f"Screenshot: {url}")
+            import os
+            os.unlink(screenshot)
+        else:
+            await ctx.reply("Failed to capture screenshot.")
+        return True
+
+    elif action == "browser_extract":
+        from actions.browser import extract_page_text, is_financial_url
+        url = intent.get("url", "")
+        if not url:
+            return False
+        if is_financial_url(url):
+            await ctx.reply("Browser access to financial sites is blocked.")
+            return True
+        await ctx.reply(f"Extracting text from {url}...")
+        text = await extract_page_text(url)
+        await ctx.reply(text[:4000])
         return True
 
     # --- macOS awareness ---

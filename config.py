@@ -112,6 +112,7 @@ HARD_GUARDRAILS = [
     "family_member_data_action",
     "generate_capability",
     "shell_dangerous",
+    "browser_financial_site",
 ]
 
 # Privacy: sensitive query patterns that should NOT be sent raw to Claude API
