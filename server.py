@@ -3730,6 +3730,91 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+
+async def handle_message_generic(ctx: MessageContext):
+    """Channel-agnostic message handler for non-Telegram channels (e.g., Slack).
+
+    Runs the core conversational pipeline: save message, detect intent,
+    query LLM with knowledge context, and reply via ctx.channel.
+    """
+    import time as _time
+    _msg_start = _time.monotonic()
+
+    global OWNER_CHAT_ID
+    query = ctx.incoming.text if ctx.incoming else ""
+    if not query:
+        return
+
+    chat_id = ctx.chat_id
+
+    if contains_sensitive_data(query):
+        await ctx.reply(
+            "Your message appears to contain sensitive data. "
+            "I'll proceed but won't include raw sensitive values in API calls."
+        )
+
+    save_message(chat_id, "user", query)
+
+    direct_intent = _try_direct_shell_intent(query)
+    if direct_intent:
+        direct_intent["llm_generated"] = False
+        direct_intent["user_query"] = query
+        handled = await handle_action_intent(direct_intent, ctx)
+        if handled:
+            return
+
+    action_hint = _looks_like_action(query)
+    if action_hint and action_hint not in ("reminder", "email", "calendar", "shell"):
+        pass  # Extension commands rely on Telegram Update — skip on other channels
+    elif action_hint:
+        intent = await detect_intent(query)
+        if intent:
+            intent["user_query"] = query
+            handled = await handle_action_intent(intent, ctx)
+            if handled:
+                return
+
+    progress_msg = await ctx.reply("Thinking...")
+
+    results = await hybrid_search(query, limit=6)
+    archive_context = truncate_context(results) if results else "No relevant archive data found."
+    personal_context = get_relevant_context(query, max_chars=2000)
+    conversation = get_conversation_history(chat_id)
+
+    full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
+    if conversation:
+        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+
+    live_context = ""
+    try:
+        from state.collector import collect_live_state, format_for_prompt
+        live = await collect_live_state()
+        live_context = format_for_prompt(live)
+    except Exception as e:
+        log.warning("Live state collection failed: %s", e)
+    if live_context:
+        full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+
+    response = await ask_claude(query, full_context)
+
+    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
+    display_response = _gap_tag_re.sub("", response).strip()
+    save_message(chat_id, "assistant", display_response)
+
+    try:
+        await progress_msg.edit(display_response)
+    except Exception:
+        await progress_msg.delete()
+        await ctx.channel.send_message(chat_id, display_response)
+
+    _latency_ms = (_time.monotonic() - _msg_start) * 1000
+    try:
+        from learning import record_signal
+        record_signal("response_latency", {"latency_ms": round(_latency_ms, 1), "query_len": len(query)})
+    except Exception:
+        pass
+
+
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """#1: Record explicit user feedback on conversation quality."""
     ctx = _ctx_from_update(update)
@@ -4621,6 +4706,22 @@ async def startup():
 
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
+
+
+    # Start Slack channel if configured
+    try:
+        slack_bot_token = keyring.get_password(KEYRING_SERVICE, "slack-bot-token")
+        slack_app_token = keyring.get_password(KEYRING_SERVICE, "slack-app-token")
+        if slack_bot_token and slack_app_token:
+            from channels.slack import SlackChannel
+            slack_ch = SlackChannel(slack_bot_token, slack_app_token)
+            channel_registry.register("slack", slack_ch)
+            asyncio.create_task(slack_ch.start_socket_mode(handle_message_generic))
+            log.info("Slack channel started")
+        else:
+            log.info("Slack tokens not configured \u2014 skipping Slack channel")
+    except Exception as e:
+        log.warning("Failed to start Slack channel: %s", e)
 
     # Start scheduler
     _setup_scheduler()
