@@ -35,21 +35,34 @@ async def _ollama_embed_text(text: str) -> list[float] | None:
         return None
 
 
+_MAX_EMBED_CHARS = 8000  # nomic-embed-text ~8192 token limit; stay safely under
+
+
 async def _ollama_embed_batch(texts: list[str], batch_size: int = 32) -> list[list[float]]:
     """Generate embeddings for multiple texts via Ollama."""
+    # Truncate any texts that exceed model's context window
+    texts = [t[:_MAX_EMBED_CHARS] if len(t) > _MAX_EMBED_CHARS else t for t in texts]
     all_embeddings = []
-    try:
-        async with httpx.AsyncClient(timeout=EMBED_BATCH_TIMEOUT) as client:
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i : i + batch_size]
+    async with httpx.AsyncClient(timeout=EMBED_BATCH_TIMEOUT) as client:
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            try:
                 response = await client.post(
                     f"{OLLAMA_URL}/api/embed",
                     json={"model": EMBED_MODEL, "input": batch},
                 )
                 response.raise_for_status()
                 all_embeddings.extend(response.json()["embeddings"])
-    except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPError) as e:
-        log.warning("Batch embedding failed at index %d: %s", len(all_embeddings), e)
+            except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPError) as e:
+                log.warning("Batch embedding failed at index %d: %s", i, e)
+                # Fall back to one-at-a-time for this batch
+                for text in batch:
+                    emb = await _ollama_embed_text(text)
+                    if emb:
+                        all_embeddings.append(emb)
+                    else:
+                        # Zero vector as placeholder so indices stay aligned
+                        all_embeddings.append([0.0] * 768)
     return all_embeddings
 
 
