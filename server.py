@@ -290,6 +290,27 @@ def _get_extension_capabilities_text() -> str:
     return ("\n".join(lines) + "\n") if lines else "(none installed)\n"
 
 
+def _get_mcp_tools_text() -> str:
+    """Build a text list of available MCP tools for the system prompt."""
+    try:
+        from mcp_client import MCPClientManager
+        manager = MCPClientManager.get_instance()
+        tools = getattr(manager, "_cached_tools", [])
+        if not tools:
+            return ""
+        lines = []
+        for t in tools:
+            lines.append(f"- {t['server']}.{t['name']} — {t['description']}")
+        return (
+            "\nMCP TOOLS: You can call external tools from connected MCP servers. "
+            "To use one, include this exact tag in your response:\n"
+            "[MCP_CALL: server_name.tool_name | {\"arg\": \"value\"}]\n"
+            "Available tools:\n" + "\n".join(lines) + "\n"
+        )
+    except Exception:
+        return ""
+
+
 LLM_TIMEOUT = 60.0  # seconds — Ollama can be slow on first call
 CLAUDE_TIMEOUT = 30.0
 _ollama_recovery_attempted = False
@@ -468,6 +489,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         "EXTENSIONS: You also have these capabilities via installed extensions:\n"
         f"{_get_extension_capabilities_text()}"
         "If the user asks for something covered by an extension, tell them to use that command.\n\n"
+        f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "AND no extension covers it "
         "(e.g., read Slack messages, post to Twitter, create a Jira ticket, book a flight), "
@@ -3002,6 +3024,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Ask LLM
     response = await ask_claude(query, full_context)
 
+    # MCP tool call interception — if LLM wants to use an MCP tool, execute it
+    _mcp_call_re = re.compile(r'\[MCP_CALL:\s*([\w.-]+)\.([\w.-]+)\s*\|\s*(\{.*?\})\]')
+    _mcp_match = _mcp_call_re.search(response)
+    if _mcp_match:
+        mcp_server = _mcp_match.group(1)
+        mcp_tool = _mcp_match.group(2)
+        try:
+            mcp_args = json.loads(_mcp_match.group(3))
+        except json.JSONDecodeError:
+            mcp_args = {}
+        try:
+            from mcp_client import MCPClientManager
+            mcp_result = await MCPClientManager.get_instance().call_tool(
+                mcp_server, mcp_tool, mcp_args,
+            )
+            # Re-query LLM with the tool result appended
+            tool_context = (
+                f"{full_context}\n\n"
+                f"[MCP tool result from {mcp_server}.{mcp_tool}]\n{mcp_result}"
+            )
+            response = await ask_claude(query, tool_context)
+        except Exception as e:
+            log.warning("MCP tool call %s.%s failed: %s", mcp_server, mcp_tool, e)
+            response = _mcp_call_re.sub("", response).strip()
+
     # Always strip CAPABILITY_GAP tags before user-facing display
     _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
     _gap_match = _gap_tag_re.search(response)
@@ -3148,6 +3195,104 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "comment": comment[:500],
     }, value=score)
     await update.message.reply_text(f"Thanks for the feedback! Recorded as {sentiment}.")
+
+
+async def cmd_mcp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage MCP server connections: list, add, remove, tools, test."""
+    from mcp_client import MCPClientManager, MCPServerConfig
+
+    manager = MCPClientManager.get_instance()
+    args = context.args or []
+    sub = args[0].lower() if args else "list"
+
+    if sub == "list":
+        statuses = manager.get_server_status()
+        if not statuses:
+            await update.message.reply_text(
+                "No MCP servers configured.\n"
+                "Add one with: /mcp add <name> <command> [args...]"
+            )
+            return
+        lines = ["MCP Servers\n"]
+        for s in statuses:
+            icon = "+" if s["status"] == "connected" else "-"
+            lines.append(f"[{icon}] {s['name']} — {s['command']} ({s['status']})")
+        await update.message.reply_text("\n".join(lines))
+
+    elif sub == "add" and len(args) >= 3:
+        name = args[1]
+        command = args[2]
+        cmd_args = args[3:] if len(args) > 3 else []
+        config = MCPServerConfig(name=name, command=command, args=cmd_args)
+        manager.add_config(config)
+        # Try to connect immediately
+        client = await manager.get_client(name)
+        if client and client.is_connected:
+            tools = await client.list_tools()
+            manager._cached_tools = await manager.get_all_tools()
+            await update.message.reply_text(
+                f"MCP server '{name}' added and connected.\n"
+                f"Available tools: {len(tools)}"
+            )
+        else:
+            await update.message.reply_text(
+                f"MCP server '{name}' added but connection failed.\n"
+                f"Check that '{command}' is installed and working."
+            )
+
+    elif sub == "remove" and len(args) >= 2:
+        name = args[1]
+        client = manager._clients.get(name)
+        if client:
+            await client.disconnect()
+            del manager._clients[name]
+        if manager.remove_config(name):
+            manager._cached_tools = await manager.get_all_tools()
+            await update.message.reply_text(f"Removed MCP server '{name}'.")
+        else:
+            await update.message.reply_text(f"MCP server '{name}' not found.")
+
+    elif sub == "tools":
+        tools = await manager.get_all_tools()
+        if not tools:
+            await update.message.reply_text("No MCP tools available. Connect a server first.")
+            return
+        lines = ["MCP Tools\n"]
+        for t in tools:
+            lines.append(f"  {t['server']}.{t['name']} — {t['description'][:80]}")
+        await update.message.reply_text("\n".join(lines))
+
+    elif sub == "test" and len(args) >= 2:
+        name = args[1]
+        client = await manager.get_client(name)
+        if not client:
+            await update.message.reply_text(f"MCP server '{name}' not found.")
+            return
+        if client.is_connected:
+            tools = await client.list_tools()
+            await update.message.reply_text(
+                f"'{name}' is connected.\nTools: {len(tools)}"
+            )
+        else:
+            await client.reconnect()
+            if client.is_connected:
+                tools = await client.list_tools()
+                manager._cached_tools = await manager.get_all_tools()
+                await update.message.reply_text(
+                    f"'{name}' reconnected.\nTools: {len(tools)}"
+                )
+            else:
+                await update.message.reply_text(f"'{name}' connection failed.")
+
+    else:
+        await update.message.reply_text(
+            "Usage:\n"
+            "/mcp — list configured servers\n"
+            "/mcp add <name> <command> [args...]\n"
+            "/mcp remove <name>\n"
+            "/mcp tools — list all available tools\n"
+            "/mcp test <name> — test connection"
+        )
 
 
 async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3414,6 +3559,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("learn", cmd_learn))
     application.add_handler(CommandHandler("feedback", cmd_feedback))
     application.add_handler(CommandHandler("extensions", cmd_extensions))
+    application.add_handler(CommandHandler("mcp", cmd_mcp))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -3447,6 +3593,7 @@ async def start_telegram_bot():
         BotCommand("backup", "Export backup"),
         BotCommand("run", "Run a shell command"),
         BotCommand("learn", "Self-improvement insights"),
+        BotCommand("mcp", "Manage MCP server connections"),
         BotCommand("help", "Show help"),
     ])
 
@@ -3744,6 +3891,17 @@ async def startup():
     except Exception as e:
         log.warning("OAuth token check failed: %s", e)
 
+    # Initialize MCP client manager (connect to configured external MCP servers)
+    try:
+        from mcp_client import MCPClientManager
+        mcp_manager = MCPClientManager.get_instance()
+        await mcp_manager.initialize()
+        mcp_manager._cached_tools = await mcp_manager.get_all_tools()
+        log.info("MCP client manager initialized (%d tools available)",
+                 len(mcp_manager._cached_tools))
+    except Exception as e:
+        log.warning("MCP client initialization failed: %s", e)
+
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
 
@@ -3782,6 +3940,16 @@ async def health():
     report["autonomy_level"] = autonomy.format_level() if autonomy else "not initialized"
     report["scheduled_jobs"] = jobs
     return report
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Clean up resources on server shutdown."""
+    try:
+        from mcp_client import MCPClientManager
+        await MCPClientManager.get_instance().shutdown()
+    except Exception as e:
+        log.warning("MCP client shutdown error: %s", e)
 
 
 if __name__ == "__main__":
