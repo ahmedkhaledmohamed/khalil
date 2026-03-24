@@ -3376,6 +3376,56 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ctx.reply(text)
 
 
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming voice messages — transcribe and process as text."""
+    import tempfile
+    import os
+    from actions.voice import convert_ogg_to_wav, transcribe_voice
+
+    ctx = _ctx_from_update(update)
+
+    if not update.message or not (update.message.voice or update.message.audio):
+        return
+
+    voice = update.message.voice or update.message.audio
+    await ctx.typing()
+
+    # Download voice file
+    ogg_path = tempfile.mktemp(suffix=".ogg")
+    try:
+        tg_file = await context.bot.get_file(voice.file_id)
+        await tg_file.download_to_drive(ogg_path)
+    except Exception as e:
+        log.error("Failed to download voice: %s", e)
+        await ctx.reply("Could not download voice message.")
+        return
+
+    # Convert and transcribe
+    wav_path = await convert_ogg_to_wav(ogg_path)
+    if not wav_path:
+        await ctx.reply("Could not convert voice message (is ffmpeg installed?).")
+        for p in [ogg_path]:
+            if os.path.exists(p):
+                os.unlink(p)
+        return
+
+    text = await transcribe_voice(wav_path)
+
+    # Cleanup temp files
+    for p in [ogg_path, wav_path]:
+        if os.path.exists(p):
+            os.unlink(p)
+
+    if not text:
+        await ctx.reply("Could not transcribe voice message (is Whisper available?).")
+        return
+
+    # Show what was heard, then process as regular text
+    await ctx.reply(f"Heard: \"{text}\"")
+    update.message.text = text
+    await handle_message(update, context)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
     ctx = _ctx_from_update(update)
@@ -4128,6 +4178,7 @@ async def start_telegram_bot():
     _load_extensions(application)
 
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
