@@ -1269,6 +1269,55 @@ def _try_direct_shell_intent(text: str) -> dict | None:
        re.search(r"\bcheck\s+(?:my\s+)?personal\s+(?:email|inbox|mail)\b", text_lower):
         return {"action": "email_search", "account": "personal", "description": "Search personal email"}
 
+    # --- macOS awareness ---
+
+    # Running apps
+    if re.search(r"\b(?:what\s+apps?|which\s+apps?|running\s+apps?|open\s+apps?|active\s+apps?)\b", text_lower) or \
+       re.search(r"\bapps?\s+(?:are\s+)?(?:running|open|active)\b", text_lower):
+        return {"action": "macos_apps", "description": "List running applications"}
+
+    # What am I working on / frontmost app
+    if re.search(r"\b(?:what\s+am\s+i\s+(?:working\s+on|doing)|what'?s?\s+(?:in\s+)?(?:focus|foreground)|frontmost\s+app|active\s+app|current\s+app)\b", text_lower):
+        return {"action": "macos_frontmost", "description": "Show frontmost application"}
+
+    # System info
+    if re.search(r"\b(?:system\s+info|system\s+status|mac\s+(?:info|status|health))\b", text_lower):
+        return {"action": "macos_system_info", "description": "Show system information"}
+
+    # Spotlight file search
+    if re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\b", text_lower):
+        query_match = re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\s+(?:called|named|about)?\s*(.+)$", text_lower)
+        search_q = query_match.group(1).strip() if query_match else text_stripped
+        return {"action": "macos_spotlight", "query": search_q, "description": f"Search files: {search_q}"}
+
+    # Browser tabs
+    if re.search(r"\b(?:what\s+tabs?|open\s+tabs?|browser\s+tabs?|safari\s+tabs?|chrome\s+tabs?)\b", text_lower):
+        browser = "Google Chrome" if "chrome" in text_lower else "Safari"
+        return {"action": "macos_browser_tabs", "browser": browser, "description": f"List {browser} tabs"}
+
+    # --- Web search ---
+
+    if re.search(r"\b(?:search\s+(?:the\s+)?(?:web|internet|online)|google|look\s+up|search\s+for)\b", text_lower):
+        query_match = re.search(r"\b(?:search\s+(?:the\s+)?(?:web|internet|online)\s+for|google|look\s+up|search\s+for)\s+(.+)$", text_lower)
+        search_q = query_match.group(1).strip() if query_match else text_stripped
+        return {"action": "web_search", "query": search_q, "description": f"Web search: {search_q}"}
+
+    # --- iMessage ---
+
+    # Recent texts from someone
+    m = re.search(r"\b(?:what\s+did|texts?\s+from|messages?\s+from|imessages?\s+from)\s+(.+?)(?:\s+(?:text|send|message|say))?\s*(?:\bme\b)?\s*\??$", text_lower)
+    if m:
+        contact = text_stripped[m.start(1):m.end(1)].strip()
+        return {"action": "imessage_read", "contact": contact, "description": f"Read messages from {contact}"}
+
+    if re.search(r"\b(?:recent\s+(?:texts?|messages?|imessages?)|who\s+texted|who\s+messaged)\b", text_lower):
+        return {"action": "imessage_recent", "description": "Show recent messages"}
+
+    if re.search(r"\bsearch\s+(?:my\s+)?(?:texts?|messages?|imessages?)\b", text_lower):
+        query_match = re.search(r"\bsearch\s+(?:my\s+)?(?:texts?|messages?|imessages?)\s+(?:for\s+)?(.+)$", text_lower)
+        search_q = query_match.group(1).strip() if query_match else text_stripped
+        return {"action": "imessage_search", "query": search_q, "description": f"Search messages: {search_q}"}
+
     return None
 
 
@@ -1743,6 +1792,126 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
             reply_markup=approve_deny_keyboard(),
             parse_mode="Markdown",
         )
+        return True
+
+    # --- macOS awareness ---
+
+    elif action == "macos_apps":
+        from actions.macos import get_running_apps
+        apps = await get_running_apps()
+        if apps:
+            text = f"🖥 Running Apps ({len(apps)}):\n" + "\n".join(f"  • {a}" for a in sorted(apps))
+        else:
+            text = "⚠️ Couldn't retrieve running apps."
+        await update.message.reply_text(text)
+        return True
+
+    elif action == "macos_frontmost":
+        from actions.macos import get_frontmost_app, get_active_window_title
+        app = await get_frontmost_app()
+        title = await get_active_window_title()
+        if app:
+            text = f"🖥 Frontmost: {app}"
+            if title:
+                text += f"\n📄 Window: {title}"
+        else:
+            text = "⚠️ Couldn't determine frontmost app."
+        await update.message.reply_text(text)
+        return True
+
+    elif action == "macos_system_info":
+        from actions.macos import get_system_info
+        info = await get_system_info()
+        lines = ["💻 System Info:"]
+        if "battery_percent" in info:
+            charge = "⚡ charging" if info.get("battery_charging") else "🔋"
+            lines.append(f"  Battery: {info['battery_percent']}% {charge}")
+        if "storage_available" in info:
+            lines.append(f"  Storage: {info['storage_used']} used / {info['storage_total']} total ({info['storage_available']} free)")
+        if "memory_total_gb" in info:
+            lines.append(f"  Memory: {info['memory_total_gb']} GB")
+        if "cpu_brand" in info:
+            lines.append(f"  CPU: {info['cpu_brand']}")
+        await update.message.reply_text("\n".join(lines) if len(lines) > 1 else "⚠️ Couldn't retrieve system info.")
+        return True
+
+    elif action == "macos_spotlight":
+        from actions.macos import spotlight_search
+        query = intent.get("query", "")
+        if not query:
+            return False
+        results = await spotlight_search(query)
+        if results:
+            lines = [f"🔍 Spotlight: {len(results)} results for \"{query}\":\n"]
+            for r in results:
+                size_str = ""
+                if r.get("size"):
+                    kb = r["size"] / 1024
+                    size_str = f" ({kb:.0f} KB)" if kb < 1024 else f" ({kb/1024:.1f} MB)"
+                lines.append(f"  📄 {r['name']}{size_str}\n     {r['path']}")
+            text = "\n".join(lines)
+        else:
+            text = f"🔍 No files found for \"{query}\"."
+        await update.message.reply_text(text[:4000])
+        return True
+
+    elif action == "macos_browser_tabs":
+        from actions.macos import get_browser_tabs
+        browser = intent.get("browser", "Safari")
+        tabs = await get_browser_tabs(browser)
+        if tabs:
+            lines = [f"🌐 {browser} Tabs ({len(tabs)}):"]
+            for t in tabs[:20]:
+                lines.append(f"  • {t['title'][:60]}\n    {t['url']}")
+            text = "\n".join(lines)
+        else:
+            text = f"🌐 No tabs found in {browser} (or {browser} not running)."
+        await update.message.reply_text(text[:4000])
+        return True
+
+    # --- Web search ---
+
+    elif action == "web_search":
+        from actions.web import web_search, format_search_results
+        query = intent.get("query", "")
+        if not query:
+            return False
+        await update.message.reply_text(f"🔍 Searching: {query}...")
+        results = await web_search(query)
+        await update.message.reply_text(
+            format_search_results(results),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return True
+
+    # --- iMessage ---
+
+    elif action == "imessage_read":
+        from actions.imessage import get_recent_messages, format_messages
+        contact = intent.get("contact")
+        messages = await get_recent_messages(contact=contact, limit=15)
+        header = f"💬 Messages from {contact}:" if contact else "💬 Recent messages:"
+        await update.message.reply_text(f"{header}\n\n{format_messages(messages)}")
+        return True
+
+    elif action == "imessage_recent":
+        from actions.imessage import get_recent_contacts
+        contacts = await get_recent_contacts(limit=15)
+        if contacts:
+            text = "💬 Recent contacts:\n" + "\n".join(f"  • {c}" for c in contacts)
+        else:
+            text = "💬 No recent contacts found (check Full Disk Access permission)."
+        await update.message.reply_text(text)
+        return True
+
+    elif action == "imessage_search":
+        from actions.imessage import search_messages, format_messages
+        query = intent.get("query", "")
+        if not query:
+            return False
+        messages = await search_messages(query, limit=10)
+        await update.message.reply_text(f"💬 Messages matching \"{query}\":\n\n{format_messages(messages)}")
         return True
 
     return False

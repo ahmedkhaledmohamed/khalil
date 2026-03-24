@@ -60,6 +60,9 @@ MAX_CONTEXT_TOKENS = 8000
 # Timezone
 TIMEZONE = "America/Toronto"
 
+# Web search
+SEARCH_PROVIDER = "duckduckgo"  # no API key needed
+
 # Telegram
 TELEGRAM_POLL_TIMEOUT = 30
 
