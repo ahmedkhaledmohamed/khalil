@@ -4045,6 +4045,89 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # M11: Pre-meeting brief — check every 5 minutes for upcoming meetings
+    async def _meeting_brief_job():
+        if not _can_send():
+            return
+        from state.calendar_provider import get_next_meeting
+        from actions.meetings import should_send_meeting_brief, build_meeting_context
+
+        event = await get_next_meeting(within_minutes=20)
+        if not event:
+            return
+
+        # Only trigger for 13-17 min window (avoids repeated sends)
+        minutes_until = event.get("minutes_until", 0)
+        if not (13 <= minutes_until <= 17):
+            return
+
+        if not should_send_meeting_brief(event):
+            return
+
+        try:
+            brief = await build_meeting_context(event)
+            await channel.send_message(
+                OWNER_CHAT_ID,
+                f"Meeting in {minutes_until} min:\n\n{brief}",
+            )
+            log.info("Pre-meeting brief sent for: %s", event.get("title"))
+        except Exception as e:
+            log.error("Failed to send meeting brief: %s", e)
+
+    scheduler.add_job(
+        _meeting_brief_job,
+        "interval",
+        minutes=5,
+        id="meeting_brief",
+        name="M11: Pre-Meeting Brief",
+        replace_existing=True,
+    )
+
+    # M11: Post-meeting follow-up — check every 5 minutes for recently ended meetings
+    async def _meeting_followup_job():
+        if not _can_send():
+            return
+        from actions.meetings import (
+            get_recently_ended_meetings, make_meeting_key,
+            should_prompt_followup, record_followup_prompt,
+            is_standup_meeting,
+        )
+
+        ended = get_recently_ended_meetings()
+        for event in ended:
+            if is_standup_meeting(event.get("title", "")):
+                continue
+            key = make_meeting_key(event)
+            if not should_prompt_followup(key):
+                continue
+
+            record_followup_prompt(key)
+            title = event.get("title", "(no title)")
+            attendees = event.get("attendees", [])
+            names = ", ".join(
+                a.split("@")[0].replace(".", " ").title()
+                for a in attendees[:3]
+            )
+            if len(attendees) > 3:
+                names += f" +{len(attendees) - 3}"
+
+            await channel.send_message(
+                OWNER_CHAT_ID,
+                f"Meeting '{title}' with {names} just ended.\n"
+                "Any action items? Reply here and I'll track them.\n"
+                "(I'll stop asking after 30 min.)",
+            )
+            log.info("Post-meeting follow-up prompt sent for: %s", title)
+
+    scheduler.add_job(
+        _meeting_followup_job,
+        "interval",
+        minutes=5,
+        id="meeting_followup",
+        name="M11: Post-Meeting Follow-up",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
@@ -4056,6 +4139,9 @@ async def startup():
 
     # Initialize database
     db_conn = init_db()
+    # M11: Create meeting intelligence tables
+    from actions.meetings import ensure_tables as _ensure_meeting_tables
+    _ensure_meeting_tables(db_conn)
     autonomy = AutonomyController(db_conn)
     # Share DB connection with learning module
     from learning import set_conn as set_learning_conn
