@@ -448,21 +448,26 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
 
     Returns an error message (not raises) if the LLM is unreachable.
     """
-    # Inject learned preferences into system prompt
+    # M9: Inject all active learned preferences into system prompt
     style_hint = ""
     try:
-        from learning import get_preference
-        response_style = get_preference("response_style")
-        if response_style:
-            parts = []
-            if response_style.get("length"):
-                parts.append(f"Keep responses {response_style['length']}.")
-            if response_style.get("format"):
-                parts.append(f"Prefer {response_style['format']} format.")
-            if parts:
-                style_hint = "\n" + " ".join(parts) + "\n"
+        from learning import get_active_response_preferences
+        style_hint = get_active_response_preferences()
     except Exception:
-        pass  # Preferences not available yet (DB not initialized)
+        # Fallback to legacy single-preference approach
+        try:
+            from learning import get_preference
+            response_style = get_preference("response_style")
+            if response_style:
+                parts = []
+                if response_style.get("length"):
+                    parts.append(f"Keep responses {response_style['length']}.")
+                if response_style.get("format"):
+                    parts.append(f"Prefer {response_style['format']} format.")
+                if parts:
+                    style_hint = "\n" + " ".join(parts) + "\n"
+        except Exception:
+            pass  # Preferences not available yet (DB not initialized)
 
     # Temporal context — inject current date/time into every LLM call
     from datetime import datetime as _dt
@@ -1784,6 +1789,12 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if context.args:
         mode_name = context.args[0].lower()
+
+        # M9: /mode patterns — show learned approval patterns
+        if mode_name == "patterns":
+            await update.message.reply_text(autonomy.format_patterns())
+            return
+
         level_map = {
             "supervised": AutonomyLevel.SUPERVISED,
             "guided": AutonomyLevel.GUIDED,
@@ -1791,7 +1802,7 @@ async def cmd_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
         }
         if mode_name not in level_map:
             await update.message.reply_text(
-                f"Unknown mode. Options: {', '.join(level_map.keys())}"
+                f"Unknown mode. Options: {', '.join(level_map.keys())}, patterns"
             )
             return
         autonomy.set_level(level_map[mode_name])
@@ -2925,6 +2936,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     save_message(chat_id, "user", query)
 
+    # M9: Record activity timing for smart proactive alerts
+    try:
+        from scheduler.proactive import record_activity_timing
+        record_activity_timing("user_active")
+    except Exception:
+        pass
+
     # Track user corrections for self-healing
     _CORRECTION_PATTERNS = [
         r"^no[,.]?\s+i\s+(?:meant|want)", r"^that'?s\s+not\s+what",
@@ -3827,6 +3845,28 @@ def _setup_scheduler():
                 _refl_micro_hour = int(row[0])
         except Exception:
             pass
+
+    # M9: Weekly preference decay — run before reflection
+    async def _preference_decay_job():
+        try:
+            from learning import decay_preferences
+            archived = decay_preferences()
+            if archived and _can_send():
+                names = ", ".join(a["key"] for a in archived[:5])
+                await channel.send_message(
+                    OWNER_CHAT_ID,
+                    f"🗑 Archived {len(archived)} stale preference(s): {names}"
+                )
+        except Exception as e:
+            log.warning("Preference decay failed: %s", e)
+
+    scheduler.add_job(
+        _preference_decay_job,
+        CronTrigger(day_of_week="sun", hour=20, minute=30, timezone=TIMEZONE),
+        id="preference_decay",
+        name="M9: Preference Decay",
+        replace_existing=True,
+    )
 
     # Weekly reflection (configurable day/hour)
     async def _weekly_reflection_job():

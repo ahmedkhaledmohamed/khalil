@@ -1816,3 +1816,203 @@ def build_entity_index(days: int = 7) -> dict[str, list[dict]]:
             record_signal("entity_mention", {"type": etype, "value": value, "count": count})
 
     return index
+
+
+# --- M9: Approval Pattern Tracking (Task 9.1) ---
+
+AUTO_ESCALATE_THRESHOLD = 5
+
+
+def _normalize_command_pattern(action_type: str, payload: dict | None) -> str:
+    """Extract a generalizable pattern from an action's payload."""
+    if not payload:
+        return action_type
+    cmd = payload.get("command", "")
+    if cmd and action_type.startswith("shell"):
+        parts = cmd.strip().split()
+        if len(parts) >= 2:
+            return f"{parts[0]} {parts[1]} *"
+        return parts[0] if parts else action_type
+    return action_type
+
+
+def record_approval_pattern(action_type: str, payload: dict | None, approved: bool):
+    """Record an approval or denial for a command pattern."""
+    conn = _get_conn()
+    pattern = _normalize_command_pattern(action_type, payload)
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "INSERT INTO approval_patterns "
+        "(action_type, command_pattern, approved_count, denied_count, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(action_type, command_pattern) DO UPDATE SET "
+        "approved_count = approved_count + ?, denied_count = denied_count + ?, updated_at = ?",
+        (action_type, pattern,
+         1 if approved else 0, 0 if approved else 1, now, now,
+         1 if approved else 0, 0 if approved else 1, now),
+    )
+    conn.commit()
+    log.info("Approval pattern recorded: %s/%s approved=%s", action_type, pattern, approved)
+
+
+def check_auto_escalation(action_type: str, payload: dict | None) -> bool:
+    """Check if a pattern qualifies for auto-approval (>= 5 approvals, 0 denials).
+
+    Never escalates DANGEROUS actions or hard guardrails.
+    """
+    from config import HARD_GUARDRAILS, ActionType
+    if action_type in HARD_GUARDRAILS:
+        return False
+    from autonomy import ACTION_RULES
+    if ACTION_RULES.get(action_type) == ActionType.DANGEROUS:
+        return False
+    conn = _get_conn()
+    pattern = _normalize_command_pattern(action_type, payload)
+    row = conn.execute(
+        "SELECT approved_count, denied_count FROM approval_patterns "
+        "WHERE action_type = ? AND command_pattern = ?",
+        (action_type, pattern),
+    ).fetchone()
+    if not row:
+        return False
+    approved = row["approved_count"] if isinstance(row, sqlite3.Row) else row[0]
+    denied = row["denied_count"] if isinstance(row, sqlite3.Row) else row[1]
+    return approved >= AUTO_ESCALATE_THRESHOLD and denied == 0
+
+
+def get_approval_patterns(limit: int = 20) -> list[dict]:
+    """Get all learned approval patterns for /mode patterns display."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT action_type, command_pattern, approved_count, denied_count, "
+        "auto_tier, updated_at FROM approval_patterns ORDER BY approved_count DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    result = []
+    for r in rows:
+        ac = r["approved_count"] if isinstance(r, sqlite3.Row) else r[2]
+        dc = r["denied_count"] if isinstance(r, sqlite3.Row) else r[3]
+        result.append({
+            "action_type": r["action_type"] if isinstance(r, sqlite3.Row) else r[0],
+            "command_pattern": r["command_pattern"] if isinstance(r, sqlite3.Row) else r[1],
+            "approved_count": ac,
+            "denied_count": dc,
+            "auto_tier": r["auto_tier"] if isinstance(r, sqlite3.Row) else r[4],
+            "auto_approve": ac >= AUTO_ESCALATE_THRESHOLD and dc == 0,
+            "updated_at": r["updated_at"] if isinstance(r, sqlite3.Row) else r[5],
+        })
+    return result
+
+
+# --- M9: Confidence Decay (Task 9.4) ---
+
+CONFIDENCE_DECAY_PER_WEEK = 0.05
+CONFIDENCE_ARCHIVE_THRESHOLD = 0.2
+
+
+def decay_preferences() -> list[dict]:
+    """Apply weekly confidence decay. Stale preferences (< 0.2) are archived."""
+    conn = _get_conn()
+    one_week_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S")
+    prefs = conn.execute(
+        "SELECT key, value, confidence, updated_at FROM learned_preferences WHERE updated_at < ?",
+        (one_week_ago,),
+    ).fetchall()
+    archived = []
+    for p in prefs:
+        key = p["key"] if isinstance(p, sqlite3.Row) else p[0]
+        value = p["value"] if isinstance(p, sqlite3.Row) else p[1]
+        confidence = p["confidence"] if isinstance(p, sqlite3.Row) else p[2]
+        updated_at = p["updated_at"] if isinstance(p, sqlite3.Row) else p[3]
+        try:
+            last_update = datetime.strptime(updated_at, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            last_update = datetime.utcnow() - timedelta(days=7)
+        weeks_stale = max(1, (datetime.utcnow() - last_update).days // 7)
+        new_confidence = max(0.0, confidence - CONFIDENCE_DECAY_PER_WEEK * weeks_stale)
+        if new_confidence < CONFIDENCE_ARCHIVE_THRESHOLD:
+            record_signal("preference_archived", {
+                "key": key, "value": value, "final_confidence": new_confidence,
+            })
+            conn.execute("DELETE FROM learned_preferences WHERE key = ?", (key,))
+            archived.append({
+                "key": key,
+                "value": json.loads(value) if isinstance(value, str) else value,
+                "final_confidence": round(new_confidence, 3),
+            })
+            log.info("Preference archived (stale): %s (confidence=%.3f)", key, new_confidence)
+        else:
+            conn.execute(
+                "UPDATE learned_preferences SET confidence = ? WHERE key = ?",
+                (round(new_confidence, 3), key),
+            )
+    conn.commit()
+    if archived:
+        log.info("Preference decay: %d archived, %d decayed", len(archived), len(prefs) - len(archived))
+    return archived
+
+
+def boost_preference_from_correction(key: str, boost: float = 0.2):
+    """Boost confidence of a preference when a user correction reinforces it."""
+    conn = _get_conn()
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    row = conn.execute(
+        "SELECT confidence FROM learned_preferences WHERE key = ?", (key,)
+    ).fetchone()
+    if row:
+        old_conf = row["confidence"] if isinstance(row, sqlite3.Row) else row[0]
+        new_conf = min(1.0, old_conf + boost)
+        conn.execute(
+            "UPDATE learned_preferences SET confidence = ?, updated_at = ? WHERE key = ?",
+            (round(new_conf, 3), now, key),
+        )
+        conn.commit()
+        log.info("Preference boosted: %s %.2f -> %.2f (correction)", key, old_conf, new_conf)
+
+
+# --- M9: Preference-Driven Response Adaptation (Task 9.2) ---
+
+def get_active_response_preferences() -> str:
+    """Query all active preferences and format for system prompt injection."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT key, value, confidence FROM learned_preferences "
+        "WHERE confidence >= 0.3 ORDER BY confidence DESC"
+    ).fetchall()
+    if not rows:
+        return ""
+    parts = []
+    for r in rows:
+        key = r["key"] if isinstance(r, sqlite3.Row) else r[0]
+        value = r["value"] if isinstance(r, sqlite3.Row) else r[1]
+        try:
+            parsed = json.loads(value) if isinstance(value, str) else value
+        except (json.JSONDecodeError, TypeError):
+            parsed = value
+        if key == "response_style":
+            if isinstance(parsed, dict):
+                if parsed.get("format"):
+                    parts.append(f"Prefer {parsed['format']} format.")
+                if parsed.get("length"):
+                    parts.append(f"Keep responses {parsed['length']}.")
+        elif key == "communication_style":
+            parts.append(f"Communication style: {parsed}.")
+        elif key == "detail_level":
+            parts.append(f"Detail level: {parsed}.")
+        elif key.startswith("expertise_"):
+            domain = key.replace("expertise_", "").replace("_", " ")
+            parts.append(f"Ahmed has expertise in {domain} -- skip basic explanations.")
+        elif key.startswith("skip_explain_"):
+            topic = key.replace("skip_explain_", "").replace("_", " ")
+            parts.append(f"Ahmed knows {topic} -- don't explain basics.")
+        elif key == "preferred_format":
+            parts.append(f"Prefer {parsed} format for responses.")
+        elif key.startswith("pref_"):
+            parts.append(str(parsed))
+    if not parts:
+        return ""
+    return (
+        "\nLEARNED PREFERENCES (from past interactions):\n"
+        + "\n".join(f"- {p}" for p in parts)
+        + "\n"
+    )

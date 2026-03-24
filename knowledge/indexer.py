@@ -139,6 +139,32 @@ def init_db() -> sqlite3.Connection:
 
         CREATE INDEX IF NOT EXISTS idx_recurring_status ON recurring_reminders(status);
         CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring_reminders(next_fire_at);
+
+        -- M9: Adaptive autonomy — learned approval patterns
+        CREATE TABLE IF NOT EXISTS approval_patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,
+            command_pattern TEXT NOT NULL,
+            approved_count INTEGER DEFAULT 0,
+            denied_count INTEGER DEFAULT 0,
+            auto_tier TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(action_type, command_pattern)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_approval_patterns_action ON approval_patterns(action_type);
+
+        -- M9: Adaptive autonomy — activity timing signals
+        CREATE TABLE IF NOT EXISTS activity_timing (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_type TEXT NOT NULL,
+            hour INTEGER NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_activity_timing ON activity_timing(signal_type, day_of_week, hour);
     """)
 
     # Create virtual table for vector search

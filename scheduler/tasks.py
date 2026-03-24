@@ -52,6 +52,15 @@ async def send_morning_brief(channel: "Channel", chat_id: int, ask_claude_fn):
     """Generate and send morning brief."""
     from scheduler.digests import generate_morning_brief
 
+    # M9: Smart timing — delay if Ahmed isn't typically active at this hour
+    try:
+        from scheduler.proactive import is_good_time_for_alert
+        if not is_good_time_for_alert("morning_brief"):
+            log.info("Morning brief deferred: not a good time based on learned patterns")
+            return
+    except Exception:
+        pass  # Fall through to default behavior
+
     try:
         brief = await generate_morning_brief(ask_claude_fn)
         await channel.send_message(chat_id, brief)

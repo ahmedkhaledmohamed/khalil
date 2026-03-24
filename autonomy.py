@@ -213,7 +213,7 @@ class AutonomyController:
                 break
         return True, ""
 
-    def needs_approval(self, action_name: str) -> bool:
+    def needs_approval(self, action_name: str, payload: dict | None = None) -> bool:
         """Check if an action needs user approval given current autonomy level."""
         action_type = self.classify_action(action_name)
         effective_level = self._effective_level()
@@ -237,6 +237,17 @@ class AutonomyController:
         else:  # AUTONOMOUS
             needs = False
             reason = "autonomous_mode"
+
+        # M9: Auto-escalation from learned approval patterns
+        if needs and reason not in ("hard_guardrail", "dangerous_action"):
+            try:
+                from learning import check_auto_escalation
+                if check_auto_escalation(action_name, payload):
+                    needs = False
+                    reason = "learned_auto_approve"
+                    log.info("Auto-approved via learned pattern: %s", action_name)
+            except Exception:
+                pass  # Table may not exist yet
 
         # #8: Decision journal — log every autonomy decision with reasoning
         try:
@@ -300,8 +311,9 @@ class AutonomyController:
         self.log_audit(action["action_type"], action["description"], action.get("payload"), "approved")
         # Record signal for self-improvement reflection
         try:
-            from learning import record_signal
+            from learning import record_signal, record_approval_pattern
             record_signal("action_decision", {"action_type": action["action_type"], "decision": "approved"}, value=1.0)
+            record_approval_pattern(action["action_type"], action.get("payload"), approved=True)
         except Exception:
             pass
         return action
@@ -321,8 +333,13 @@ class AutonomyController:
             self.log_audit(row[0], row[1], result="denied")
             # Record signal for self-improvement reflection
             try:
-                from learning import record_signal
+                from learning import record_signal, record_approval_pattern
                 record_signal("action_decision", {"action_type": row[0], "decision": "denied"}, value=0.0)
+                payload_row = self.conn.execute(
+                    "SELECT payload FROM pending_actions WHERE id = ?", (action_id,)
+                ).fetchone()
+                _payload = json.loads(payload_row[0]) if payload_row and payload_row[0] else None
+                record_approval_pattern(row[0], _payload, approved=False)
             except Exception:
                 pass
         return result.rowcount > 0
@@ -445,6 +462,27 @@ class AutonomyController:
             AutonomyLevel.AUTONOMOUS: "⚡",
         }
         return f"{icons[self._level]} {self._level.name.title()} (Level {self._level.value})"
+
+
+    def format_patterns(self) -> str:
+        """Format learned approval patterns for /mode patterns display."""
+        try:
+            from learning import get_approval_patterns, AUTO_ESCALATE_THRESHOLD
+            patterns = get_approval_patterns()
+        except Exception:
+            return "No learned patterns yet."
+
+        if not patterns:
+            return "No learned patterns yet. Patterns are recorded as you approve/deny actions."
+
+        lines = [f"Learned Approval Patterns (auto-approve threshold: {AUTO_ESCALATE_THRESHOLD}):"]
+        for p in patterns:
+            status = "AUTO" if p["auto_approve"] else "LEARNING"
+            lines.append(
+                f"  [{status}] {p['action_type']}/{p['command_pattern']}"
+                f" | Approved: {p['approved_count']} | Denied: {p['denied_count']}"
+            )
+        return chr(10).join(lines)
 
 
 def generate_confirmation_code() -> str:
