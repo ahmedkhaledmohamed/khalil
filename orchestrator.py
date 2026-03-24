@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from config import DB_PATH
+from config import DB_PATH, SWARM_ENABLED
 
 log = logging.getLogger("khalil.orchestrator")
 
@@ -190,33 +190,64 @@ async def execute_plan(
         if not ready:
             break  # No more steps can execute
 
-        # Execute ready steps in parallel
-        async def _run_step(step: TaskStep):
-            step_num = steps.index(step) + 1
-            step.status = "running"
-            try:
-                await channel.send_message(
-                    chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
-                )
-                step_result = await execute_step_fn(step)
-                step.status = "completed"
-                step.result = step_result
-                result.completed_count += 1
-                await channel.send_message(
-                    chat_id, f"✅ Step {step_num}/{total}: {step.description}"
-                )
-            except Exception as e:
-                step.status = "failed"
-                step.error = str(e)[:500]
-                result.failed_count += 1
-                await channel.send_message(
-                    chat_id, f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}"
-                )
-                # Block all downstream steps
-                _block_downstream(step.id, step_map, pending_deps, result)
+        # Swarm path: when 3+ independent steps are ready, use swarm coordinator
+        if len(ready) >= 3 and SWARM_ENABLED:
+            from agents.coordinator import SubAgent, run_swarm
+            sub_agents = [
+                SubAgent(name=s.id, task=s.description)
+                for s in ready
+            ]
+            await channel.send_message(
+                chat_id,
+                f"🐝 Running {len(ready)} steps as swarm...",
+            )
+            swarm_result = await run_swarm(sub_agents)
+            for step in ready:
+                step_num = steps.index(step) + 1
+                if step.id in swarm_result.results:
+                    step.result = swarm_result.results[step.id]
+                    step.status = "completed"
+                    result.completed_count += 1
+                    await channel.send_message(
+                        chat_id, f"✅ Step {step_num}/{total}: {step.description}"
+                    )
+                elif step.id in swarm_result.errors:
+                    step.error = swarm_result.errors[step.id]
+                    step.status = "failed"
+                    result.failed_count += 1
+                    await channel.send_message(
+                        chat_id,
+                        f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}",
+                    )
+                    _block_downstream(step.id, step_map, pending_deps, result)
+        else:
+            # Standard path: execute ready steps in parallel
+            async def _run_step(step: TaskStep):
+                step_num = steps.index(step) + 1
+                step.status = "running"
+                try:
+                    await channel.send_message(
+                        chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
+                    )
+                    step_result = await execute_step_fn(step)
+                    step.status = "completed"
+                    step.result = step_result
+                    result.completed_count += 1
+                    await channel.send_message(
+                        chat_id, f"✅ Step {step_num}/{total}: {step.description}"
+                    )
+                except Exception as e:
+                    step.status = "failed"
+                    step.error = str(e)[:500]
+                    result.failed_count += 1
+                    await channel.send_message(
+                        chat_id, f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}"
+                    )
+                    # Block all downstream steps
+                    _block_downstream(step.id, step_map, pending_deps, result)
 
-        tasks = [_run_step(s) for s in ready]
-        await asyncio.gather(*tasks)
+            tasks = [_run_step(s) for s in ready]
+            await asyncio.gather(*tasks)
 
         # Remove completed/failed steps from dependency lists of remaining steps
         done_ids = {s.id for s in steps if s.status in ("completed", "failed", "blocked")}

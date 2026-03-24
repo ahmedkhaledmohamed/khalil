@@ -7,11 +7,9 @@ import time
 
 import anthropic
 
-from config import CLAUDE_MODEL, KEYRING_SERVICE
+from config import CLAUDE_MODEL, KEYRING_SERVICE, MAX_CONCURRENT_AGENTS
 
 log = logging.getLogger("khalil.agents")
-
-MAX_CONCURRENT_AGENTS = 3
 
 _SUB_AGENT_SYSTEM = (
     "You are a sub-agent for Khalil, a personal AI assistant. "
