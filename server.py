@@ -3906,6 +3906,26 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # State-aware proactive alerts — every 30 min during work hours (M-F 8AM-6PM)
+    async def _state_aware_alerts_job():
+        if not _can_send():
+            return
+        from scheduler.state_alerts import run_state_aware_checks
+        findings = await run_state_aware_checks()
+        if findings:
+            text = "🔔 State Alert:\n\n" + "\n\n".join(findings)
+            await channel.send_message(OWNER_CHAT_ID, text)
+            log.info("State-aware alert sent: %d findings", len(findings))
+
+    scheduler.add_job(
+        _state_aware_alerts_job,
+        "interval",
+        minutes=30,
+        id="state_aware_alerts",
+        name="State-Aware Alerts",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
