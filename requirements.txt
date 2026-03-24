@@ -41,5 +41,11 @@ requests>=2.31.0
 slack-sdk>=3.27.0
 slack-bolt>=1.18.0
 
+# Browser automation
+playwright>=1.40.0
+
+# Discord (bidirectional channel)
+discord.py>=2.3.0
+
 # Testing
 pytest>=8.0.0

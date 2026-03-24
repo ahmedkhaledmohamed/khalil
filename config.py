@@ -89,6 +89,10 @@ SANDBOX_TIMEOUT = 15
 SWARM_ENABLED = True
 MAX_CONCURRENT_AGENTS = 3
 
+# Voice interaction
+VOICE_REPLY_ENABLED = False  # opt-in: reply with voice audio by default
+TTS_VOICE = "Samantha"  # macOS say voice
+
 
 class AutonomyLevel(Enum):
     SUPERVISED = 1   # Ask before every action
@@ -112,6 +116,7 @@ HARD_GUARDRAILS = [
     "family_member_data_action",
     "generate_capability",
     "shell_dangerous",
+    "browser_financial_site",
 ]
 
 # Privacy: sensitive query patterns that should NOT be sent raw to Claude API

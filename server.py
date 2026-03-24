@@ -17,7 +17,8 @@ import httpx
 import keyring
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -29,7 +30,7 @@ from telegram.ext import (
 )
 
 import channels.registry as channel_registry
-from channels import ActionButton, Channel, SentMessage
+from channels import ActionButton, Channel, ChannelType, SentMessage
 from channels.message_context import MessageContext
 from channels.telegram import TelegramChannel
 
@@ -1340,6 +1341,26 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         search_q = query_match.group(1).strip() if query_match else text_stripped
         return {"action": "imessage_search", "query": search_q, "description": f"Search messages: {search_q}"}
 
+    # --- Browser automation ---
+
+    # "go to <url> and screenshot" / "navigate to <url> and capture"
+    m = re.search(r'\b(?:go\s+to|navigate\s+to|open)\s+(https?://\S+)\s+and\s+(?:screenshot|capture)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_screenshot", "url": url, "description": "Screenshot webpage"}
+
+    # "extract text from <url>" / "scrape <url>"
+    m = re.search(r'\b(?:extract|scrape|get)\s+(?:text|data|content)\s+(?:from|at)\s+(https?://\S+)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_extract", "url": url, "description": "Extract page text"}
+
+    # "screenshot the page at <url>"
+    m = re.search(r'\bscreenshot\s+(?:the\s+)?(?:page|site|website)\s+(?:at\s+)?(https?://\S+)', text_lower)
+    if m:
+        url = text_stripped[m.start(1):m.end(1)]
+        return {"action": "browser_screenshot", "url": url, "description": "Screenshot webpage"}
+
     return None
 
 
@@ -1799,6 +1820,48 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}{guardian_note}\n\n"
             f"{autonomy.format_level()}",
             approve_deny_keyboard(), parse_mode="Markdown")
+        return True
+
+    # --- Browser automation ---
+
+    elif action == "browser_navigate":
+        url = intent.get("url", "")
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        screenshot_path, title = await navigate_and_screenshot(url)
+        if screenshot_path:
+            await ctx.reply_photo(screenshot_path, caption=f"Page: {title}\nURL: {url}")
+        else:
+            await ctx.reply(f"Navigation result: {title}")
+        return True
+
+    elif action == "browser_extract":
+        url = intent.get("url", "")
+        selector = intent.get("selector")
+        from actions.browser import extract_page_text, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        text = await extract_page_text(url, selector)
+        await ctx.reply(text[:4000])
+        return True
+
+    elif action == "browser_screenshot":
+        url = intent.get("url", "")
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        path, title = await navigate_and_screenshot(url)
+        if path:
+            await ctx.reply_photo(path, caption=title)
+        else:
+            await ctx.reply(title)
         return True
 
     # --- macOS awareness ---
@@ -3376,6 +3439,56 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ctx.reply(text)
 
 
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming voice messages — transcribe and process as text."""
+    import tempfile
+    import os
+    from actions.voice import convert_ogg_to_wav, transcribe_voice
+
+    ctx = _ctx_from_update(update)
+
+    if not update.message or not (update.message.voice or update.message.audio):
+        return
+
+    voice = update.message.voice or update.message.audio
+    await ctx.typing()
+
+    # Download voice file
+    ogg_path = tempfile.mktemp(suffix=".ogg")
+    try:
+        tg_file = await context.bot.get_file(voice.file_id)
+        await tg_file.download_to_drive(ogg_path)
+    except Exception as e:
+        log.error("Failed to download voice: %s", e)
+        await ctx.reply("Could not download voice message.")
+        return
+
+    # Convert and transcribe
+    wav_path = await convert_ogg_to_wav(ogg_path)
+    if not wav_path:
+        await ctx.reply("Could not convert voice message (is ffmpeg installed?).")
+        for p in [ogg_path]:
+            if os.path.exists(p):
+                os.unlink(p)
+        return
+
+    text = await transcribe_voice(wav_path)
+
+    # Cleanup temp files
+    for p in [ogg_path, wav_path]:
+        if os.path.exists(p):
+            os.unlink(p)
+
+    if not text:
+        await ctx.reply("Could not transcribe voice message (is Whisper available?).")
+        return
+
+    # Show what was heard, then process as regular text
+    await ctx.reply(f"Heard: \"{text}\"")
+    update.message.text = text
+    await handle_message(update, context)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
     ctx = _ctx_from_update(update)
@@ -3732,11 +3845,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_message_generic(ctx: MessageContext):
-    """Channel-agnostic message handler for non-Telegram channels (Slack, etc.).
+    """Channel-agnostic message handler for non-Telegram channels (Slack, Discord, etc.)."""
+    import time as _time
+    _msg_start = _time.monotonic()
 
-    Mirrors the core flow of handle_message() but accepts a MessageContext
-    directly instead of a Telegram Update.
-    """
+    global OWNER_CHAT_ID
     query = ctx.incoming.text if ctx.incoming else ""
     if not query:
         return
@@ -3771,7 +3884,7 @@ async def handle_message_generic(ctx: MessageContext):
                 return
 
     # Fall through to conversational LLM flow
-    await ctx.typing()
+    progress_msg = await ctx.reply("Thinking...")
 
     results = await hybrid_search(query, limit=6)
     archive_context = truncate_context(results) if results else "No relevant archive data found."
@@ -3789,6 +3902,7 @@ async def handle_message_generic(ctx: MessageContext):
         live_context = format_for_prompt(live)
     except Exception as e:
         log.warning("Live state collection failed: %s", e)
+
     if live_context:
         full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
 
@@ -3798,7 +3912,19 @@ async def handle_message_generic(ctx: MessageContext):
     display_response = _gap_tag_re.sub("", response).strip()
 
     save_message(chat_id, "assistant", display_response)
-    await ctx.reply(display_response)
+
+    try:
+        await progress_msg.edit(display_response)
+    except Exception:
+        await progress_msg.delete()
+        await ctx.channel.send_message(chat_id, display_response)
+
+    _latency_ms = (_time.monotonic() - _msg_start) * 1000
+    try:
+        from learning import record_signal
+        record_signal("response_latency", {"latency_ms": round(_latency_ms, 1), "query_len": len(query)})
+    except Exception:
+        pass
 
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4199,6 +4325,7 @@ async def start_telegram_bot():
     _load_extensions(application)
 
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -4690,6 +4817,11 @@ async def startup():
     except Exception as e:
         log.warning("MCP client initialization failed: %s", e)
 
+    # Register webhook handlers
+    from webhooks.github import GitHubWebhookHandler
+    from webhooks.registry import register as register_webhook
+    register_webhook("github", GitHubWebhookHandler())
+
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
 
@@ -4707,6 +4839,34 @@ async def startup():
             log.info("Slack tokens not configured — skipping Slack channel")
     except Exception as e:
         log.warning("Slack channel not started: %s", e)
+
+    # Start WhatsApp channel if configured
+    try:
+        wa_token = keyring.get_password(KEYRING_SERVICE, "whatsapp-access-token")
+        wa_phone_id = keyring.get_password(KEYRING_SERVICE, "whatsapp-phone-number-id")
+        if wa_token and wa_phone_id:
+            from channels.whatsapp import WhatsAppChannel
+            wa_ch = WhatsAppChannel(wa_phone_id, wa_token)
+            channel_registry.register("whatsapp", wa_ch)
+            log.info("WhatsApp channel registered")
+        else:
+            log.info("WhatsApp tokens not configured — skipping WhatsApp channel")
+    except Exception as e:
+        log.warning("Failed to register WhatsApp channel: %s", e)
+
+    # Start Discord channel if configured
+    try:
+        discord_token = get_secret("discord-bot-token")
+        if discord_token:
+            from channels.discord import DiscordChannel
+            discord_ch = DiscordChannel(discord_token)
+            channel_registry.register("discord", discord_ch)
+            asyncio.create_task(discord_ch.start_bot(handle_message_generic))
+            log.info("Discord channel started")
+        else:
+            log.info("Discord token not configured — skipping Discord channel")
+    except Exception as e:
+        log.warning("Failed to start Discord channel: %s", e)
 
     # Start scheduler
     _setup_scheduler()
@@ -4743,6 +4903,132 @@ async def health():
     report["autonomy_level"] = autonomy.format_level() if autonomy else "not initialized"
     report["scheduled_jobs"] = jobs
     return report
+
+
+# --- WhatsApp webhook endpoints (must be before generic {source} catch-all) ---
+
+@app.post("/webhook/whatsapp")
+async def whatsapp_webhook(request: Request):
+    """Handle inbound WhatsApp messages via Meta Cloud API webhook."""
+    body = await request.body()
+    payload = json.loads(body)
+
+    whatsapp_ch = channel_registry.get("whatsapp")
+    if not whatsapp_ch:
+        return {"ok": True}  # Acknowledge but ignore if not configured
+
+    from channels.whatsapp import WhatsAppChannel
+    incoming = WhatsAppChannel.extract_incoming(payload)
+    if not incoming:
+        return {"ok": True}  # Not a text message
+
+    ctx = MessageContext(
+        channel=whatsapp_ch,
+        chat_id=incoming.chat_id,
+        user_id=incoming.user_id,
+        channel_type=ChannelType.WHATSAPP,
+        incoming=incoming,
+    )
+
+    # Process in background to return 200 quickly (WhatsApp requires fast response)
+    asyncio.create_task(_process_whatsapp_message(ctx))
+    return {"ok": True}
+
+
+async def _process_whatsapp_message(ctx: MessageContext):
+    """Process an inbound WhatsApp message through the standard pipeline."""
+    try:
+        query = ctx.incoming.text if ctx.incoming else ""
+        if not query:
+            return
+
+        chat_id = ctx.chat_id
+
+        # Save user message to conversation history
+        save_message(chat_id, "user", query)
+
+        # Try intent detection first (actions: email, reminder, calendar, etc.)
+        intent = await detect_intent(query)
+        if intent:
+            intent["user_query"] = query
+            handled = await handle_action_intent(intent, ctx)
+            if handled:
+                return
+
+        # Fall through to conversational LLM flow
+        results = await hybrid_search(query, limit=6)
+        archive_context = truncate_context(results) if results else "No relevant archive data found."
+        personal_context = get_relevant_context(query, max_chars=2000)
+        conversation = get_conversation_history(chat_id)
+
+        full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
+        if conversation:
+            full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+
+        response = await ask_claude(query, full_context)
+
+        # Strip capability gap tags before display
+        _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
+        display_response = _gap_tag_re.sub("", response).strip()
+
+        save_message(chat_id, "assistant", display_response)
+        await ctx.reply(display_response)
+    except Exception as e:
+        log.error("WhatsApp message processing failed: %s", e)
+
+
+@app.get("/webhook/whatsapp")
+async def whatsapp_verify(request: Request):
+    """Handle Meta webhook verification challenge."""
+    params = dict(request.query_params)
+    mode = params.get("hub.mode", "")
+    token = params.get("hub.verify_token", "")
+    challenge = params.get("hub.challenge", "")
+
+    verify_token = keyring.get_password(KEYRING_SERVICE, "whatsapp-verify-token")
+    if mode == "subscribe" and token == verify_token:
+        log.info("WhatsApp webhook verified")
+        return int(challenge)
+
+    log.warning("WhatsApp webhook verification failed")
+    return PlainTextResponse("Forbidden", status_code=403)
+
+
+# --- Generic webhook endpoints (catch-all for GitHub, etc.) ---
+
+@app.post("/webhook/{source}")
+async def webhook_endpoint(source: str, request: Request):
+    """Handle inbound webhook events from external services."""
+    from webhooks.registry import get as get_webhook_handler
+
+    handler = get_webhook_handler(source)
+    if not handler:
+        raise HTTPException(status_code=404, detail=f"No handler for source: {source}")
+
+    body = await request.body()
+    if not await handler.validate(dict(request.headers), body):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = json.loads(body)
+    message = await handler.handle(payload)
+
+    if message and OWNER_CHAT_ID:
+        primary = channel_registry.get_primary()
+        if primary:
+            await primary.send_message(OWNER_CHAT_ID, f"\U0001f514 Webhook ({source}):\n\n{message}")
+
+    return {"ok": True}
+
+
+@app.get("/webhook/{source}")
+async def webhook_verify(source: str, request: Request):
+    """Handle webhook verification challenges (e.g., WhatsApp, Slack)."""
+    params = dict(request.query_params)
+    if "hub.challenge" in params:
+        verify_token = keyring.get_password(KEYRING_SERVICE, f"webhook-verify-{source}")
+        if params.get("hub.verify_token") == verify_token:
+            return int(params["hub.challenge"])
+    return {"error": "Verification failed"}
 
 
 @app.on_event("shutdown")
