@@ -39,7 +39,21 @@ _TTL = {
     "next_meeting": 120,      # 2 min — need fresher for "meeting in 5 min" alerts
     "unread_count": 180,      # 3 min
     "needs_reply": 300,       # 5 min
+    "frontmost_app": 30,      # 30s — app focus changes frequently
 }
+
+
+# ---------------------------------------------------------------------------
+# LiveState dataclass
+# ---------------------------------------------------------------------------
+
+@dataclass
+class LiveState:
+    """Structured live state snapshot."""
+    collected_at: str = ""
+    calendar: dict = field(default_factory=dict)
+    email: dict = field(default_factory=dict)
+    frontmost_app: str | None = None
 
 
 def _get_cached(key: str) -> object | None:
@@ -133,6 +147,26 @@ async def _collect_email() -> dict:
     return result
 
 
+async def _collect_macos() -> dict:
+    """Collect macOS state: frontmost app."""
+    result = {}
+
+    cached_app = _get_cached("frontmost_app")
+    if cached_app is not None:
+        result["frontmost_app"] = cached_app
+    else:
+        try:
+            from actions.macos import get_frontmost_app
+            app = await get_frontmost_app()
+            _set_cached("frontmost_app", app)
+            result["frontmost_app"] = app or None
+        except Exception as e:
+            log.warning("Frontmost app collection failed: %s", e)
+            result["frontmost_app"] = None
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Main collector
 # ---------------------------------------------------------------------------
@@ -145,9 +179,10 @@ async def collect_live_state() -> dict:
     """
     calendar_task = asyncio.create_task(_collect_calendar())
     email_task = asyncio.create_task(_collect_email())
+    macos_task = asyncio.create_task(_collect_macos())
 
-    calendar_state, email_state = await asyncio.gather(
-        calendar_task, email_task, return_exceptions=True
+    calendar_state, email_state, macos_state = await asyncio.gather(
+        calendar_task, email_task, macos_task, return_exceptions=True
     )
 
     state = {"collected_at": datetime.now(ZoneInfo(TIMEZONE)).isoformat()}
@@ -163,6 +198,12 @@ async def collect_live_state() -> dict:
     else:
         log.warning("Email collection returned exception: %s", email_state)
         state["email"] = {"unread_count": None, "needs_reply": []}
+
+    if isinstance(macos_state, dict):
+        state["frontmost_app"] = macos_state.get("frontmost_app")
+    else:
+        log.warning("macOS collection returned exception: %s", macos_state)
+        state["frontmost_app"] = None
 
     return state
 
@@ -212,5 +253,10 @@ def format_for_prompt(state: dict) -> str:
         lines.append(f"Needs reply ({len(needs_reply)}):")
         for em in needs_reply[:5]:
             lines.append(f"  - From {em['from']}: {em['subject']}")
+
+    # macOS
+    frontmost = state.get("frontmost_app")
+    if frontmost:
+        lines.append(f"\nActive app: {frontmost}")
 
     return "\n".join(lines)
