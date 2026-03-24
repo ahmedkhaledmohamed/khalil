@@ -1823,35 +1823,44 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
 
     # --- Browser automation ---
 
-    elif action == "browser_screenshot":
-        from actions.browser import navigate_and_screenshot, is_financial_url
+    elif action == "browser_navigate":
         url = intent.get("url", "")
-        if not url:
-            return False
+        from actions.browser import navigate_and_screenshot, is_financial_url
         if is_financial_url(url):
-            await ctx.reply("Browser access to financial sites is blocked.")
+            await ctx.reply("Blocked: Cannot automate financial sites.")
             return True
-        await ctx.reply(f"Capturing screenshot of {url}...")
-        screenshot = await navigate_and_screenshot(url)
-        if screenshot:
-            await ctx.reply_photo(screenshot, caption=f"Screenshot: {url}")
-            import os
-            os.unlink(screenshot)
+        await ctx.typing()
+        screenshot_path, title = await navigate_and_screenshot(url)
+        if screenshot_path:
+            await ctx.reply_photo(screenshot_path, caption=f"Page: {title}\nURL: {url}")
         else:
-            await ctx.reply("Failed to capture screenshot.")
+            await ctx.reply(f"Navigation result: {title}")
         return True
 
     elif action == "browser_extract":
-        from actions.browser import extract_page_text, is_financial_url
         url = intent.get("url", "")
-        if not url:
-            return False
+        selector = intent.get("selector")
+        from actions.browser import extract_page_text, is_financial_url
         if is_financial_url(url):
-            await ctx.reply("Browser access to financial sites is blocked.")
+            await ctx.reply("Blocked: Cannot automate financial sites.")
             return True
-        await ctx.reply(f"Extracting text from {url}...")
-        text = await extract_page_text(url)
+        await ctx.typing()
+        text = await extract_page_text(url, selector)
         await ctx.reply(text[:4000])
+        return True
+
+    elif action == "browser_screenshot":
+        url = intent.get("url", "")
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        path, title = await navigate_and_screenshot(url)
+        if path:
+            await ctx.reply_photo(path, caption=title)
+        else:
+            await ctx.reply(title)
         return True
 
     # --- macOS awareness ---
