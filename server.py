@@ -1748,6 +1748,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/finance — Financial dashboard\n"
         "/work — Sprint dashboard & epics\n"
         "/goals — Track quarterly goals\n"
+        "/commitments — Track meeting commitments\n"
         "/project — Project status tracking\n"
         "/nudge — What needs attention right now\n"
         "/audit — View recent actions\n"
@@ -2661,17 +2662,113 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Manual trigger for proactive checks."""
-    from scheduler.proactive import run_proactive_checks
+async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /commitments command: view, add, complete commitments from meetings."""
+    from actions.meetings import (
+        list_commitments, complete_commitment, add_commitment, format_commitments,
+    )
 
-    findings = run_proactive_checks()
-    if not findings:
-        await update.message.reply_text("✅ All clear — nothing needs attention.")
+    args = context.args or []
+    if not args:
+        commitments = list_commitments("open")
+        if not commitments:
+            await update.message.reply_text("No open commitments.")
+            return
+        text = f"Open Commitments ({len(commitments)}):\n\n{format_commitments(commitments)}"
+        await update.message.reply_text(text)
         return
 
-    text = "🔔 Proactive Check — things that need attention:\n\n" + "\n\n".join(findings)
-    await update.message.reply_text(text)
+    subcommand = args[0].lower()
+
+    if subcommand == "done" and len(args) >= 2:
+        try:
+            cid = int(args[1])
+        except ValueError:
+            await update.message.reply_text("Usage: /commitments done <id>")
+            return
+        if complete_commitment(cid):
+            await update.message.reply_text(f"Commitment #{cid} marked as done.")
+        else:
+            await update.message.reply_text(f"Commitment #{cid} not found or already done.")
+
+    elif subcommand == "add" and len(args) >= 3:
+        # /commitments add <person> <commitment text>
+        person = args[1]
+        commitment = " ".join(args[2:])
+        result = add_commitment("(manual)", person, commitment)
+        await update.message.reply_text(
+            f"Commitment #{result['id']} added: {person} -> {commitment}"
+        )
+
+    elif subcommand == "all":
+        open_c = list_commitments("open")
+        done_c = list_commitments("done")
+        text = f"Open ({len(open_c)}):\n{format_commitments(open_c)}"
+        if done_c:
+            text += f"\n\nDone ({len(done_c)}):\n{format_commitments(done_c)}"
+        await update.message.reply_text(text)
+
+    else:
+        await update.message.reply_text(
+            "Usage:\n"
+            "  /commitments — Open commitments\n"
+            "  /commitments all — All commitments\n"
+            "  /commitments done <id> — Mark done\n"
+            "  /commitments add <person> <text> — Add manually"
+        )
+
+
+async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Synthesis-driven nudge — capacity score, top risks, top actions."""
+    try:
+        from synthesis.aggregator import aggregate_all_domains
+        from synthesis.capacity import detect_overcommitment, capacity_report_to_text
+
+        snapshot = await aggregate_all_domains()
+        report = await detect_overcommitment(snapshot)
+
+        # Score label
+        score = report.capacity_score
+        if score > 80:
+            emoji, label = "🔴", "OVERCOMMITTED"
+        elif score > 60:
+            emoji, label = "🟠", "Heavy Load"
+        elif score > 40:
+            emoji, label = "🟡", "Busy"
+        else:
+            emoji, label = "🟢", "Comfortable"
+
+        lines = [f"{emoji} Capacity: {score}/100 ({label})\n"]
+
+        # Top 3 risks
+        if report.risk_areas:
+            lines.append("Top risks:")
+            for risk in report.risk_areas[:3]:
+                lines.append(f"  - {risk}")
+
+        # Top 3 recommendations
+        if report.recommendations:
+            lines.append("\nRecommended actions:")
+            for rec in report.recommendations[:3]:
+                lines.append(f"  > {rec}")
+
+        if not report.risk_areas and not report.recommendations:
+            lines.append("All clear — no immediate risks detected.")
+
+        await update.message.reply_text("\n".join(lines))
+
+    except Exception as e:
+        # Fallback to legacy proactive checks
+        log.error("Synthesis nudge failed, falling back: %s", e)
+        from scheduler.proactive import run_proactive_checks
+
+        findings = run_proactive_checks()
+        if not findings:
+            await update.message.reply_text("All clear — nothing needs attention.")
+            return
+
+        text = "Proactive Check — things that need attention:\n\n" + "\n\n".join(findings)
+        await update.message.reply_text(text)
 
 
 async def cmd_run(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3652,6 +3749,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("feedback", cmd_feedback))
     application.add_handler(CommandHandler("extensions", cmd_extensions))
     application.add_handler(CommandHandler("mcp", cmd_mcp))
+    application.add_handler(CommandHandler("commitments", cmd_commitments))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -3686,6 +3784,7 @@ async def start_telegram_bot():
         BotCommand("run", "Run a shell command"),
         BotCommand("learn", "Self-improvement insights"),
         BotCommand("mcp", "Manage MCP server connections"),
+        BotCommand("commitments", "Track meeting commitments"),
         BotCommand("help", "Show help"),
     ])
 

@@ -181,6 +181,37 @@ async def run_micro_reflection(ask_claude_fn, channel: "Channel | None" = None, 
         _record_scheduler_failure("self_healing_check", e)
 
 
+async def send_weekly_synthesis(channel: "Channel", chat_id: int, ask_claude_fn):
+    """M10: Generate and send weekly synthesis digest (Sunday evening)."""
+    from scheduler.digests import generate_weekly_synthesis
+
+    try:
+        synthesis = await generate_weekly_synthesis(ask_claude_fn)
+        await channel.send_message(chat_id, synthesis)
+        _record_digest_sent("weekly_synthesis")
+        log.info("Weekly synthesis digest sent")
+    except Exception as e:
+        log.error(f"Failed to send weekly synthesis: {e}")
+        _record_scheduler_failure("weekly_synthesis", e)
+
+
+async def send_synthesis_nudge(channel: "Channel", chat_id: int):
+    """M10: Proactive synthesis nudge — triggers when capacity > 70."""
+    from scheduler.proactive import run_synthesis_nudge_check
+
+    try:
+        nudge = await run_synthesis_nudge_check()
+        if nudge:
+            await channel.send_message(chat_id, nudge)
+            _record_digest_sent("synthesis_nudge")
+            log.info("Synthesis nudge sent (capacity threshold crossed)")
+        else:
+            log.debug("Synthesis nudge: below threshold, no alert")
+    except Exception as e:
+        log.error(f"Synthesis nudge failed: {e}")
+        _record_scheduler_failure("synthesis_nudge", e)
+
+
 async def poll_dev_state(channel: "Channel", chat_id: int):
     """Poll dev environment state and notify on changes."""
     try:
