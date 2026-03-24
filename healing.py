@@ -803,8 +803,14 @@ def _build_pr_body(diagnosis: dict) -> str:
 
 # --- Orchestrator ---
 
-async def run_self_healing(triggers: list[dict], bot, chat_id: int):
-    """Main orchestrator — diagnose, patch, validate, PR, notify."""
+async def run_self_healing(triggers: list[dict], channel, chat_id: int):
+    """Main orchestrator — diagnose, patch, validate, PR, notify.
+
+    Args:
+        triggers: list of failure trigger dicts from detect_recurring_failures()
+        channel: Channel instance (channels.Channel protocol) for sending notifications
+        chat_id: owner chat ID to send notifications to
+    """
     for trigger in triggers:
         fingerprint = trigger["fingerprint"]
         log.info("Self-healing: processing %s", fingerprint)
@@ -818,10 +824,10 @@ async def run_self_healing(triggers: list[dict], bot, chat_id: int):
         # 2. Generate patch
         result = await generate_healing_patch(diagnosis)
         if not result:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
-                     f"Could not generate a fix automatically. Manual investigation needed.",
+            await channel.send_message(
+                chat_id,
+                f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
+                f"Could not generate a fix automatically. Manual investigation needed.",
             )
             store_insight("self_heal", diagnosis["summary"], fingerprint, "Fix generation failed")
             continue
@@ -839,11 +845,11 @@ async def run_self_healing(triggers: list[dict], bot, chat_id: int):
         valid, error = validate_patch(original_source, patched_func, target_path)
         if not valid:
             log.error("Patch validation failed for %s: %s", fingerprint, error)
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
-                     f"Generated a fix but it failed validation: {error}\n"
-                     f"Manual investigation needed.",
+            await channel.send_message(
+                chat_id,
+                f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
+                f"Generated a fix but it failed validation: {error}\n"
+                f"Manual investigation needed.",
             )
             store_insight("self_heal", diagnosis["summary"], fingerprint, f"Validation failed: {error}")
             continue
@@ -854,20 +860,20 @@ async def run_self_healing(triggers: list[dict], bot, chat_id: int):
             pr_url = await create_healing_pr(primary["file"], patched_content, diagnosis)
         except Exception as e:
             log.error("Failed to create healing PR: %s", e)
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
-                     f"Fix generated and validated, but PR creation failed: {e}",
+            await channel.send_message(
+                chat_id,
+                f"🔧 Detected recurring failure: {diagnosis['summary']}\n\n"
+                f"Fix generated and validated, but PR creation failed: {e}",
             )
             continue
 
         # 5. Notify
-        await bot.send_message(
-            chat_id=chat_id,
-            text=f"🔧 Self-Healing: {diagnosis['summary']}\n\n"
-                 f"{explanation}\n\n"
-                 f"PR: {pr_url}\n\n"
-                 f"Review and merge to apply the fix.",
+        await channel.send_message(
+            chat_id,
+            f"🔧 Self-Healing: {diagnosis['summary']}\n\n"
+            f"{explanation}\n\n"
+            f"PR: {pr_url}\n\n"
+            f"Review and merge to apply the fix.",
         )
 
         # 6. Record insight to prevent re-triggering

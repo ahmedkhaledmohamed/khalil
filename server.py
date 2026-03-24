@@ -28,6 +28,10 @@ from telegram.ext import (
     ContextTypes,
 )
 
+import channels.registry as channel_registry
+from channels import ActionButton, Channel, SentMessage
+from channels.telegram import TelegramChannel
+
 from config import (
     ActionType,
     AutonomyLevel,
@@ -135,6 +139,7 @@ db_conn = None
 autonomy: AutonomyController = None
 claude: anthropic.AsyncAnthropic = None
 telegram_app: Application | None = None
+channel: Channel | None = None  # Primary channel instance (set during bot startup)
 OWNER_CHAT_ID: int | None = None  # Loaded from DB on startup, updated on first message
 
 
@@ -1224,10 +1229,8 @@ async def _try_inline_healing(update: Update):
     try:
         from healing import detect_recurring_failures, run_self_healing
         triggers = detect_recurring_failures()
-        if triggers and OWNER_CHAT_ID:
-            bot = telegram_app.bot if telegram_app else None
-            if bot:
-                await run_self_healing(triggers, bot, OWNER_CHAT_ID)
+        if triggers and OWNER_CHAT_ID and channel:
+            await run_self_healing(triggers, channel, OWNER_CHAT_ID)
     except Exception as e:
         log.debug("Inline self-healing check failed: %s", e)
 
@@ -1832,16 +1835,16 @@ async def _handle_self_extend_with_spec(spec: dict, update):
     )
 
 
-async def _run_extension_build(spec: dict, bot, chat_id: int):
+async def _run_extension_build(spec: dict, ch: Channel, chat_id: int):
     """Run extension build in background, notify on completion."""
     try:
-        await bot.send_message(chat_id, f"🔧 Building `{spec['name']}` capability...")
+        await ch.send_message(chat_id, f"🔧 Building `{spec['name']}` capability...")
         from actions.extend import generate_and_pr
         result = await generate_and_pr({"spec": spec})
-        await bot.send_message(chat_id, f"✅ {result}")
+        await ch.send_message(chat_id, f"✅ {result}")
     except Exception as e:
         log.error("Extension build failed for %s: %s", spec["name"], e)
-        await bot.send_message(chat_id, f"❌ Failed to build `{spec['name']}`: {e}")
+        await ch.send_message(chat_id, f"❌ Failed to build `{spec['name']}`: {e}")
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1985,10 +1988,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         # Run build in background — non-blocking
-        bot = telegram_app.bot if telegram_app else None
         chat_id = query.message.chat_id
-        if bot and chat_id:
-            asyncio.create_task(_run_extension_build(spec, bot, chat_id))
+        if channel and chat_id:
+            asyncio.create_task(_run_extension_build(spec, channel, chat_id))
 
     elif query.data == "extend_skip":
         await query.edit_message_text("Skipped. Let me know if you change your mind.")
@@ -2948,8 +2950,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Try immediate self-healing if this is a recurring failure
             await _try_inline_healing(update)
 
-    # Show progress indicator
-    progress_msg = await update.message.reply_text("🔍 Thinking...")
+    # Show progress indicator — uses channel abstraction
+    progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
     # Search knowledge base
     results = await hybrid_search(query, limit=6)
@@ -3014,7 +3016,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "llm_generated": True,
             }
             await progress_msg.delete()
-            handled = await handle_action_intent(intent, update)
+            handled = await handle_action_intent(intent, update, channel)
             if handled:
                 return
 
@@ -3037,10 +3039,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "original_query": query,
             }
             try:
-                await progress_msg.edit_text(display_response)
+                await progress_msg.edit(display_response)
             except Exception:
                 await progress_msg.delete()
-                await update.message.reply_text(display_response)
+                await channel.send_message(chat_id, display_response)
             await _handle_self_extend_with_spec(spec, update)
             return
     # 2. Fallback: phrase-based detection
@@ -3067,11 +3069,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Replace progress message with response (tag already stripped)
     try:
-        await progress_msg.edit_text(display_response)
+        await progress_msg.edit(display_response)
     except Exception:
         # If edit fails (e.g., message too long), send as new message
         await progress_msg.delete()
-        await update.message.reply_text(display_response)
+        await channel.send_message(chat_id, display_response)
 
     # #2: Record response latency
     _latency_ms = (_time.monotonic() - _msg_start) * 1000
@@ -3339,8 +3341,10 @@ async def start_telegram_bot():
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
 
-    global telegram_app
+    global telegram_app, channel
     telegram_app = application
+    channel = TelegramChannel.from_application(application)
+    channel_registry.register("telegram", channel)
 
     return application
 
@@ -3350,21 +3354,21 @@ def _setup_scheduler():
     from scheduler.tasks import sync_emails, send_morning_brief, send_financial_alert, send_weekly_summary, send_career_alert, send_friday_reflection, run_reflection, run_micro_reflection
 
     def _can_send():
-        return telegram_app and OWNER_CHAT_ID
+        return channel and OWNER_CHAT_ID
 
     async def _morning_brief_job():
         if _can_send():
-            await send_morning_brief(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
+            await send_morning_brief(channel, OWNER_CHAT_ID, ask_claude)
         else:
-            log.warning("Morning brief skipped: no Telegram bot or owner chat ID yet")
+            log.warning("Morning brief skipped: no channel or owner chat ID yet")
 
     async def _financial_alert_job():
         if _can_send():
-            await send_financial_alert(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
+            await send_financial_alert(channel, OWNER_CHAT_ID, ask_claude)
 
     async def _weekly_summary_job():
         if _can_send():
-            await send_weekly_summary(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
+            await send_weekly_summary(channel, OWNER_CHAT_ID, ask_claude)
 
     async def _reminder_check_job():
         if not _can_send():
@@ -3373,18 +3377,12 @@ def _setup_scheduler():
         # One-shot reminders
         fired = check_due_reminders()
         for r in fired:
-            await telegram_app.bot.send_message(
-                chat_id=OWNER_CHAT_ID,
-                text=f"⏰ Reminder!\n\n{r['text']}",
-            )
+            await channel.send_message(OWNER_CHAT_ID, f"⏰ Reminder!\n\n{r['text']}")
             log.info(f"Reminder #{r['id']} fired: {r['text']}")
         # Recurring reminders
         recurring_fired = check_recurring_due()
         for r in recurring_fired:
-            await telegram_app.bot.send_message(
-                chat_id=OWNER_CHAT_ID,
-                text=f"🔄 Recurring Reminder!\n\n{r['text']}",
-            )
+            await channel.send_message(OWNER_CHAT_ID, f"🔄 Recurring Reminder!\n\n{r['text']}")
             log.info(f"Recurring #{r['id']} fired: {r['text']}")
 
     # Morning brief at 7:00 AM every day
@@ -3436,7 +3434,7 @@ def _setup_scheduler():
     # Daily career alert at 10 AM
     async def _career_alert_job():
         if _can_send():
-            await send_career_alert(telegram_app.bot, OWNER_CHAT_ID)
+            await send_career_alert(channel, OWNER_CHAT_ID)
 
     scheduler.add_job(
         _career_alert_job,
@@ -3449,7 +3447,7 @@ def _setup_scheduler():
     # Friday reflection at 5 PM
     async def _friday_reflection_job():
         if _can_send():
-            await send_friday_reflection(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
+            await send_friday_reflection(channel, OWNER_CHAT_ID, ask_claude)
 
     scheduler.add_job(
         _friday_reflection_job,
@@ -3466,7 +3464,7 @@ def _setup_scheduler():
         from monitoring import generate_self_check_message
         msg = await generate_self_check_message()
         if msg:
-            await telegram_app.bot.send_message(chat_id=OWNER_CHAT_ID, text=msg)
+            await channel.send_message(OWNER_CHAT_ID, msg)
             log.warning("Self-check found issues — notified owner")
 
     scheduler.add_job(
@@ -3498,7 +3496,7 @@ def _setup_scheduler():
     # Weekly reflection (configurable day/hour)
     async def _weekly_reflection_job():
         if _can_send():
-            await run_reflection(telegram_app.bot, OWNER_CHAT_ID, ask_claude)
+            await run_reflection(channel, OWNER_CHAT_ID, ask_claude)
 
     scheduler.add_job(
         _weekly_reflection_job,
@@ -3510,8 +3508,7 @@ def _setup_scheduler():
 
     # Daily micro-reflection + self-healing check (configurable hour)
     async def _micro_reflection_job():
-        bot = telegram_app.bot if telegram_app else None
-        await run_micro_reflection(ask_claude, bot=bot, chat_id=OWNER_CHAT_ID)
+        await run_micro_reflection(ask_claude, channel=channel, chat_id=OWNER_CHAT_ID)
 
     scheduler.add_job(
         _micro_reflection_job,
@@ -3529,7 +3526,7 @@ def _setup_scheduler():
         findings = run_proactive_checks()
         if findings:
             text = "🔔 Proactive Check — things that need attention:\n\n" + "\n\n".join(findings)
-            await telegram_app.bot.send_message(chat_id=OWNER_CHAT_ID, text=text)
+            await channel.send_message(OWNER_CHAT_ID, text)
             log.info("Proactive alert sent: %d findings", len(findings))
         else:
             log.info("Proactive check: all clear")
@@ -3547,7 +3544,7 @@ def _setup_scheduler():
         from oauth_utils import proactive_token_refresh
         async def _notify(msg):
             if _can_send():
-                await telegram_app.bot.send_message(chat_id=OWNER_CHAT_ID, text=msg)
+                await channel.send_message(OWNER_CHAT_ID, msg)
         await proactive_token_refresh(notify_fn=_notify)
 
     scheduler.add_job(
@@ -3563,7 +3560,7 @@ def _setup_scheduler():
         if not _can_send():
             return
         from scheduler.tasks import poll_dev_state
-        await poll_dev_state(telegram_app.bot, OWNER_CHAT_ID)
+        await poll_dev_state(channel, OWNER_CHAT_ID)
 
     scheduler.add_job(
         _dev_state_poll_job,
@@ -3648,9 +3645,9 @@ async def startup():
         report = format_startup_report(test_results)
         log.info("Startup self-test:\n%s", report)
         # Send report to owner via Telegram if there are issues
-        if test_results["overall"] != "ok" and OWNER_CHAT_ID and telegram_app:
+        if test_results["overall"] != "ok" and OWNER_CHAT_ID and channel:
             try:
-                await telegram_app.bot.send_message(OWNER_CHAT_ID, report)
+                await channel.send_message(OWNER_CHAT_ID, report)
             except Exception as e:
                 log.warning("Could not send startup report to Telegram: %s", e)
     except Exception as e:
