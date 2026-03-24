@@ -1411,6 +1411,19 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
         except Exception:
             pass
 
+    # M12: Auto-detect goal progress from user actions
+    try:
+        from learning import check_goal_relevance, record_goal_progress
+        from scheduler.planning import map_goal_to_domain
+        description = intent.get("description", "") or str(intent.get("text", ""))
+        if description:
+            related_goal = check_goal_relevance(description)
+            if related_goal:
+                domain = map_goal_to_domain(related_goal)
+                record_goal_progress(related_goal, domain, description[:200])
+    except Exception:
+        pass
+
     if action == "reminder":
         from actions.reminders import _parse_relative_time, create_reminder
 
@@ -2650,6 +2663,76 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(answer)
 
+    elif subcommand == "progress":
+        # M12: Goal progress summary with signals
+        from scheduler.planning import get_goal_progress_summary
+        from learning import get_weekly_goal_progress
+        summary = get_goal_progress_summary()
+        signals = get_weekly_goal_progress(days=7)
+        if signals:
+            summary += "\n\nRecent activity:"
+            for s in signals[:5]:
+                summary += f"\n  - {s['description']} (x{s['count']})"
+        await update.message.reply_text(summary)
+
+    elif subcommand == "plan":
+        # M12: Trigger quarterly planning prompt on demand
+        await update.message.reply_text("📋 Generating quarterly plan...")
+        from scheduler.planning import generate_planning_prompt
+        prompt = await generate_planning_prompt(ask_claude)
+        await update.message.reply_text(prompt)
+
+    elif subcommand == "midreview":
+        # M12: Trigger mid-quarter review on demand
+        await update.message.reply_text("📊 Generating mid-quarter review...")
+        from scheduler.planning import generate_mid_quarter_review
+        review = await generate_mid_quarter_review(ask_claude)
+        await update.message.reply_text(review)
+
+    elif subcommand == "align":
+        # M12: Check goal-domain alignment and conflicts
+        await update.message.reply_text("🔗 Checking goal alignment...")
+        from scheduler.planning import map_goal_to_domain, detect_goal_conflicts, _estimate_weekly_hours
+        from actions.goals import GOALS_FILE, _parse_goals, _current_quarter as _cq
+        quarter = _cq()
+        goal_list = []
+        try:
+            if GOALS_FILE.exists():
+                content = GOALS_FILE.read_text(encoding="utf-8")
+                goals_data = _parse_goals(content)
+                q_goals = goals_data.get(quarter, {})
+                for cat, items in q_goals.items():
+                    for item in items:
+                        if not item["done"]:
+                            domain = map_goal_to_domain(item["text"])
+                            hours = _estimate_weekly_hours(item["text"])
+                            goal_list.append({
+                                "text": item["text"],
+                                "category": cat,
+                                "domain": domain,
+                                "estimated_hours": hours,
+                            })
+        except Exception:
+            pass
+
+        if not goal_list:
+            await update.message.reply_text(f"No active goals in {quarter} to analyze.")
+            return
+
+        lines = [f"Goal-Domain Alignment ({quarter}):\n"]
+        for g in goal_list:
+            lines.append(f"  [{g['domain']}] {g['text']} (~{g['estimated_hours']:.0f}h/week)")
+
+        conflicts = await detect_goal_conflicts(goal_list)
+        if conflicts:
+            lines.append("\nConflicts:")
+            for c in conflicts:
+                lines.append(f"  ⚠ {c}")
+        else:
+            lines.append("\nNo capacity conflicts detected.")
+
+        await update.message.reply_text("\n".join(lines))
+
     else:
         await update.message.reply_text(
             "Usage:\n"
@@ -2658,6 +2741,10 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "  /goals add <category> <text> — Add a goal\n"
             "  /goals done <category> <number> — Mark done\n"
             "  /goals review — LLM-powered reflection\n"
+            "  /goals progress — Weekly progress with signals\n"
+            "  /goals plan — Trigger quarterly planning\n"
+            "  /goals midreview — Mid-quarter review\n"
+            "  /goals align — Check goal-domain alignment\n"
             "\nCategories: career, health, learning, personal"
         )
 
@@ -4125,6 +4212,34 @@ def _setup_scheduler():
         minutes=5,
         id="meeting_followup",
         name="M11: Post-Meeting Follow-up",
+        replace_existing=True,
+    )
+
+    # M12: Quarterly planning — check daily at 9 AM if it's a planning trigger date
+    async def _quarterly_planning_job():
+        if _can_send():
+            from scheduler.tasks import send_quarterly_planning
+            await send_quarterly_planning(channel, OWNER_CHAT_ID, ask_claude)
+
+    scheduler.add_job(
+        _quarterly_planning_job,
+        CronTrigger(hour=9, minute=30, timezone=TIMEZONE),
+        id="quarterly_planning",
+        name="M12: Quarterly Planning Check",
+        replace_existing=True,
+    )
+
+    # M12: Mid-quarter review — check daily at 9 AM if it's a review date
+    async def _mid_quarter_review_job():
+        if _can_send():
+            from scheduler.tasks import send_mid_quarter_review
+            await send_mid_quarter_review(channel, OWNER_CHAT_ID, ask_claude)
+
+    scheduler.add_job(
+        _mid_quarter_review_job,
+        CronTrigger(hour=9, minute=45, timezone=TIMEZONE),
+        id="mid_quarter_review",
+        name="M12: Mid-Quarter Review Check",
         replace_existing=True,
     )
 

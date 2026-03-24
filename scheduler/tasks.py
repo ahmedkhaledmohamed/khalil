@@ -224,3 +224,39 @@ async def poll_dev_state(channel: "Channel", chat_id: int):
     except Exception as e:
         log.debug("Dev state poll failed: %s", e)
         _record_scheduler_failure("dev_state_poll", e)
+
+
+async def send_quarterly_planning(channel: "Channel", chat_id: int, ask_claude_fn):
+    """M12: Check if today is a planning trigger date and send planning prompt."""
+    from scheduler.planning import is_planning_trigger_date, generate_planning_prompt
+
+    try:
+        if not is_planning_trigger_date():
+            log.debug("Quarterly planning: not a trigger date")
+            return
+
+        prompt = await generate_planning_prompt(ask_claude_fn)
+        await channel.send_message(chat_id, prompt)
+        _record_digest_sent("quarterly_planning")
+        log.info("Quarterly planning prompt sent")
+    except Exception as e:
+        log.error(f"Quarterly planning failed: {e}")
+        _record_scheduler_failure("quarterly_planning", e)
+
+
+async def send_mid_quarter_review(channel: "Channel", chat_id: int, ask_claude_fn):
+    """M12: Check if today is a mid-quarter review date and send review."""
+    from scheduler.planning import is_mid_quarter_date, generate_mid_quarter_review
+
+    try:
+        if not is_mid_quarter_date():
+            log.debug("Mid-quarter review: not a review date")
+            return
+
+        review = await generate_mid_quarter_review(ask_claude_fn)
+        await channel.send_message(chat_id, review)
+        _record_digest_sent("mid_quarter_review")
+        log.info("Mid-quarter review sent")
+    except Exception as e:
+        log.error(f"Mid-quarter review failed: {e}")
+        _record_scheduler_failure("mid_quarter_review", e)
