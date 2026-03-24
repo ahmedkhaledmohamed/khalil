@@ -119,6 +119,26 @@ def tmp_db(tmp_path):
             metadata TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS approval_patterns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,
+            command_pattern TEXT NOT NULL,
+            approved_count INTEGER DEFAULT 0,
+            denied_count INTEGER DEFAULT 0,
+            auto_tier TEXT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(action_type, command_pattern)
+        );
+
+        CREATE TABLE IF NOT EXISTS activity_timing (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_type TEXT NOT NULL,
+            hour INTEGER NOT NULL,
+            day_of_week INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
     conn.commit()
     yield conn

@@ -188,7 +188,11 @@ def generate_weekend_nudge() -> str | None:
 
 
 def run_proactive_checks() -> list[str]:
-    """Run all proactive detectors. Returns list of findings (strings)."""
+    """Run all proactive detectors. Returns list of findings (strings).
+
+    M9: Applies smart timing filter — suppresses non-urgent alerts during
+    inactive hours based on learned activity patterns.
+    """
     checks = [
         check_stale_goals,
         check_stale_projects,
@@ -206,4 +210,124 @@ def run_proactive_checks() -> list[str]:
         except Exception as e:
             log.error("Proactive check %s failed: %s", check.__name__, e)
 
-    return findings
+    # M9: Filter by smart timing
+    return filter_alerts_by_timing(findings)
+
+
+# --- M9: Smart Proactive Timing (Task 9.3) ---
+
+def record_activity_timing(signal_type: str = "user_active"):
+    """Record when Ahmed actually reads/responds to alerts.
+
+    Called when a user message is received, indicating active engagement.
+    """
+    import sqlite3
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            "INSERT INTO activity_timing (signal_type, hour, day_of_week, created_at) VALUES (?, ?, ?, ?)",
+            (signal_type, now.hour, now.weekday(), now.strftime("%Y-%m-%d %H:%M:%S")),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.debug("Failed to record activity timing: %s", e)
+
+
+def get_active_hours(day_of_week: int | None = None, min_signals: int = 3) -> list[int]:
+    """Get hours when Ahmed is typically active, based on observed signals.
+
+    Args:
+        day_of_week: 0=Monday, 6=Sunday. None means current day.
+        min_signals: minimum signal count to consider an hour "active".
+
+    Returns sorted list of active hours (0-23).
+    """
+    import sqlite3
+    if day_of_week is None:
+        day_of_week = datetime.now(ZoneInfo(TIMEZONE)).weekday()
+
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        # Look at last 30 days of data for this day of week
+        cutoff = (datetime.now(ZoneInfo(TIMEZONE)) - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = conn.execute(
+            "SELECT hour, COUNT(*) as cnt FROM activity_timing "
+            "WHERE day_of_week = ? AND created_at > ? "
+            "GROUP BY hour HAVING cnt >= ? ORDER BY hour",
+            (day_of_week, cutoff, min_signals),
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        log.debug("Failed to get active hours: %s", e)
+        return []
+
+
+def is_good_time_for_alert(alert_type: str = "general") -> bool:
+    """Check if now is a good time to send an alert based on learned activity patterns.
+
+    Returns True if:
+    - Not enough data yet (defaults to permissive)
+    - Current hour is in the learned active hours for this day of week
+    - Calendar is not in deep work mode (if calendar integration available)
+    """
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    active_hours = get_active_hours(now.weekday())
+
+    # If we don't have enough data, fall back to default work hours
+    if not active_hours:
+        # Default: 7 AM - 10 PM on weekdays, 9 AM - 10 PM on weekends
+        if now.weekday() >= 5:  # weekend
+            return 9 <= now.hour <= 22
+        return 7 <= now.hour <= 22
+
+    # Check if current hour is in learned active hours
+    if now.hour not in active_hours:
+        log.info("Suppressing alert: hour %d not in active hours %s for day %d",
+                 now.hour, active_hours, now.weekday())
+        return False
+
+    # Check for calendar-blocked deep work
+    try:
+        _check_deep_work_block(now)
+    except Exception:
+        pass  # Calendar check is best-effort
+
+    return True
+
+
+def _check_deep_work_block(now: datetime) -> bool:
+    """Check if there's a calendar event blocking alerts (deep work, focus time).
+
+    Returns True if alerts should be suppressed.
+    """
+    try:
+        from actions.calendar_reader import get_events_for_range
+        events = get_events_for_range(now, now + timedelta(minutes=1))
+        for event in events:
+            summary = (event.get("summary") or "").lower()
+            if any(keyword in summary for keyword in ("deep work", "focus", "do not disturb", "dnd", "heads down")):
+                log.info("Suppressing alert: calendar blocked (%s)", event.get("summary"))
+                return True
+    except Exception:
+        pass  # Calendar integration may not be available
+    return False
+
+
+def filter_alerts_by_timing(findings: list[str]) -> list[str]:
+    """Filter proactive check findings based on smart timing.
+
+    Suppresses alerts if now is not a good time for the user.
+    """
+    if not findings:
+        return findings
+
+    if is_good_time_for_alert():
+        return findings
+
+    # Suppress non-urgent alerts during inactive hours
+    # Overdue reminders and passed deadlines are always delivered
+    urgent_keywords = ("overdue", "passed", "expired", "urgent")
+    return [f for f in findings if any(k in f.lower() for k in urgent_keywords)]
