@@ -2004,6 +2004,39 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     cmd = payload.get("command")
                     await query.message.reply_text("🖥 New Cursor terminal created" + (f"\nRunning: `{cmd}`" if cmd else ""), parse_mode="Markdown")
 
+            elif result["action_type"] == "task_plan":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from orchestrator import TaskStep, execute_plan as _exec_plan, format_plan_summary, ensure_table as _ensure_plans
+                _ensure_plans()
+                steps = [TaskStep.from_dict(s) for s in payload["steps"]]
+                plan_query = payload["query"]
+
+                async def _execute_approved_step(step):
+                    intent = None
+                    if step.action == "reminder":
+                        intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
+                    elif step.action == "email":
+                        intent = {"action": "email", "to": step.params.get("to", ""), "subject": step.params.get("subject", ""), "context_query": step.params.get("context_query", "")}
+                    elif step.action == "calendar":
+                        intent = {"action": "calendar"}
+                    elif step.action == "shell":
+                        intent = {"action": "shell", "command": step.params.get("command", ""), "description": step.description, "llm_generated": True}
+                    else:
+                        intent = await detect_intent(step.description)
+                    if intent:
+                        intent["user_query"] = step.description
+                        handled = await handle_action_intent(intent, update)
+                        if handled:
+                            return f"Completed: {step.description}"
+                    return f"Executed: {step.description}"
+
+                _plan_chat_id = query.message.chat_id
+                plan_result = await _exec_plan(
+                    steps, plan_query, channel, _plan_chat_id, _execute_approved_step,
+                )
+                await query.message.reply_text(format_plan_summary(plan_result))
+
             else:
                 status_msg = await autonomy.execute_action(result)
                 await query.message.reply_text(status_msg)
@@ -2722,6 +2755,33 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text += f"   {e['description'][:60]}\n"
         text += f"   Result: {e['result'] or '—'} | {e['timestamp'][:16]}\n\n"
     await update.message.reply_text(text)
+
+
+async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show active and recently completed task plans."""
+    from orchestrator import list_active_plans, load_plan, format_plan_summary, ensure_table as ensure_plans_table
+    ensure_plans_table()
+    args = context.args or []
+    if args:
+        plan_id = args[0]
+        plan = load_plan(plan_id)
+        if not plan:
+            await update.message.reply_text(f"No plan found with ID: {plan_id}")
+            return
+        await update.message.reply_text(format_plan_summary(plan))
+        return
+    plans = list_active_plans()
+    if not plans:
+        await update.message.reply_text("No task plans yet.")
+        return
+    status_icons = {"in_progress": "🔄", "completed": "✅", "partial_failure": "⚠️", "blocked": "🚫"}
+    lines = [f"📋 Task Plans ({len(plans)}):\n"]
+    for p in plans:
+        icon = status_icons.get(p["status"], "❓")
+        lines.append(f"{icon} {p['plan_id']}\n   {p['query'][:60]}\n   {p['step_count']} steps | {p['status']} | {(p['created_at'] or '')[:16]}")
+        lines.append("")
+    lines.append("Use /tasks <plan_id> for details.")
+    await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3634,6 +3694,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("feedback", cmd_feedback))
     application.add_handler(CommandHandler("extensions", cmd_extensions))
     application.add_handler(CommandHandler("mcp", cmd_mcp))
+    application.add_handler(CommandHandler("tasks", cmd_tasks))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -3668,6 +3729,7 @@ async def start_telegram_bot():
         BotCommand("run", "Run a shell command"),
         BotCommand("learn", "Self-improvement insights"),
         BotCommand("mcp", "Manage MCP server connections"),
+        BotCommand("tasks", "View active task plans"),
         BotCommand("help", "Show help"),
     ])
 

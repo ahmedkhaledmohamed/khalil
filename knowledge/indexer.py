@@ -139,6 +139,18 @@ def init_db() -> sqlite3.Connection:
 
         CREATE INDEX IF NOT EXISTS idx_recurring_status ON recurring_reminders(status);
         CREATE INDEX IF NOT EXISTS idx_recurring_next ON recurring_reminders(next_fire_at);
+
+        -- Multi-step task orchestrator plans
+        CREATE TABLE IF NOT EXISTS active_plans (
+            plan_id TEXT PRIMARY KEY,
+            query TEXT NOT NULL,
+            steps_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'in_progress',
+            created_at TEXT NOT NULL,
+            completed_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_plans_status ON active_plans(status);
     """)
 
     # Create virtual table for vector search
