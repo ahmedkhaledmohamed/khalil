@@ -80,6 +80,11 @@ HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
 CLAUDE_CODE_BIN = "/opt/homebrew/bin/claude"
 WORKTREES_DIR = KHALIL_DIR / ".worktrees"
 
+# Container sandbox
+SANDBOX_IMAGE = "khalil-sandbox"
+SANDBOX_MEM_LIMIT = "256m"
+SANDBOX_TIMEOUT = 15
+
 # Agent swarms
 SWARM_ENABLED = True
 MAX_CONCURRENT_AGENTS = 3
