@@ -436,6 +436,61 @@ async def generate_meeting_prep(ask_claude_fn, event: dict) -> str:
     return f"Meeting Prep: {subject}\n\n{brief}"
 
 
+async def generate_weekly_synthesis(ask_claude_fn) -> str:
+    """Generate weekly synthesis digest — replaces generic weekly summary.
+
+    Sections: Capacity Score, Cross-domain risks, Recommendations, Wins.
+    Delivered Sunday evening.
+    """
+    from synthesis.aggregator import aggregate_all_domains, snapshot_to_text
+    from synthesis.capacity import detect_overcommitment, capacity_report_to_text
+
+    today = date.today()
+
+    # Aggregate all domains and detect overcommitment
+    snapshot = await aggregate_all_domains()
+    report = await detect_overcommitment(snapshot)
+
+    snapshot_text = snapshot_to_text(snapshot)
+    capacity_text = capacity_report_to_text(report)
+
+    # Gather wins — completed goals, resolved items
+    wins = []
+    try:
+        from actions.goals import GOALS_FILE, _parse_goals, _current_quarter
+        if GOALS_FILE.exists():
+            content = GOALS_FILE.read_text(encoding="utf-8")
+            goals = _parse_goals(content)
+            q_goals = goals.get(_current_quarter(), {})
+            for cat, items in q_goals.items():
+                for item in items:
+                    if item["done"]:
+                        wins.append(f"[{cat}] {item['text']}")
+    except Exception:
+        pass
+
+    wins_text = "\n".join(f"  - {w}" for w in wins[:5]) if wins else "  (none tracked this period)"
+
+    context = (
+        f"Domain Snapshot:\n{snapshot_text}\n\n"
+        f"Capacity Report:\n{capacity_text}\n\n"
+        f"Completed Goals:\n{wins_text}"
+    )
+
+    synthesis = await ask_claude_fn(
+        "Generate a weekly synthesis digest for Ahmed. Structure it exactly as:\n\n"
+        "1. **Capacity Score** — state the score, label, and one-line interpretation\n"
+        "2. **Cross-Domain Risks** — top 3 risks from the data, be specific\n"
+        "3. **Recommendations** — top 3 actionable items, each starting with a verb\n"
+        "4. **Wins** — acknowledge completed goals or resolved items\n\n"
+        "Be direct, specific to the data. No filler. Under 20 lines.",
+        context,
+        system_extra=f"Today's date: {today.isoformat()}, Sunday evening",
+    )
+
+    return f"Weekly Synthesis — {today.isoformat()}\n\n{synthesis}"
+
+
 async def generate_career_alert() -> str | None:
     """Run job scraper and return formatted results, or None if no new matches."""
     from actions.jobs import fetch_new_jobs, format_jobs_text

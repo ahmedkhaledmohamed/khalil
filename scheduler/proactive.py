@@ -187,6 +187,19 @@ def generate_weekend_nudge() -> str | None:
     return nudge
 
 
+def check_overdue_commitments() -> str | None:
+    """M11: Commitments past due by 2+ days."""
+    try:
+        from actions.meetings import get_overdue_commitments, format_commitments
+        overdue = get_overdue_commitments(days_past=2)
+        if overdue:
+            formatted = format_commitments(overdue)
+            return f"📋 Overdue commitments ({len(overdue)}):\n{formatted}"
+    except Exception as e:
+        log.debug("Overdue commitments check failed: %s", e)
+    return None
+
+
 def run_proactive_checks() -> list[str]:
     """Run all proactive detectors. Returns list of findings (strings).
 
@@ -199,6 +212,7 @@ def run_proactive_checks() -> list[str]:
         check_passed_deadlines,
         check_stale_portfolio,
         check_overdue_reminders,
+        check_overdue_commitments,
     ]
 
     findings = []
@@ -314,6 +328,46 @@ def _check_deep_work_block(now: datetime) -> bool:
     except Exception:
         pass  # Calendar integration may not be available
     return False
+
+
+async def run_synthesis_nudge_check() -> str | None:
+    """M10: Check if capacity score crosses threshold and return nudge text.
+
+    Triggers when capacity score > 70. Returns formatted nudge or None.
+    Called by the scheduler to proactively alert Ahmed.
+    """
+    try:
+        from synthesis.aggregator import aggregate_all_domains
+        from synthesis.capacity import detect_overcommitment
+
+        snapshot = await aggregate_all_domains()
+        report = await detect_overcommitment(snapshot)
+
+        if report.capacity_score <= 70:
+            log.debug("Synthesis nudge: score %d, below threshold", report.capacity_score)
+            return None
+
+        score = report.capacity_score
+        if score > 80:
+            label = "OVERCOMMITTED"
+        else:
+            label = "Heavy Load"
+
+        lines = [f"Capacity Alert: {score}/100 ({label})\n"]
+
+        for risk in report.risk_areas[:3]:
+            lines.append(f"  - {risk}")
+
+        if report.recommendations:
+            lines.append("")
+            for rec in report.recommendations[:3]:
+                lines.append(f"  > {rec}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        log.debug("Synthesis nudge check failed: %s", e)
+        return None
 
 
 def filter_alerts_by_timing(findings: list[str]) -> list[str]:
