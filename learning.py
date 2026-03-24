@@ -101,6 +101,88 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
     conn.commit()
 
 
+# --- Goal Progress Signals (M12) ---
+
+def record_goal_progress(goal_text: str, domain: str, description: str = ""):
+    """Record a goal progress signal when Ahmed works on a goal-related project.
+
+    Args:
+        goal_text: The goal text being progressed.
+        domain: The domain (work, project, finance, personal).
+        description: What progress was made.
+    """
+    record_signal("goal_progress", {
+        "goal": goal_text,
+        "domain": domain,
+        "description": description or f"Progress on: {goal_text[:80]}",
+    })
+    log.info("Goal progress recorded: [%s] %s", domain, goal_text[:60])
+
+
+def get_weekly_goal_progress(days: int = 7) -> list[dict]:
+    """Get goal progress signals from the last N days for the weekly digest.
+
+    Returns list of dicts with goal, domain, description, count.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT context, COUNT(*) as count FROM interaction_signals "
+        "WHERE signal_type = 'goal_progress' AND created_at > ? "
+        "GROUP BY json_extract(context, '$.goal') "
+        "ORDER BY count DESC",
+        (cutoff,),
+    ).fetchall()
+
+    results = []
+    for row in rows:
+        if row[0]:
+            import json as _json
+            ctx = _json.loads(row[0])
+            results.append({
+                "goal": ctx.get("goal", ""),
+                "domain": ctx.get("domain", ""),
+                "description": ctx.get("description", ""),
+                "count": row[1],
+            })
+    return results
+
+
+def check_goal_relevance(action_text: str) -> str | None:
+    """Check if an action relates to a current goal.
+
+    Returns the goal text if relevant, None otherwise.
+    Used to auto-record goal progress signals.
+    """
+    try:
+        from actions.goals import GOALS_FILE, _parse_goals, _current_quarter
+        if not GOALS_FILE.exists():
+            return None
+
+        content = GOALS_FILE.read_text(encoding="utf-8")
+        goals = _parse_goals(content)
+        quarter = _current_quarter()
+        q_goals = goals.get(quarter, {})
+
+        action_lower = action_text.lower()
+        for _category, items in q_goals.items():
+            for item in items:
+                if item["done"]:
+                    continue
+                # Check if action text contains key words from the goal
+                goal_words = set(item["text"].lower().split())
+                # Remove common words
+                goal_words -= {"a", "the", "to", "and", "or", "for", "in", "on", "with", "my"}
+                if len(goal_words) == 0:
+                    continue
+                matches = sum(1 for w in goal_words if w in action_lower)
+                if matches >= 2 or (len(goal_words) <= 3 and matches >= 1):
+                    return item["text"]
+    except Exception:
+        pass
+    return None
+
+
 # --- Capability Usage Heatmap (#10) ---
 
 def get_capability_heatmap(days: int = 7) -> list[dict]:

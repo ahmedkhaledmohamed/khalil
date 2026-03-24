@@ -471,10 +471,32 @@ async def generate_weekly_synthesis(ask_claude_fn) -> str:
 
     wins_text = "\n".join(f"  - {w}" for w in wins[:5]) if wins else "  (none tracked this period)"
 
+    # M12: Goal progress bar for weekly digest
+    goal_progress_text = ""
+    try:
+        from scheduler.planning import get_goal_progress_summary
+        goal_progress_text = get_goal_progress_summary()
+    except Exception:
+        pass
+
+    # M12: Weekly goal activity signals
+    goal_signals_text = ""
+    try:
+        from learning import get_weekly_goal_progress
+        signals = get_weekly_goal_progress(days=7)
+        if signals:
+            goal_signals_text = "Goal Activity This Week:\n" + "\n".join(
+                f"  - {s['description']} (x{s['count']})" for s in signals[:5]
+            )
+    except Exception:
+        pass
+
     context = (
         f"Domain Snapshot:\n{snapshot_text}\n\n"
         f"Capacity Report:\n{capacity_text}\n\n"
-        f"Completed Goals:\n{wins_text}"
+        f"Completed Goals:\n{wins_text}\n\n"
+        f"{f'{goal_progress_text}{chr(10)}{chr(10)}' if goal_progress_text else ''}"
+        f"{f'{goal_signals_text}{chr(10)}{chr(10)}' if goal_signals_text else ''}"
     )
 
     synthesis = await ask_claude_fn(
