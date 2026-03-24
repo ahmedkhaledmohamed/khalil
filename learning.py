@@ -617,6 +617,31 @@ async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
         )
         insights.append({"id": insight_id, "category": "intent_detection", "summary": f"{len(pattern_misses)} intent pattern misses"})
 
+    # 6. Agent delegation performance
+    delegations = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'agent_delegation' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if delegations:
+        total_delegations = len(delegations)
+        latencies = []
+        successes = 0
+        for row in delegations:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            latencies.append(ctx.get("latency_ms", 0))
+            if ctx.get("success"):
+                successes += 1
+        avg_latency = int(sum(latencies) / len(latencies)) if latencies else 0
+        success_rate = round(successes / total_delegations * 100, 1)
+        insight_id = store_insight(
+            "agent_performance",
+            f"{total_delegations} sub-agent delegations today (avg {avg_latency}ms, {success_rate}% success)",
+            f"Total: {total_delegations}, Avg latency: {avg_latency}ms, Success rate: {success_rate}%",
+            "Review delegation patterns — high latency or low success rate may indicate model or prompt issues.",
+        )
+        insights.append({"id": insight_id, "category": "agent_performance", "summary": f"{total_delegations} delegations, {success_rate}% success"})
+
     if not insights:
         log.info("Daily micro-reflection: no quality issues detected")
 

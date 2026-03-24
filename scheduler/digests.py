@@ -1,5 +1,6 @@
 """Digest generation — morning brief, weekly summary, financial alerts, career alerts."""
 
+import asyncio
 import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -68,18 +69,50 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     day_name = today.strftime("%A")
     day_style = DAY_STYLE.get(today.weekday(), "")
 
-    # Gather context
+    # Gather context — sync calls
     personal = get_relevant_context("current work projects goals", max_chars=1500)
 
-    # Search for recent / relevant items
-    recent = await hybrid_search("recent important updates reminders deadlines", limit=5)
-    recent_text = "\n".join(
-        f"- [{r['category']}] {r['title']}: {r['content'][:150]}" for r in recent
-    )
-
-    # Check active reminders — due today or upcoming
     from actions.reminders import list_reminders
     reminders = list_reminders()
+
+    # --- Parallel async data gathering ---
+    async def _fetch_recent():
+        return await hybrid_search("recent important updates reminders deadlines", limit=5)
+
+    async def _fetch_calendar():
+        try:
+            from actions.calendar import get_today_events, format_events_text
+            events = await get_today_events()
+            if events:
+                return f"\n\nToday's calendar ({len(events)} events):\n{format_events_text(events)}"
+        except Exception as e:
+            log.debug("Calendar fetch for brief failed: %s", e)
+        return ""
+
+    async def _fetch_jobs():
+        try:
+            from actions.jobs import fetch_new_jobs
+            jobs = await fetch_new_jobs()
+            if jobs:
+                return "\n\nNew job matches ({}):\n".format(len(jobs)) + "\n".join(
+                    f"- {j['title']} @ {j['company']}" for j in jobs[:3]
+                )
+        except Exception:
+            pass
+        return ""
+
+    recent_raw, weather, calendar_text, job_text = await asyncio.gather(
+        _fetch_recent(),
+        _get_weather_toronto(),
+        _fetch_calendar(),
+        _fetch_jobs(),
+    )
+
+    recent_text = "\n".join(
+        f"- [{r['category']}] {r['title']}: {r['content'][:150]}" for r in recent_raw
+    )
+
+    # Reminders (from sync call above)
     reminder_text = ""
     if reminders:
         due_today = [r for r in reminders if r["due_at"][:10] == today_iso]
@@ -94,33 +127,9 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         if parts:
             reminder_text = "\n\nReminders:\n" + "\n".join(parts)
 
-    # Weather
-    weather = await _get_weather_toronto()
     weather_text = f"\n\nToronto weather: {weather}" if weather else ""
 
-    # Calendar events (non-blocking, best-effort)
-    calendar_text = ""
-    try:
-        from actions.calendar import get_today_events, format_events_text
-        events = await get_today_events()
-        if events:
-            calendar_text = f"\n\nToday's calendar ({len(events)} events):\n{format_events_text(events)}"
-    except Exception as e:
-        log.debug("Calendar fetch for brief failed: %s", e)
-
-    # Job matches (non-blocking, best-effort)
-    job_text = ""
-    try:
-        from actions.jobs import fetch_new_jobs
-        jobs = await fetch_new_jobs()
-        if jobs:
-            job_text = f"\n\nNew job matches ({len(jobs)}):\n" + "\n".join(
-                f"- {j['title']} @ {j['company']}" for j in jobs[:3]
-            )
-    except Exception:
-        pass
-
-    # Work priorities (non-blocking)
+    # Work priorities (sync, non-blocking)
     work_text = ""
     try:
         from actions.work import get_sprint_summary, get_p0_epics
@@ -128,7 +137,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     except Exception:
         pass
 
-    # Goal progress (non-blocking)
+    # Goal progress (sync, non-blocking)
     goal_text = ""
     try:
         from actions.goals import get_goal_summary
@@ -137,7 +146,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     except Exception:
         pass
 
-    # Financial deadlines within 14 days (non-blocking)
+    # Financial deadlines within 14 days (sync, non-blocking)
     deadline_text = ""
     try:
         from actions.finance import get_deadlines
