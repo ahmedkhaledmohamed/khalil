@@ -17,7 +17,7 @@ import httpx
 import keyring
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -4619,6 +4619,11 @@ async def startup():
     except Exception as e:
         log.warning("MCP client initialization failed: %s", e)
 
+    # Register webhook handlers
+    from webhooks.github import GitHubWebhookHandler
+    from webhooks.registry import register as register_webhook
+    register_webhook("github", GitHubWebhookHandler())
+
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
 
@@ -4657,6 +4662,41 @@ async def health():
     report["autonomy_level"] = autonomy.format_level() if autonomy else "not initialized"
     report["scheduled_jobs"] = jobs
     return report
+
+
+@app.post("/webhook/{source}")
+async def webhook_endpoint(source: str, request: Request):
+    """Handle inbound webhook events from external services."""
+    from webhooks.registry import get as get_webhook_handler
+
+    handler = get_webhook_handler(source)
+    if not handler:
+        raise HTTPException(status_code=404, detail=f"No handler for source: {source}")
+
+    body = await request.body()
+    if not await handler.validate(dict(request.headers), body):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = json.loads(body)
+    message = await handler.handle(payload)
+
+    if message and OWNER_CHAT_ID:
+        primary = channel_registry.get_primary()
+        if primary:
+            await primary.send_message(OWNER_CHAT_ID, f"\U0001f514 Webhook ({source}):\n\n{message}")
+
+    return {"ok": True}
+
+
+@app.get("/webhook/{source}")
+async def webhook_verify(source: str, request: Request):
+    """Handle webhook verification challenges (e.g., WhatsApp, Slack)."""
+    params = dict(request.query_params)
+    if "hub.challenge" in params:
+        verify_token = keyring.get_password(KEYRING_SERVICE, f"webhook-verify-{source}")
+        if params.get("hub.verify_token") == verify_token:
+            return int(params["hub.challenge"])
+    return {"error": "Verification failed"}
 
 
 @app.on_event("shutdown")
