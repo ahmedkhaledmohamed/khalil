@@ -831,8 +831,24 @@ async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
             if not ok:
                 raise RuntimeError(f"Validation failed after retry: {err}")
 
+        # Guardian review of generated code
+        guardian_flag = ""
+        try:
+            from actions.guardian import review_code_patch, GuardianVerdict
+            guardian_result = await review_code_patch(module_source, f"actions/{spec['name']}.py")
+            if guardian_result.verdict == GuardianVerdict.BLOCK:
+                guardian_flag = "[NEEDS REVIEW] "
+                log.warning("Guardian blocked extension %s: %s", spec['name'], guardian_result.reason)
+                try:
+                    from learning import record_signal as _rec
+                    _rec("guardian_blocked_heal", {"name": spec['name'], "reason": guardian_result.reason})
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning("Guardian review failed for extension %s: %s — proceeding", spec['name'], e)
+
         # Commit and push from worktree, open PR
-        pr_url = await _commit_and_pr_from_worktree(wt_path, branch, spec, manifest, warnings)
+        pr_url = await _commit_and_pr_from_worktree(wt_path, branch, spec, manifest, warnings, pr_title_prefix=guardian_flag)
         return module_source, json.dumps(manifest), pr_url
 
     finally:
@@ -842,6 +858,7 @@ async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
 async def _commit_and_pr_from_worktree(
     wt_path: Path, branch: str, spec: dict, manifest: dict,
     warnings: list[str] | None = None,
+    pr_title_prefix: str = "",
 ) -> str:
     """Commit changes in worktree and open a PR. Returns PR URL."""
     name = spec["name"]
@@ -891,7 +908,7 @@ async def _commit_and_pr_from_worktree(
         # Open PR
         result = subprocess.run(
             ["gh", "pr", "create",
-             "--title", f"Khalil: Add {name} capability (Claude Code)",
+             "--title", f"{pr_title_prefix}Khalil: Add {name} capability (Claude Code)",
              "--body", body,
              ],
             cwd=str(wt_path),
@@ -1369,7 +1386,7 @@ async def create_extension_pr(
             # Open PR
             result = _run_gh(
                 "pr", "create",
-                "--title", f"Khalil: Add {name} capability",
+                "--title", f"{pr_title_prefix}Khalil: Add {name} capability",
                 "--body", pr_body,
             )
             pr_url = result.stdout.strip()
