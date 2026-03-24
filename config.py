@@ -85,6 +85,10 @@ SANDBOX_IMAGE = "khalil-sandbox"
 SANDBOX_MEM_LIMIT = "256m"
 SANDBOX_TIMEOUT = 15
 
+# Agent swarms
+SWARM_ENABLED = True
+MAX_CONCURRENT_AGENTS = 3
+
 
 class AutonomyLevel(Enum):
     SUPERVISED = 1   # Ask before every action
