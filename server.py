@@ -845,18 +845,26 @@ async def _try_extension_handler(hint: str, query: str, update, context) -> bool
     """Try to route a query to a matching extension handler.
 
     Looks up extension manifests by command name matching the action hint.
+    Skips disabled extensions (checked via plugin manifest).
     Returns True if handled, False otherwise.
     """
     import importlib
     from config import EXTENSIONS_DIR
+    from extensions.manifest import is_extension_enabled
 
     if not EXTENSIONS_DIR or not EXTENSIONS_DIR.exists():
         return False
 
     for manifest_path in EXTENSIONS_DIR.glob("*.json"):
+        if manifest_path.name == "extensions.json":
+            continue
         try:
             manifest = json.loads(manifest_path.read_text())
             if manifest.get("command") == hint:
+                ext_name = manifest.get("name", manifest_path.stem)
+                if not is_extension_enabled(ext_name):
+                    log.debug("Extension '%s' is disabled, skipping", ext_name)
+                    continue
                 mod = importlib.import_module(manifest["action_module"])
                 handler_fn = getattr(mod, manifest["handler_function"])
                 # Synthesize args from the query (pass the full query as args)
@@ -1647,14 +1655,37 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                 await update.message.reply_text(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
                 return True
 
-        # Needs approval — show Approve/Deny
+        # Guardian review for RISKY / uncategorized shell actions
+        from actions.guardian import review_tool_call, GuardianVerdict
+        guardian_result = await review_tool_call(
+            "shell_write", cmd, {"llm_generated": llm_generated, "description": description},
+        )
+        if guardian_result.verdict == GuardianVerdict.BLOCK:
+            autonomy.log_audit("shell_write", f"GUARDIAN BLOCKED: {cmd}", result="guardian_blocked")
+            try:
+                from learning import record_signal
+                record_signal("guardian_blocked", {"action": "shell_write", "command": cmd, "reason": guardian_result.reason})
+            except Exception:
+                pass
+            await update.message.reply_text(
+                f"🛡 Guardian blocked this command:\n\n`{cmd}`\n\n"
+                f"Reason: {guardian_result.reason}",
+                parse_mode="Markdown",
+            )
+            return True
+
+        # Needs approval — show Approve/Deny (include guardian reason if NEEDS_CONFIRMATION)
+        guardian_note = ""
+        if guardian_result.verdict == GuardianVerdict.NEEDS_CONFIRMATION:
+            guardian_note = f"\n\n🛡 Guardian: {guardian_result.reason}"
+
         action_id = autonomy.create_pending_action(
             "shell_write",
             f"Run: {cmd}",
             {"command": cmd, "llm_generated": llm_generated, "user_query": user_query},
         )
         await update.message.reply_text(
-            f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}\n\n"
+            f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}{guardian_note}\n\n"
             f"{autonomy.format_level()}",
             reply_markup=approve_deny_keyboard(),
             parse_mode="Markdown",
@@ -3119,6 +3150,72 @@ async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Thanks for the feedback! Recorded as {sentiment}.")
 
 
+async def cmd_extensions(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage extensions: list, enable, disable, info."""
+    from extensions.manifest import (
+        list_extensions, set_extension_enabled, load_manifest,
+    )
+
+    args = context.args or []
+    sub = args[0].lower() if args else "list"
+
+    if sub == "list":
+        exts = list_extensions()
+        if not exts:
+            await update.message.reply_text("No extensions registered.")
+            return
+        lines = ["📦 Extensions\n"]
+        for ext in exts:
+            status = "✅" if ext.get("enabled") else "❌"
+            lines.append(f"{status} **{ext['name']}** — {ext.get('description', 'no description')}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    elif sub == "enable" and len(args) >= 2:
+        name = args[1]
+        if set_extension_enabled(name, True):
+            await update.message.reply_text(f"✅ Extension '{name}' enabled. Restart to apply.")
+        else:
+            await update.message.reply_text(f"Extension '{name}' not found in manifest.")
+
+    elif sub == "disable" and len(args) >= 2:
+        name = args[1]
+        if set_extension_enabled(name, False):
+            await update.message.reply_text(f"❌ Extension '{name}' disabled. Restart to apply.")
+        else:
+            await update.message.reply_text(f"Extension '{name}' not found in manifest.")
+
+    elif sub == "info" and len(args) >= 2:
+        name = args[1]
+        manifest = load_manifest()
+        entry = manifest["extensions"].get(name)
+        if not entry:
+            await update.message.reply_text(f"Extension '{name}' not found.")
+            return
+        status = "enabled" if entry.get("enabled") else "disabled"
+        lines = [
+            f"📦 **{name}**\n",
+            f"Status: {status}",
+            f"Version: {entry.get('version', '?')}",
+            f"Type: {entry.get('action_type', '?')}",
+            f"Description: {entry.get('description', '—')}",
+            f"Created: {entry.get('created_at', '?')}",
+            f"PR: {entry.get('source_pr') or '—'}",
+        ]
+        patterns = entry.get("intent_patterns", [])
+        if patterns:
+            lines.append(f"Patterns: {', '.join(patterns)}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+    else:
+        await update.message.reply_text(
+            "Usage:\n"
+            "/extensions — list all extensions\n"
+            "/extensions enable <name>\n"
+            "/extensions disable <name>\n"
+            "/extensions info <name>"
+        )
+
+
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Unknown command. Send /help to see available commands."
@@ -3229,19 +3326,35 @@ def reregister_extension(application, name: str) -> str:
 
 
 def _load_extensions(application):
-    """Dynamically register command handlers from extension manifests."""
+    """Dynamically register command handlers from extension manifests.
+
+    Bootstraps the plugin manifest on first run, then only loads
+    extensions that are enabled in extensions.json.
+    """
     import importlib
     from config import EXTENSIONS_DIR
+    from extensions.manifest import bootstrap_manifest, is_extension_enabled
 
     if not EXTENSIONS_DIR.exists():
         return
 
+    # Ensure manifest exists with entries for all existing extensions
+    bootstrap_manifest()
+
     for manifest_path in sorted(EXTENSIONS_DIR.glob("*.json")):
+        if manifest_path.name == "extensions.json":
+            continue
         try:
             manifest = json.loads(manifest_path.read_text())
             module_name = manifest["action_module"]
             handler_name = manifest["handler_function"]
             command = manifest["command"]
+            ext_name = manifest.get("name", manifest_path.stem)
+
+            # Skip disabled extensions
+            if not is_extension_enabled(ext_name):
+                log.info("Extension '%s' is disabled, skipping load", ext_name)
+                continue
 
             # Import the action module
             mod = importlib.import_module(module_name)
@@ -3300,6 +3413,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
     application.add_handler(CommandHandler("feedback", cmd_feedback))
+    application.add_handler(CommandHandler("extensions", cmd_extensions))
 
     # Dynamically register extension handlers
     _load_extensions(application)

@@ -899,7 +899,19 @@ async def _commit_and_pr_from_worktree(
         )
         if result.returncode != 0:
             raise RuntimeError(f"PR creation failed: {result.stderr}")
-        return result.stdout.strip()
+        pr_url = result.stdout.strip()
+
+        # Register in plugin manifest (disabled until PR merged)
+        from extensions.manifest import register_extension
+        register_extension(
+            name,
+            action_type=spec.get("command", name),
+            intent_patterns=[],
+            description=spec.get("description", ""),
+            source_pr=pr_url,
+        )
+
+        return pr_url
 
     return await asyncio.to_thread(_workflow)
 
@@ -1272,6 +1284,7 @@ async def create_extension_pr(
     warnings: list[str] | None = None,
     test_source: str | None = None,
     scheduler_source: str | None = None,
+    pr_title_prefix: str = "",
 ) -> str:
     """Create a branch, commit the generated files, push, and open a PR.
 
@@ -1361,6 +1374,16 @@ async def create_extension_pr(
             )
             pr_url = result.stdout.strip()
 
+            # Register in plugin manifest (disabled until PR merged)
+            from extensions.manifest import register_extension
+            register_extension(
+                name,
+                action_type=manifest.get("command", name),
+                intent_patterns=[],
+                description=manifest.get("description", ""),
+                source_pr=pr_url,
+            )
+
             return pr_url
         finally:
             # Always return to original branch
@@ -1443,11 +1466,28 @@ async def generate_and_pr(payload: dict) -> str:
             else:
                 log.warning("Test generation failed for %s — proceeding without tests", name)
 
+            # Guardian review of generated code
+            guardian_flag = ""
+            try:
+                from actions.guardian import review_code_patch, GuardianVerdict
+                guardian_result = await review_code_patch(module_source, f"actions/{name}.py")
+                if guardian_result.verdict == GuardianVerdict.BLOCK:
+                    guardian_flag = "[NEEDS REVIEW] "
+                    log.warning("Guardian blocked extension %s: %s", name, guardian_result.reason)
+                    try:
+                        from learning import record_signal as _rec
+                        _rec("guardian_blocked_heal", {"name": name, "reason": guardian_result.reason})
+                    except Exception:
+                        pass
+            except Exception as e:
+                log.warning("Guardian review failed for extension %s: %s — proceeding", name, e)
+
             manifest = json.loads(manifest_json)
             if scheduler_source:
                 manifest["scheduler_job"] = f"actions.{name}_scheduler"
 
-            pr_url = await create_extension_pr(name, module_source, manifest, warnings, test_source, scheduler_source)
+            pr_title_prefix = guardian_flag
+            pr_url = await create_extension_pr(name, module_source, manifest, warnings, test_source, scheduler_source, pr_title_prefix=pr_title_prefix)
 
         _last_generation_time = time.time()
 
