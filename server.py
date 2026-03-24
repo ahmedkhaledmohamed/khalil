@@ -443,8 +443,11 @@ def _get_cached_response(query: str) -> str | None:
     return None
 
 
-async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
+async def ask_llm(query: str, context: str, system_extra: str = "", model: str | None = None) -> str:
     """Send query + context to LLM for reasoning. Supports Ollama (local) and Claude (cloud).
+
+    Args:
+        model: Explicit model override. If None, model_router selects based on query complexity.
 
     Returns an error message (not raises) if the LLM is unreachable.
     """
@@ -508,6 +511,16 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
 
     user_message = f"Context from Ahmed's archives:\n\n{context}\n\n---\n\nQuestion: {query}"
 
+    # M6: Smart model routing — select model based on query complexity
+    from model_router import route_query
+    _routed_tier, _routed_model = route_query(query)
+    _selected_model = model or _routed_model
+    try:
+        from learning import record_signal
+        record_signal("model_routed", {"tier": _routed_tier.value, "model": _selected_model})
+    except Exception:
+        pass
+
     # #78: Privacy-aware LLM routing — force Ollama for sensitive queries
     import re as _re
     _force_local = any(_re.search(p, query, _re.IGNORECASE) for p in SENSITIVE_PATTERNS)
@@ -518,7 +531,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
     if LLM_BACKEND == "claude" and claude and not _force_local:
         try:
             response = await claude.messages.create(
-                model=CLAUDE_MODEL,
+                model=_selected_model,
                 max_tokens=1500,
                 system=system,
                 messages=[{"role": "user", "content": user_message}],
@@ -2029,6 +2042,38 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     cmd = payload.get("command")
                     await query.message.reply_text("🖥 New Cursor terminal created" + (f"\nRunning: `{cmd}`" if cmd else ""), parse_mode="Markdown")
 
+            elif result["action_type"] == "task_plan":
+                import json as _json
+                payload = _json.loads(result["payload"]) if isinstance(result["payload"], str) else result["payload"]
+                from orchestrator import TaskStep, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
+                ensure_plans_table()
+                steps = [TaskStep.from_dict(s) for s in payload.get("steps", [])]
+                original_query = payload.get("query", "")
+
+                async def _execute_single_step(step):
+                    intent = None
+                    if step.action == "reminder":
+                        intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
+                    elif step.action == "email":
+                        intent = {"action": "email", "to": step.params.get("to", ""), "subject": step.params.get("subject", ""), "context_query": step.params.get("context_query", "")}
+                    elif step.action == "calendar":
+                        intent = {"action": "calendar"}
+                    elif step.action == "shell":
+                        intent = {"action": "shell", "command": step.params.get("command", ""), "description": step.description, "llm_generated": True}
+                    else:
+                        intent = await detect_intent(step.description)
+                    if intent:
+                        intent["user_query"] = step.description
+                        handled = await handle_action_intent(intent, update)
+                        if handled:
+                            return f"Completed: {step.description}"
+                    return f"Executed: {step.description}"
+
+                plan_result = await execute_task_plan(
+                    steps, original_query, channel, query.message.chat_id, _execute_single_step,
+                )
+                await query.message.reply_text(format_plan_summary(plan_result))
+
             else:
                 status_msg = await autonomy.execute_action(result)
                 await query.message.reply_text(status_msg)
@@ -2803,6 +2848,42 @@ async def cmd_commitments(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "  /commitments done <id> — Mark done\n"
             "  /commitments add <person> <text> — Add manually"
         )
+
+
+async def cmd_tasks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /tasks command: list active and recent task plans from the orchestrator."""
+    from orchestrator import list_active_plans, ensure_table as ensure_plans_table
+    try:
+        ensure_plans_table()
+        plans = list_active_plans()
+    except Exception as e:
+        await update.message.reply_text(f"Failed to load plans: {e}")
+        return
+
+    if not plans:
+        await update.message.reply_text("No task plans found.")
+        return
+
+    status_icons = {
+        "in_progress": "🔄",
+        "completed": "✅",
+        "partial_failure": "⚠️",
+        "blocked": "🚫",
+    }
+
+    lines = [f"📋 Task Plans ({len(plans)}):"]
+    for p in plans[:10]:
+        icon = status_icons.get(p["status"], "❓")
+        query_short = p["query"][:60] + ("..." if len(p["query"]) > 60 else "")
+        lines.append(
+            f"\n{icon} {query_short}\n"
+            f"   ID: {p['plan_id']} | {p['step_count']} steps | {p['status']}\n"
+            f"   Created: {p['created_at'][:16]}"
+        )
+        if p.get("completed_at"):
+            lines.append(f"   Completed: {p['completed_at'][:16]}")
+
+    await update.message.reply_text("\n".join(lines))
 
 
 async def cmd_nudge(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3837,6 +3918,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("extensions", cmd_extensions))
     application.add_handler(CommandHandler("mcp", cmd_mcp))
     application.add_handler(CommandHandler("commitments", cmd_commitments))
+    application.add_handler(CommandHandler("tasks", cmd_tasks))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -3872,6 +3954,7 @@ async def start_telegram_bot():
         BotCommand("learn", "Self-improvement insights"),
         BotCommand("mcp", "Manage MCP server connections"),
         BotCommand("commitments", "Track meeting commitments"),
+        BotCommand("tasks", "View active task plans"),
         BotCommand("help", "Show help"),
     ])
 
@@ -4113,6 +4196,22 @@ def _setup_scheduler():
         CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
         id="oauth_refresh",
         name="OAuth Token Refresh",
+        replace_existing=True,
+    )
+
+    # M8.5: State-aware proactive alerts — every 30 minutes during work hours
+    async def _state_alerts_job():
+        if not _can_send():
+            return
+        from scheduler.state_alerts import run_state_aware_checks
+        await run_state_aware_checks(channel, OWNER_CHAT_ID)
+
+    scheduler.add_job(
+        _state_alerts_job,
+        "interval",
+        minutes=30,
+        id="state_alerts",
+        name="M8.5: State-Aware Alerts",
         replace_existing=True,
     )
 
