@@ -1187,6 +1187,22 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
         log.warning("Sandbox check failed for %s: %s", module_path, e)
 
     handler_name = f"cmd_{command_name}"
+
+    # Container sandbox integration — route tests through Docker when available
+    from sandbox import run_in_sandbox, is_docker_available
+    use_sandbox = is_docker_available()
+    if use_sandbox:
+        log.info("Docker available — running smoke tests in container sandbox")
+    else:
+        log.warning("Docker not available — falling back to host subprocess for smoke test")
+
+    class SandboxResult:
+        """Lightweight result object matching subprocess.CompletedProcess interface."""
+        def __init__(self, rc, out, err):
+            self.returncode = rc
+            self.stdout = out
+            self.stderr = err
+
     # Phase 1: Import check + handler exists
     test_script = (
         f"import sys; sys.path.insert(0, {str(module_path.parent)!r}); "
@@ -1197,10 +1213,15 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
         f"'{handler_name} is not callable'"
     )
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", test_script],
-            capture_output=True, text=True, timeout=10,
-        )
+        if use_sandbox:
+            container_script = test_script.replace(str(KHALIL_DIR), "/khalil")
+            exit_code, stdout, stderr = run_in_sandbox(container_script, timeout=10)
+            result = SandboxResult(exit_code, stdout, stderr)
+        else:
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True, text=True, timeout=10,
+            )
         if result.returncode != 0:
             error = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
             return False, f"Smoke test failed: {error}"
@@ -1235,10 +1256,15 @@ except Exception as e:
         sys.exit(1)
 """
     try:
-        result = subprocess.run(
-            [sys.executable, "-c", mock_test_script],
-            capture_output=True, text=True, timeout=15,
-        )
+        if use_sandbox:
+            container_mock_script = mock_test_script.replace(str(KHALIL_DIR), "/khalil")
+            exit_code, stdout, stderr = run_in_sandbox(container_mock_script, timeout=15)
+            result = SandboxResult(exit_code, stdout, stderr)
+        else:
+            result = subprocess.run(
+                [sys.executable, "-c", mock_test_script],
+                capture_output=True, text=True, timeout=15,
+            )
         if result.returncode != 0:
             error = result.stderr.strip().split("\n")[-1] if result.stderr else "Unknown error"
             if error.startswith("FAIL:"):

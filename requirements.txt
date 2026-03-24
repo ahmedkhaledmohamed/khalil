@@ -30,6 +30,9 @@ croniter>=2.0.0
 # Web search
 duckduckgo-search>=7.0.0
 
+# Container sandbox
+docker>=7.0.0
+
 # Job scraper dependencies
 beautifulsoup4>=4.12.0
 requests>=2.31.0
