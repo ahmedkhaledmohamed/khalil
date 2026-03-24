@@ -3082,6 +3082,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if conversation:
         full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
 
+    # Live state injection — real-time awareness of calendar, email, Cursor, reminders
+    live_context = ""
+    try:
+        from state.collector import collect_live_state, format_for_prompt
+        live = await collect_live_state()
+        live_context = format_for_prompt(live)
+    except Exception as e:
+        log.warning("Live state collection failed: %s", e)
+
+    # Prepend live state before archive context so LLM sees current state first
+    if live_context:
+        full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+
     # Ask LLM
     response = await ask_claude(query, full_context)
 
