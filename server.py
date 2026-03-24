@@ -1644,14 +1644,37 @@ async def handle_action_intent(intent: dict, update: Update) -> bool:
                 await update.message.reply_text(f"```\n{format_output(result, final_cmd)}\n```", parse_mode="Markdown")
                 return True
 
-        # Needs approval — show Approve/Deny
+        # Guardian review for RISKY / uncategorized shell actions
+        from actions.guardian import review_tool_call, GuardianVerdict
+        guardian_result = await review_tool_call(
+            "shell_write", cmd, {"llm_generated": llm_generated, "description": description},
+        )
+        if guardian_result.verdict == GuardianVerdict.BLOCK:
+            autonomy.log_audit("shell_write", f"GUARDIAN BLOCKED: {cmd}", result="guardian_blocked")
+            try:
+                from learning import record_signal
+                record_signal("guardian_blocked", {"action": "shell_write", "command": cmd, "reason": guardian_result.reason})
+            except Exception:
+                pass
+            await update.message.reply_text(
+                f"🛡 Guardian blocked this command:\n\n`{cmd}`\n\n"
+                f"Reason: {guardian_result.reason}",
+                parse_mode="Markdown",
+            )
+            return True
+
+        # Needs approval — show Approve/Deny (include guardian reason if NEEDS_CONFIRMATION)
+        guardian_note = ""
+        if guardian_result.verdict == GuardianVerdict.NEEDS_CONFIRMATION:
+            guardian_note = f"\n\n🛡 Guardian: {guardian_result.reason}"
+
         action_id = autonomy.create_pending_action(
             "shell_write",
             f"Run: {cmd}",
             {"command": cmd, "llm_generated": llm_generated, "user_query": user_query},
         )
         await update.message.reply_text(
-            f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}\n\n"
+            f"🖥 I'd run this command:\n\n`{cmd}`\n\n{description}{guardian_note}\n\n"
             f"{autonomy.format_level()}",
             reply_markup=approve_deny_keyboard(),
             parse_mode="Markdown",

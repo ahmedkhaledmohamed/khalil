@@ -762,9 +762,10 @@ async def create_healing_pr(target_file: str, patched_content: str, diagnosis: d
             _run_git("push", "-u", "origin", branch_name)
 
             body = _build_pr_body(diagnosis)
+            title_prefix = "[NEEDS REVIEW] " if diagnosis.get("_guardian_blocked") else ""
             result = _run_gh(
                 "pr", "create",
-                "--title", f"Khalil self-heal: {diagnosis['summary'][:60]}",
+                "--title", f"{title_prefix}Khalil self-heal: {diagnosis['summary'][:60]}",
                 "--body", body,
             )
             return result.stdout.strip()
@@ -848,8 +849,28 @@ async def run_self_healing(triggers: list[dict], bot, chat_id: int):
             store_insight("self_heal", diagnosis["summary"], fingerprint, f"Validation failed: {error}")
             continue
 
-        # 4. Create PR
+        # 3.5. Guardian review of the healing patch
+        guardian_blocked = False
+        try:
+            from actions.guardian import review_code_patch, GuardianVerdict
+            guardian_result = await review_code_patch(patched_func, primary["file"])
+            if guardian_result.verdict == GuardianVerdict.BLOCK:
+                guardian_blocked = True
+                log.warning("Guardian blocked healing patch for %s: %s", fingerprint, guardian_result.reason)
+                try:
+                    from learning import record_signal
+                    record_signal("guardian_blocked_heal", {
+                        "fingerprint": fingerprint, "reason": guardian_result.reason,
+                    })
+                except Exception:
+                    pass
+        except Exception as e:
+            log.warning("Guardian review failed for healing patch: %s — proceeding", e)
+
+        # 4. Create PR (prefix title with [NEEDS REVIEW] if guardian blocked)
         patched_content = substitute_function_in_file(target_path, patched_func)
+        if guardian_blocked:
+            diagnosis = {**diagnosis, "_guardian_blocked": True}
         try:
             pr_url = await create_healing_pr(primary["file"], patched_content, diagnosis)
         except Exception as e:
