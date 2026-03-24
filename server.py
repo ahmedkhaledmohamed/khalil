@@ -44,6 +44,7 @@ from config import (
     SENSITIVE_PATTERNS,
     TIMEZONE,
 )
+from model_router import route_query
 from knowledge.indexer import init_db
 from knowledge.search import hybrid_search, get_stats
 from knowledge.context import get_relevant_context, get_section_names
@@ -443,8 +444,11 @@ def _get_cached_response(query: str) -> str | None:
     return None
 
 
-async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
+async def ask_llm(query: str, context: str, system_extra: str = "", *, model: str | None = None) -> str:
     """Send query + context to LLM for reasoning. Supports Ollama (local) and Claude (cloud).
+
+    Args:
+        model: Optional model override. If None, uses smart router to select model.
 
     Returns an error message (not raises) if the LLM is unreachable.
     """
@@ -511,9 +515,26 @@ async def ask_llm(query: str, context: str, system_extra: str = "") -> str:
         # Fall through to Ollama path below instead of Claude
 
     if LLM_BACKEND == "claude" and claude and not _force_local:
+        # Smart model routing -- select tier based on query complexity
+        if model:
+            _routed_model = model
+            _tier_value = "explicit"
+        else:
+            _tier, _routed_model = route_query(query)
+            _tier_value = _tier.value
+        log.info("Model router: tier=%s model=%s", _tier_value, _routed_model)
+        try:
+            from learning import record_signal
+            record_signal("model_routed", {
+                "query_preview": query[:100],
+                "tier": _tier_value,
+                "model": _routed_model,
+            })
+        except Exception:
+            pass  # Signal recording should never block LLM call
         try:
             response = await claude.messages.create(
-                model=CLAUDE_MODEL,
+                model=_routed_model,
                 max_tokens=1500,
                 system=system,
                 messages=[{"role": "user", "content": user_message}],
@@ -3903,6 +3924,26 @@ def _setup_scheduler():
         seconds=60,
         id="dev_state_poll",
         name="Dev State Poll",
+        replace_existing=True,
+    )
+
+    # State-aware proactive alerts — every 30 min during work hours (M-F 8AM-6PM)
+    async def _state_aware_alerts_job():
+        if not _can_send():
+            return
+        from scheduler.state_alerts import run_state_aware_checks
+        findings = await run_state_aware_checks()
+        if findings:
+            text = "🔔 State Alert:\n\n" + "\n\n".join(findings)
+            await channel.send_message(OWNER_CHAT_ID, text)
+            log.info("State-aware alert sent: %d findings", len(findings))
+
+    scheduler.add_job(
+        _state_aware_alerts_job,
+        "interval",
+        minutes=30,
+        id="state_aware_alerts",
+        name="State-Aware Alerts",
         replace_existing=True,
     )
 

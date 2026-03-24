@@ -642,6 +642,28 @@ async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
         )
         insights.append({"id": insight_id, "category": "agent_performance", "summary": f"{total_delegations} delegations, {success_rate}% success"})
 
+    # 7. Model routing distribution
+    routed = conn.execute(
+        "SELECT context FROM interaction_signals WHERE signal_type = 'model_routed' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+
+    if routed:
+        tier_counts: dict[str, int] = {}
+        for row in routed:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            tier = ctx.get("tier", "unknown")
+            tier_counts[tier] = tier_counts.get(tier, 0) + 1
+        total_routed = sum(tier_counts.values())
+        breakdown = ", ".join(f"{v} {k.upper()}" for k, v in sorted(tier_counts.items()))
+        insight_id = store_insight(
+            "model_routing",
+            f"Routed {total_routed} queries: {breakdown}",
+            f"Tier distribution: {json.dumps(tier_counts)}",
+            "Review tier distribution -- high COMPLEX usage may indicate over-classification or costly queries.",
+        )
+        insights.append({"id": insight_id, "category": "model_routing", "summary": f"Routed {total_routed} queries: {breakdown}"})
+
     if not insights:
         log.info("Daily micro-reflection: no quality issues detected")
 
