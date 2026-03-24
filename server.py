@@ -17,7 +17,7 @@ import httpx
 import keyring
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from telegram import Update, BotCommand, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -1822,6 +1822,48 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             approve_deny_keyboard(), parse_mode="Markdown")
         return True
 
+    # --- Browser automation ---
+
+    elif action == "browser_navigate":
+        url = intent.get("url", "")
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        screenshot_path, title = await navigate_and_screenshot(url)
+        if screenshot_path:
+            await ctx.reply_photo(screenshot_path, caption=f"Page: {title}\nURL: {url}")
+        else:
+            await ctx.reply(f"Navigation result: {title}")
+        return True
+
+    elif action == "browser_extract":
+        url = intent.get("url", "")
+        selector = intent.get("selector")
+        from actions.browser import extract_page_text, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        text = await extract_page_text(url, selector)
+        await ctx.reply(text[:4000])
+        return True
+
+    elif action == "browser_screenshot":
+        url = intent.get("url", "")
+        from actions.browser import navigate_and_screenshot, is_financial_url
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        await ctx.typing()
+        path, title = await navigate_and_screenshot(url)
+        if path:
+            await ctx.reply_photo(path, caption=title)
+        else:
+            await ctx.reply(title)
+        return True
+
     # --- macOS awareness ---
 
     elif action == "macos_apps":
@@ -3397,6 +3439,56 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ctx.reply(text)
 
 
+async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming voice messages — transcribe and process as text."""
+    import tempfile
+    import os
+    from actions.voice import convert_ogg_to_wav, transcribe_voice
+
+    ctx = _ctx_from_update(update)
+
+    if not update.message or not (update.message.voice or update.message.audio):
+        return
+
+    voice = update.message.voice or update.message.audio
+    await ctx.typing()
+
+    # Download voice file
+    ogg_path = tempfile.mktemp(suffix=".ogg")
+    try:
+        tg_file = await context.bot.get_file(voice.file_id)
+        await tg_file.download_to_drive(ogg_path)
+    except Exception as e:
+        log.error("Failed to download voice: %s", e)
+        await ctx.reply("Could not download voice message.")
+        return
+
+    # Convert and transcribe
+    wav_path = await convert_ogg_to_wav(ogg_path)
+    if not wav_path:
+        await ctx.reply("Could not convert voice message (is ffmpeg installed?).")
+        for p in [ogg_path]:
+            if os.path.exists(p):
+                os.unlink(p)
+        return
+
+    text = await transcribe_voice(wav_path)
+
+    # Cleanup temp files
+    for p in [ogg_path, wav_path]:
+        if os.path.exists(p):
+            os.unlink(p)
+
+    if not text:
+        await ctx.reply("Could not transcribe voice message (is Whisper available?).")
+        return
+
+    # Show what was heard, then process as regular text
+    await ctx.reply(f"Heard: \"{text}\"")
+    update.message.text = text
+    await handle_message(update, context)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle free-text messages — the main conversational flow."""
     ctx = _ctx_from_update(update)
@@ -3747,6 +3839,89 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "latency_ms": round(_latency_ms, 1),
             "had_correction": any(re.search(p, query.lower()) for p in _CORRECTION_PATTERNS),
         })
+    except Exception:
+        pass
+
+
+
+async def handle_message_generic(ctx: MessageContext):
+    """Channel-agnostic message handler for non-Telegram channels."""
+    import time as _time
+    _msg_start = _time.monotonic()
+
+    global OWNER_CHAT_ID
+    query = ctx.incoming.text if ctx.incoming else ""
+    if not query:
+        return
+
+    chat_id = ctx.chat_id
+
+    if contains_sensitive_data(query):
+        await ctx.reply(
+            "Your message appears to contain sensitive data. "
+            "I'll proceed but won't include raw sensitive values in API calls."
+        )
+
+    save_message(chat_id, "user", query)
+
+    direct_intent = _try_direct_shell_intent(query)
+    if direct_intent:
+        direct_intent["llm_generated"] = False
+        direct_intent["user_query"] = query
+        handled = await handle_action_intent(direct_intent, ctx)
+        if handled:
+            return
+
+    action_hint = _looks_like_action(query)
+    if action_hint and action_hint not in ("reminder", "email", "calendar", "shell"):
+        pass  # Extension commands rely on Telegram Update -- skip on other channels
+    elif action_hint:
+        intent = await detect_intent(query)
+        if intent:
+            intent["user_query"] = query
+            handled = await handle_action_intent(intent, ctx)
+            if handled:
+                return
+
+    progress_msg = await ctx.reply("Thinking...")
+
+    results = await hybrid_search(query, limit=6)
+    archive_context = truncate_context(results) if results else "No relevant archive data found."
+    personal_context = get_relevant_context(query, max_chars=2000)
+    conversation = get_conversation_history(chat_id)
+
+    full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
+    if conversation:
+        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+
+    live_context = ""
+    try:
+        from state.collector import collect_live_state, format_for_prompt
+        live = await collect_live_state()
+        live_context = format_for_prompt(live)
+    except Exception as e:
+        log.warning("Live state collection failed: %s", e)
+
+    if live_context:
+        full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+
+    response = await ask_claude(query, full_context)
+
+    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
+    display_response = _gap_tag_re.sub("", response).strip()
+
+    save_message(chat_id, "assistant", display_response)
+
+    try:
+        await progress_msg.edit(display_response)
+    except Exception:
+        await progress_msg.delete()
+        await ctx.channel.send_message(chat_id, display_response)
+
+    _latency_ms = (_time.monotonic() - _msg_start) * 1000
+    try:
+        from learning import record_signal
+        record_signal("response_latency", {"latency_ms": round(_latency_ms, 1), "query_len": len(query)})
     except Exception:
         pass
 
@@ -4149,6 +4324,7 @@ async def start_telegram_bot():
     _load_extensions(application)
 
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
@@ -4640,6 +4816,11 @@ async def startup():
     except Exception as e:
         log.warning("MCP client initialization failed: %s", e)
 
+    # Register webhook handlers
+    from webhooks.github import GitHubWebhookHandler
+    from webhooks.registry import register as register_webhook
+    register_webhook("github", GitHubWebhookHandler())
+
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
 
@@ -4656,6 +4837,7 @@ async def startup():
             log.info("WhatsApp tokens not configured — skipping WhatsApp channel")
     except Exception as e:
         log.warning("Failed to register WhatsApp channel: %s", e)
+
 
     # Start Discord channel if configured
     try:
@@ -4708,7 +4890,7 @@ async def health():
     return report
 
 
-# --- WhatsApp webhook endpoints ---
+# --- WhatsApp webhook endpoints (must be before generic {source} catch-all) ---
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(request: Request):
@@ -4795,6 +4977,43 @@ async def whatsapp_verify(request: Request):
 
     log.warning("WhatsApp webhook verification failed")
     return PlainTextResponse("Forbidden", status_code=403)
+
+
+# --- Generic webhook endpoints (catch-all for GitHub, etc.) ---
+
+@app.post("/webhook/{source}")
+async def webhook_endpoint(source: str, request: Request):
+    """Handle inbound webhook events from external services."""
+    from webhooks.registry import get as get_webhook_handler
+
+    handler = get_webhook_handler(source)
+    if not handler:
+        raise HTTPException(status_code=404, detail=f"No handler for source: {source}")
+
+    body = await request.body()
+    if not await handler.validate(dict(request.headers), body):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    payload = json.loads(body)
+    message = await handler.handle(payload)
+
+    if message and OWNER_CHAT_ID:
+        primary = channel_registry.get_primary()
+        if primary:
+            await primary.send_message(OWNER_CHAT_ID, f"\U0001f514 Webhook ({source}):\n\n{message}")
+
+    return {"ok": True}
+
+
+@app.get("/webhook/{source}")
+async def webhook_verify(source: str, request: Request):
+    """Handle webhook verification challenges (e.g., WhatsApp, Slack)."""
+    params = dict(request.query_params)
+    if "hub.challenge" in params:
+        verify_token = keyring.get_password(KEYRING_SERVICE, f"webhook-verify-{source}")
+        if params.get("hub.verify_token") == verify_token:
+            return int(params["hub.challenge"])
+    return {"error": "Verification failed"}
 
 
 @app.on_event("shutdown")
