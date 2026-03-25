@@ -64,6 +64,10 @@ MAX_CONTEXT_TOKENS = 8000
 # Timezone
 TIMEZONE = "America/Toronto"
 
+# Weather (Open-Meteo, free, no API key)
+WEATHER_LAT = 43.6532
+WEATHER_LON = -79.3832
+
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed
 
