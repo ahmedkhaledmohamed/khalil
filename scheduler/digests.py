@@ -5,8 +5,6 @@ import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from config import TIMEZONE
 
 log = logging.getLogger("khalil.scheduler")
@@ -24,35 +22,9 @@ DAY_STYLE = {
 
 
 async def _get_weather_toronto() -> str:
-    """Fetch current Toronto weather from Open-Meteo (free, no API key)."""
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": 43.65,
-                    "longitude": -79.38,
-                    "current": "temperature_2m,weather_code",
-                    "timezone": "America/Toronto",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()["current"]
-            temp = data["temperature_2m"]
-            code = data["weather_code"]
-            # Simple weather code interpretation
-            conditions = {
-                0: "Clear", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
-                45: "Foggy", 48: "Foggy", 51: "Light drizzle", 53: "Drizzle",
-                55: "Heavy drizzle", 61: "Light rain", 63: "Rain", 65: "Heavy rain",
-                71: "Light snow", 73: "Snow", 75: "Heavy snow", 80: "Rain showers",
-                95: "Thunderstorm",
-            }
-            desc = conditions.get(code, f"Code {code}")
-            return f"{temp}°C, {desc}"
-    except Exception as e:
-        log.debug("Weather fetch failed: %s", e)
-        return ""
+    """Fetch current Toronto weather via actions.weather module."""
+    from actions.weather import get_weather_summary
+    return await get_weather_summary()
 
 
 async def generate_morning_brief(ask_claude_fn) -> str:
@@ -101,11 +73,22 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             pass
         return ""
 
-    recent_raw, weather, calendar_text, job_text = await asyncio.gather(
+    async def _fetch_github_notifications():
+        try:
+            from actions.github_api import get_notifications
+            notifications = await get_notifications(unread_only=True)
+            if notifications:
+                return f"\n\nGitHub: {len(notifications)} unread notification(s)"
+        except Exception as e:
+            log.debug("GitHub notifications fetch for brief failed: %s", e)
+        return ""
+
+    recent_raw, weather, calendar_text, job_text, github_text = await asyncio.gather(
         _fetch_recent(),
         _get_weather_toronto(),
         _fetch_calendar(),
         _fetch_jobs(),
+        _fetch_github_notifications(),
     )
 
     recent_text = "\n".join(
@@ -163,7 +146,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     context = (
         f"Personal Profile:\n{personal}\n\n"
         f"Recent Items:\n{recent_text}"
-        f"{reminder_text}{weather_text}{calendar_text}{job_text}"
+        f"{reminder_text}{weather_text}{calendar_text}{job_text}{github_text}"
         f"{work_text}{goal_text}{deadline_text}"
     )
 
@@ -177,6 +160,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         "- Work priorities: P0 epics or key in-progress items (1-2 lines)\n"
         "- Goal progress (one line if goals exist)\n"
         "- Financial deadlines if any are within 14 days or passed\n"
+        "- GitHub unread notifications count (if any)\n"
         "- Job matches if any new ones found\n"
         "- A closing line with suggested focus for the day\n"
         "- Keep it under 15 lines, be direct and actionable.",

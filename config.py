@@ -45,6 +45,7 @@ TOKEN_FILE_CONTACTS = SCRIPTS_DIR / "token_contacts.json"  # contacts.readonly f
 TOKEN_FILE_TASKS = SCRIPTS_DIR / "token_tasks.json"  # tasks.readonly for Google Tasks (#50)
 TOKEN_FILE_DRIVE_WRITE = SCRIPTS_DIR / "token_drive_write.json"  # drive.file for Doc/Sheet creation (#54)
 TOKEN_FILE_WORK = SCRIPTS_DIR / "token_work.json"  # gmail.readonly for work account (#55)
+TOKEN_FILE_SPOTIFY = SCRIPTS_DIR / "token_spotify.json"  # Spotify OAuth token cache
 TOKEN_FILE_YOUTUBE = SCRIPTS_DIR / "token_youtube.json"  # youtube.readonly for YouTube Data API
 
 # Embedding config
@@ -65,6 +66,10 @@ MAX_CONTEXT_TOKENS = 8000
 # Timezone
 TIMEZONE = "America/Toronto"
 
+# Weather (Open-Meteo, free, no API key)
+WEATHER_LAT = 43.6532
+WEATHER_LON = -79.3832
+
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed
 
@@ -73,6 +78,10 @@ TELEGRAM_POLL_TIMEOUT = 30
 
 # Keyring service name
 KEYRING_SERVICE = "khalil-assistant"
+# App Store Connect API keys (stored in keyring, not here):
+#   appstore-key-id       — API Key ID from App Store Connect
+#   appstore-issuer-id    — Issuer ID from App Store Connect
+#   appstore-private-key  — Contents of the .p8 private key file
 
 # Self-healing
 HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
@@ -93,6 +102,9 @@ MAX_CONCURRENT_AGENTS = 3
 # Voice interaction
 VOICE_REPLY_ENABLED = False  # opt-in: reply with voice audio by default
 TTS_VOICE = "Samantha"  # macOS say voice
+
+# Apple Reminders sync — push Khalil reminders to Reminders.app
+APPLE_REMINDERS_SYNC = True
 
 
 class AutonomyLevel(Enum):

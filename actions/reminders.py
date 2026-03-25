@@ -7,7 +7,7 @@ import subprocess
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from config import DB_PATH, TIMEZONE
+from config import APPLE_REMINDERS_SYNC, DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.reminders")
 
@@ -73,6 +73,16 @@ def create_reminder(text: str, due_at: datetime) -> dict:
     conn.close()
 
     log.info(f"Reminder created: #{reminder_id} '{text}' due {due_at}")
+
+    if APPLE_REMINDERS_SYNC:
+        try:
+            import asyncio
+            from actions.apple_reminders import sync_to_apple
+            due_str = due_at.strftime("%Y-%m-%d %H:%M") if due_at else None
+            asyncio.get_event_loop().create_task(sync_to_apple(text, due_date=due_str))
+        except Exception as exc:
+            log.warning("Apple Reminders sync failed: %s", exc)
+
     return {"id": reminder_id, "text": text, "due_at": due_at.isoformat(), "status": "active"}
 
 
