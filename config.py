@@ -89,6 +89,10 @@ KEYRING_SERVICE = "khalil-assistant"
 # Self-healing
 HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
 
+# Reactive workflow engine
+WORKFLOW_ENGINE_ENABLED = True
+WORKFLOW_MAX_RUNS_PER_HOUR = 10
+
 # Claude Code CLI (for complex code generation)
 CLAUDE_CODE_BIN = "/opt/homebrew/bin/claude"
 WORKTREES_DIR = KHALIL_DIR / ".worktrees"
