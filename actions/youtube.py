@@ -1,0 +1,172 @@
+"""YouTube Data API v3 integration — liked videos, search, subscriptions, channel stats.
+
+Uses separate OAuth token (TOKEN_FILE_YOUTUBE) with youtube.readonly scope.
+
+NOTE: The YouTube Data API does not expose watch history. get_watch_history()
+returns liked videos as a proxy. For actual watch history, use Google Takeout.
+
+All public functions are async — sync Google API calls run in asyncio.to_thread().
+"""
+
+import asyncio
+import logging
+
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+
+from config import CREDENTIALS_FILE, TOKEN_FILE_YOUTUBE
+
+log = logging.getLogger("khalil.actions.youtube")
+
+SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
+
+
+def _get_credentials():
+    """Get or refresh OAuth credentials for YouTube readonly."""
+    creds = None
+    if TOKEN_FILE_YOUTUBE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE_YOUTUBE), SCOPES)
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not CREDENTIALS_FILE.exists():
+                raise FileNotFoundError(
+                    f"Missing {CREDENTIALS_FILE}. "
+                    "Download from Google Cloud Console -> APIs -> Credentials -> OAuth 2.0"
+                )
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
+            creds = flow.run_local_server(port=0)
+
+        with open(TOKEN_FILE_YOUTUBE, "w") as f:
+            f.write(creds.to_json())
+
+    return creds
+
+
+def _get_youtube_service():
+    """Get YouTube Data API v3 service."""
+    creds = _get_credentials()
+    return build("youtube", "v3", credentials=creds)
+
+
+def _get_liked_videos_sync(limit: int = 20) -> list[dict]:
+    """Fetch liked videos from the 'LL' playlist. Runs in thread."""
+    service = _get_youtube_service()
+    response = service.playlistItems().list(
+        playlistId="LL",
+        part="snippet",
+        maxResults=min(limit, 50),
+    ).execute()
+
+    return [
+        {
+            "title": item["snippet"]["title"],
+            "channel": item["snippet"].get("videoOwnerChannelTitle", ""),
+            "video_id": item["snippet"]["resourceId"]["videoId"],
+            "published_at": item["snippet"].get("publishedAt", ""),
+            "url": f"https://youtube.com/watch?v={item['snippet']['resourceId']['videoId']}",
+        }
+        for item in response.get("items", [])
+    ]
+
+
+def _search_videos_sync(query: str, limit: int = 5) -> list[dict]:
+    """Search YouTube videos. Runs in thread."""
+    service = _get_youtube_service()
+    response = service.search().list(
+        q=query,
+        part="snippet",
+        type="video",
+        maxResults=min(limit, 50),
+    ).execute()
+
+    return [
+        {
+            "title": item["snippet"]["title"],
+            "channel": item["snippet"]["channelTitle"],
+            "video_id": item["id"]["videoId"],
+            "published_at": item["snippet"].get("publishedAt", ""),
+            "description": (item["snippet"].get("description") or "")[:200],
+            "url": f"https://youtube.com/watch?v={item['id']['videoId']}",
+        }
+        for item in response.get("items", [])
+    ]
+
+
+def _get_channel_stats_sync(channel_id: str) -> dict:
+    """Fetch channel statistics. Runs in thread."""
+    service = _get_youtube_service()
+    response = service.channels().list(
+        id=channel_id,
+        part="snippet,statistics",
+    ).execute()
+
+    items = response.get("items", [])
+    if not items:
+        return {"error": f"Channel {channel_id} not found"}
+
+    ch = items[0]
+    stats = ch.get("statistics", {})
+    return {
+        "title": ch["snippet"]["title"],
+        "description": (ch["snippet"].get("description") or "")[:200],
+        "subscribers": stats.get("subscriberCount", "hidden"),
+        "views": stats.get("viewCount", "0"),
+        "videos": stats.get("videoCount", "0"),
+        "url": f"https://youtube.com/channel/{channel_id}",
+    }
+
+
+def _get_subscriptions_sync(limit: int = 20) -> list[dict]:
+    """Fetch authenticated user's subscriptions. Runs in thread."""
+    service = _get_youtube_service()
+    response = service.subscriptions().list(
+        mine=True,
+        part="snippet",
+        maxResults=min(limit, 50),
+        order="alphabetical",
+    ).execute()
+
+    return [
+        {
+            "title": item["snippet"]["title"],
+            "channel_id": item["snippet"]["resourceId"]["channelId"],
+            "description": (item["snippet"].get("description") or "")[:200],
+            "url": f"https://youtube.com/channel/{item['snippet']['resourceId']['channelId']}",
+        }
+        for item in response.get("items", [])
+    ]
+
+
+async def get_watch_history(limit: int = 20) -> list[dict]:
+    """Get recent video activity.
+
+    NOTE: YouTube Data API does not expose watch history. This returns
+    liked videos as a proxy. For full watch history, use Google Takeout.
+    """
+    log.info("Watch history not available via API; returning liked videos as proxy")
+    return await asyncio.to_thread(_get_liked_videos_sync, limit)
+
+
+async def get_liked_videos(limit: int = 20) -> list[dict]:
+    """Get liked videos from the authenticated user's 'Liked videos' playlist."""
+    return await asyncio.to_thread(_get_liked_videos_sync, limit)
+
+
+async def search_videos(query: str, limit: int = 5) -> list[dict]:
+    """Search YouTube videos by query string."""
+    return await asyncio.to_thread(_search_videos_sync, query, limit)
+
+
+async def get_channel_stats(channel_id: str) -> dict:
+    """Get statistics for a YouTube channel."""
+    return await asyncio.to_thread(_get_channel_stats_sync, channel_id)
+
+
+async def get_subscriptions(limit: int = 20) -> list[dict]:
+    """Get the authenticated user's YouTube subscriptions."""
+    return await asyncio.to_thread(_get_subscriptions_sync, limit)
