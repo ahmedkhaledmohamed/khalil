@@ -72,6 +72,10 @@ TELEGRAM_POLL_TIMEOUT = 30
 
 # Keyring service name
 KEYRING_SERVICE = "khalil-assistant"
+# App Store Connect API keys (stored in keyring, not here):
+#   appstore-key-id       — API Key ID from App Store Connect
+#   appstore-issuer-id    — Issuer ID from App Store Connect
+#   appstore-private-key  — Contents of the .p8 private key file
 
 # Self-healing
 HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
