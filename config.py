@@ -45,6 +45,7 @@ TOKEN_FILE_CONTACTS = SCRIPTS_DIR / "token_contacts.json"  # contacts.readonly f
 TOKEN_FILE_TASKS = SCRIPTS_DIR / "token_tasks.json"  # tasks.readonly for Google Tasks (#50)
 TOKEN_FILE_DRIVE_WRITE = SCRIPTS_DIR / "token_drive_write.json"  # drive.file for Doc/Sheet creation (#54)
 TOKEN_FILE_WORK = SCRIPTS_DIR / "token_work.json"  # gmail.readonly for work account (#55)
+TOKEN_FILE_SPOTIFY = SCRIPTS_DIR / "token_spotify.json"  # Spotify OAuth token cache
 
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"
