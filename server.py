@@ -2863,6 +2863,43 @@ async def cmd_insights(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_workflows(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List and manage reactive workflows."""
+    ctx = _ctx_from_update(update)
+    from workflows import get_engine
+    engine = get_engine()
+    if not engine:
+        await ctx.reply("Workflow engine not initialized.")
+        return
+
+    if context.args:
+        sub = context.args[0].lower()
+        if sub == "run" and len(context.args) > 1:
+            wf_id = context.args[1]
+            wf = engine.get_workflow(wf_id)
+            if not wf:
+                await ctx.reply(f"Workflow {wf_id} not found.")
+                return
+            await ctx.reply(f"⚡ Running {wf.name}...")
+            await engine._try_execute(wf, "manual", {"manual": True})
+            await ctx.reply(f"✅ {wf.name} completed.")
+            return
+        if sub == "disable" and len(context.args) > 1:
+            engine.unregister(context.args[1])
+            await ctx.reply(f"Disabled workflow: {context.args[1]}")
+            return
+        if sub == "enable" and len(context.args) > 1:
+            wf_id = context.args[1]
+            engine._conn.execute(
+                "UPDATE workflows SET enabled = 1 WHERE id = ?", (wf_id,)
+            )
+            engine._conn.commit()
+            await ctx.reply(f"Enabled workflow: {wf_id}")
+            return
+
+    await ctx.reply(engine.format_workflows_list())
+
+
 async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
     progress = await ctx.reply("📰 Generating brief...")
@@ -4821,6 +4858,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("commitments", cmd_commitments))
     application.add_handler(CommandHandler("tasks", cmd_tasks))
     application.add_handler(CommandHandler("insights", cmd_insights))
+    application.add_handler(CommandHandler("workflows", cmd_workflows))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -5344,6 +5382,19 @@ async def startup():
     from webhooks.github import GitHubWebhookHandler
     from webhooks.registry import register as register_webhook
     register_webhook("github", GitHubWebhookHandler())
+
+    # Initialize workflow engine
+    try:
+        from workflows import init_engine as init_workflow_engine
+        from learning import register_signal_hook
+        wf_engine = init_workflow_engine(
+            conn=db_conn, channel=channel, chat_id=OWNER_CHAT_ID,
+            ask_llm_fn=ask_llm,
+        )
+        register_signal_hook(wf_engine.evaluate_signal)
+        log.info("Workflow engine initialized (%d workflows)", len(wf_engine.list_workflows()))
+    except Exception as e:
+        log.warning("Workflow engine not started: %s", e)
 
     # Start Telegram bot
     asyncio.create_task(start_telegram_bot())
