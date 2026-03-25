@@ -48,6 +48,9 @@ TOKEN_FILE_WORK = SCRIPTS_DIR / "token_work.json"  # gmail.readonly for work acc
 TOKEN_FILE_SPOTIFY = SCRIPTS_DIR / "token_spotify.json"  # Spotify OAuth token cache
 TOKEN_FILE_YOUTUBE = SCRIPTS_DIR / "token_youtube.json"  # youtube.readonly for YouTube Data API
 
+# App Store Connect (Zia app ID — set after configuring ASC API key)
+ZIA_APP_ID = ""
+
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"
 EMBED_MODEL = "nomic-embed-text"

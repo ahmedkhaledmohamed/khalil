@@ -737,11 +737,59 @@ _ACTION_PATTERNS = [
     (r"\bsend\s+(?:a\s+)?slack\s+message\b", "slack_send"),
     (r"\bpost\s+to\s+slack\b", "slack_send"),
     (r"\bmessage\s+on\s+slack\b", "slack_send"),
-    # #51: Spotify playback control
+    # #51: Spotify playback control (osascript)
     (r"\b(?:play|resume)\s+music\b", "shell"),
     (r"\b(?:pause|stop)\s+music\b", "shell"),
     (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
-    (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "shell"),
+    # Spotify data queries (API)
+    (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "spotify_now"),
+    (r"\b(?:what\s+am\s+i|what'?s)\s+(?:listening|playing)\b", "spotify_now"),
+    (r"\brecently\s+played\b", "spotify_recent"),
+    (r"\blistening\s+history\b", "spotify_recent"),
+    (r"\btop\s+(?:tracks?|songs?)\b", "spotify_top"),
+    (r"\btop\s+artists?\b", "spotify_top"),
+    (r"\bmost\s+played\b", "spotify_top"),
+    # Weather
+    (r"\b(?:what'?s\s+the\s+)?weather\b", "weather"),
+    (r"\btemperature\b", "weather"),
+    (r"\bforecast\b", "weather_forecast"),
+    # LinkedIn
+    (r"\blinkedin\s+(?:messages?|inmail)\b", "linkedin_messages"),
+    (r"\brecruiter\s+messages?\b", "linkedin_messages"),
+    (r"\blinkedin\s+jobs?\b", "linkedin_jobs"),
+    (r"\bjob\s+search\s+linkedin\b", "linkedin_jobs"),
+    (r"\blinkedin\s+(?:views?|profile\s+views?)\b", "linkedin_profile"),
+    (r"\bprofile\s+views?\b", "linkedin_profile"),
+    # App Store
+    (r"\bapp\s+store\s+(?:rating|reviews?)\b", "appstore_ratings"),
+    (r"\bzia\s+(?:rating|reviews?)\b", "appstore_ratings"),
+    (r"\bapp\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+    (r"\bzia\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+    (r"\bhow\s+is\s+zia\b", "appstore_ratings"),
+    # DigitalOcean
+    (r"\b(?:server|droplet)\s+(?:status|health)\b", "digitalocean_status"),
+    (r"\bdigitalocean\b", "digitalocean_status"),
+    (r"\b(?:server|digitalocean)\s+(?:cost|bill|spend)\b", "digitalocean_spend"),
+    # Notion
+    (r"\bsearch\s+(?:my\s+)?notion\b", "notion_search"),
+    (r"\bfind\s+in\s+notion\b", "notion_search"),
+    (r"\bnotion\s+search\b", "notion_search"),
+    (r"\bcreate\s+(?:a\s+)?notion\s+page\b", "notion_create"),
+    # YouTube
+    (r"\bsearch\s+(?:on\s+)?youtube\b", "youtube_search"),
+    (r"\bfind\s+(?:a\s+)?video\b", "youtube_search"),
+    (r"\byoutube\s+search\b", "youtube_search"),
+    (r"\bliked\s+videos?\b", "youtube_liked"),
+    (r"\byoutube\s+(?:history|liked)\b", "youtube_liked"),
+    # Readwise
+    (r"\breadwise\b", "readwise_highlights"),
+    (r"\bbook\s+highlights?\b", "readwise_highlights"),
+    (r"\bmy\s+highlights?\b", "readwise_highlights"),
+    (r"\bdaily\s+review\b", "readwise_review"),
+    # Apple Reminders (native app sync)
+    (r"\bapple\s+reminders?\b", "apple_reminders_list"),
+    (r"\biphone\s+reminders?\b", "apple_reminders_list"),
+    (r"\bsync\s+(?:reminders?\s+)?(?:to\s+)?apple\b", "apple_reminders_sync"),
     # #37: Screenshot and OCR
     (r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", "screenshot"),
     (r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", "screenshot"),
@@ -820,6 +868,26 @@ ACTION_REGISTRY = {
     "github_notifications": "github notifications unread alerts",
     "github_prs": "github pull requests prs open review",
     "github_create_issue": "github create new issue file open bug",
+    "weather": "weather temperature outside today toronto",
+    "weather_forecast": "weather forecast days week ahead",
+    "spotify_now": "playing listening song track music spotify",
+    "spotify_recent": "recently played listening history spotify",
+    "spotify_top": "top tracks artists most played spotify",
+    "linkedin_messages": "linkedin messages recruiter inmail",
+    "linkedin_jobs": "linkedin jobs search openings",
+    "linkedin_profile": "linkedin profile views",
+    "appstore_ratings": "app store rating reviews zia",
+    "appstore_downloads": "app store downloads stats zia",
+    "digitalocean_status": "server droplet status health digitalocean",
+    "digitalocean_spend": "server cost bill spend digitalocean",
+    "notion_search": "notion search find pages notes",
+    "notion_create": "notion create page new",
+    "youtube_search": "youtube search video find",
+    "youtube_liked": "youtube liked videos history",
+    "readwise_highlights": "readwise highlights books reading",
+    "readwise_review": "readwise daily review",
+    "apple_reminders_list": "apple iphone reminders list native",
+    "apple_reminders_sync": "sync reminders apple iphone",
 }
 
 
@@ -2040,6 +2108,340 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             await ctx.reply(f"✅ Issue created: {url}")
         except Exception as e:
             await ctx.reply(f"❌ GitHub issue creation failed: {e}")
+        return True
+
+    # --- Weather ---
+
+    elif action == "weather":
+        try:
+            from actions.weather import get_current_weather, get_weather_summary
+            summary = await get_weather_summary()
+            await ctx.reply(f"🌤 {summary}")
+        except Exception as e:
+            await ctx.reply(f"❌ Weather fetch failed: {e}")
+        return True
+
+    elif action == "weather_forecast":
+        try:
+            from actions.weather import get_forecast
+            days = int(intent.get("days", 3))
+            forecast = await get_forecast(days=days)
+            if not forecast:
+                await ctx.reply("No forecast data available.")
+            else:
+                lines = [f"📅 {days}-Day Forecast:\n"]
+                for day in forecast:
+                    lines.append(f"  {day.get('date', '')}: {day.get('condition', '')} — "
+                                 f"{day.get('temp_min', '')}°C / {day.get('temp_max', '')}°C"
+                                 + (f", {day['precipitation']}mm rain" if day.get('precipitation') else ""))
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Forecast fetch failed: {e}")
+        return True
+
+    # --- Spotify ---
+
+    elif action == "spotify_now":
+        try:
+            from actions.spotify import get_now_playing
+            track = await get_now_playing()
+            if not track:
+                await ctx.reply("Nothing playing right now.")
+            else:
+                await ctx.reply(f"🎵 Now playing: {track.get('name', '?')} — {track.get('artist', '?')}"
+                                f"\n   Album: {track.get('album', '?')}"
+                                + (f"\n   {track['url']}" if track.get('url') else ""))
+        except Exception as e:
+            await ctx.reply(f"❌ Spotify failed: {e}")
+        return True
+
+    elif action == "spotify_recent":
+        try:
+            from actions.spotify import get_recently_played
+            tracks = await get_recently_played(limit=10)
+            if not tracks:
+                await ctx.reply("No recent listening history.")
+            else:
+                lines = ["🎧 Recently Played:\n"]
+                for t in tracks:
+                    lines.append(f"  • {t.get('name', '?')} — {t.get('artist', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Spotify failed: {e}")
+        return True
+
+    elif action == "spotify_top":
+        try:
+            from actions.spotify import get_top_tracks, get_top_artists
+            query_text = intent.get("text", "").lower()
+            if "artist" in query_text:
+                artists = await get_top_artists(limit=10)
+                lines = ["🎤 Top Artists:\n"]
+                for a in artists:
+                    lines.append(f"  • {a.get('name', '?')}")
+                await ctx.reply("\n".join(lines))
+            else:
+                tracks = await get_top_tracks(limit=10)
+                lines = ["🏆 Top Tracks:\n"]
+                for t in tracks:
+                    lines.append(f"  • {t.get('name', '?')} — {t.get('artist', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Spotify failed: {e}")
+        return True
+
+    # --- LinkedIn ---
+
+    elif action == "linkedin_messages":
+        try:
+            from actions.linkedin import get_recruiter_messages
+            messages = await get_recruiter_messages(limit=5)
+            if not messages:
+                await ctx.reply("No recent recruiter messages.")
+            else:
+                lines = [f"💼 LinkedIn Messages ({len(messages)}):\n"]
+                for m in messages:
+                    lines.append(f"  • {m.get('from', '?')}: {m.get('subject', m.get('preview', ''))[:80]}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ LinkedIn failed: {e}")
+        return True
+
+    elif action == "linkedin_jobs":
+        try:
+            from actions.linkedin import search_jobs
+            query = intent.get("query", intent.get("text", "product manager"))
+            location = intent.get("location", "Toronto")
+            jobs = await search_jobs(query, location)
+            if not jobs:
+                await ctx.reply(f"No LinkedIn jobs found for \"{query}\" in {location}.")
+            else:
+                lines = [f"🔍 LinkedIn Jobs — \"{query}\" in {location}:\n"]
+                for j in jobs[:10]:
+                    lines.append(f"  • {j.get('title', '?')} @ {j.get('company', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ LinkedIn jobs failed: {e}")
+        return True
+
+    elif action == "linkedin_profile":
+        try:
+            from actions.linkedin import get_profile_views
+            views = await get_profile_views()
+            await ctx.reply(f"👀 LinkedIn profile views: {views.get('count', '?')} "
+                            f"({views.get('trend', 'no trend data')})")
+        except Exception as e:
+            await ctx.reply(f"❌ LinkedIn failed: {e}")
+        return True
+
+    # --- App Store Connect ---
+
+    elif action == "appstore_ratings":
+        try:
+            from actions.appstore import get_app_ratings
+            from config import ZIA_APP_ID
+            app_id = intent.get("app_id", ZIA_APP_ID)
+            if not app_id:
+                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                return True
+            ratings = await get_app_ratings(app_id)
+            avg = ratings.get("average_rating", "?")
+            count = ratings.get("review_count", "?")
+            await ctx.reply(f"⭐ App Store: {avg}★ ({count} reviews)")
+        except Exception as e:
+            await ctx.reply(f"❌ App Store fetch failed: {e}")
+        return True
+
+    elif action == "appstore_downloads":
+        try:
+            from actions.appstore import get_app_downloads
+            from config import ZIA_APP_ID
+            app_id = intent.get("app_id", ZIA_APP_ID)
+            if not app_id:
+                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                return True
+            downloads = await get_app_downloads(app_id)
+            await ctx.reply(f"📊 Downloads (7d): {downloads.get('total', '?')}\n"
+                            f"   Daily avg: {downloads.get('daily_avg', '?')}")
+        except Exception as e:
+            await ctx.reply(f"❌ App Store fetch failed: {e}")
+        return True
+
+    # --- DigitalOcean ---
+
+    elif action == "digitalocean_status":
+        try:
+            from actions.digitalocean import get_droplets
+            droplets = await get_droplets()
+            if not droplets:
+                await ctx.reply("No droplets found.")
+            else:
+                lines = [f"🖥 Droplets ({len(droplets)}):\n"]
+                for d in droplets:
+                    lines.append(f"  • {d.get('name', '?')} — {d.get('status', '?')} "
+                                 f"({d.get('memory', '?')}MB, {d.get('region', '?')})")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ DigitalOcean failed: {e}")
+        return True
+
+    elif action == "digitalocean_spend":
+        try:
+            from actions.digitalocean import get_monthly_spend
+            spend = await get_monthly_spend()
+            await ctx.reply(f"💵 DigitalOcean MTD: ${spend.get('month_to_date_usage', '?')}\n"
+                            f"   Balance: ${spend.get('account_balance', '?')}")
+        except Exception as e:
+            await ctx.reply(f"❌ DigitalOcean billing failed: {e}")
+        return True
+
+    # --- Notion ---
+
+    elif action == "notion_search":
+        try:
+            from actions.notion import search_pages
+            query = intent.get("query", intent.get("text", ""))
+            if not query:
+                await ctx.reply("What should I search for in Notion?")
+                return True
+            pages = await search_pages(query)
+            if not pages:
+                await ctx.reply(f"No Notion pages found for \"{query}\".")
+            else:
+                lines = [f"📝 Notion results for \"{query}\":\n"]
+                for p in pages[:10]:
+                    lines.append(f"  • {p.get('title', 'Untitled')}")
+                    if p.get("url"):
+                        lines.append(f"    {p['url']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Notion search failed: {e}")
+        return True
+
+    elif action == "notion_create":
+        try:
+            from actions.notion import create_page
+            title = intent.get("title", intent.get("text", ""))
+            parent_id = intent.get("parent_id", "")
+            if not title:
+                await ctx.reply("What should the page be titled?")
+                return True
+            if not parent_id:
+                await ctx.reply("I need a parent page or database ID. "
+                                "Example: create notion page titled 'Ideas' in <parent_id>")
+                return True
+            url = await create_page(parent_id, title)
+            await ctx.reply(f"✅ Notion page created: {url}")
+        except Exception as e:
+            await ctx.reply(f"❌ Notion page creation failed: {e}")
+        return True
+
+    # --- YouTube ---
+
+    elif action == "youtube_search":
+        try:
+            from actions.youtube import search_videos
+            query = intent.get("query", intent.get("text", ""))
+            if not query:
+                await ctx.reply("What should I search for on YouTube?")
+                return True
+            videos = await search_videos(query, limit=5)
+            if not videos:
+                await ctx.reply(f"No YouTube results for \"{query}\".")
+            else:
+                lines = [f"▶️ YouTube — \"{query}\":\n"]
+                for v in videos:
+                    lines.append(f"  • {v.get('title', '?')}")
+                    if v.get("url"):
+                        lines.append(f"    {v['url']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ YouTube search failed: {e}")
+        return True
+
+    elif action == "youtube_liked":
+        try:
+            from actions.youtube import get_liked_videos
+            videos = await get_liked_videos(limit=10)
+            if not videos:
+                await ctx.reply("No liked videos found.")
+            else:
+                lines = ["👍 Liked Videos:\n"]
+                for v in videos:
+                    lines.append(f"  • {v.get('title', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ YouTube failed: {e}")
+        return True
+
+    # --- Readwise ---
+
+    elif action == "readwise_highlights":
+        try:
+            from actions.readwise import get_highlights
+            highlights = await get_highlights(limit=10)
+            if not highlights:
+                await ctx.reply("No Readwise highlights found.")
+            else:
+                lines = ["📚 Recent Highlights:\n"]
+                for h in highlights:
+                    lines.append(f"  • \"{h.get('text', '')[:100]}\"")
+                    if h.get("title"):
+                        lines.append(f"    — {h['title']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Readwise failed: {e}")
+        return True
+
+    elif action == "readwise_review":
+        try:
+            from actions.readwise import get_daily_review
+            highlights = await get_daily_review()
+            if not highlights:
+                await ctx.reply("No daily review highlights today.")
+            else:
+                lines = [f"📖 Daily Review ({len(highlights)} highlights):\n"]
+                for h in highlights:
+                    lines.append(f"  • \"{h.get('text', '')[:120]}\"")
+                    if h.get("title"):
+                        lines.append(f"    — {h['title']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Readwise failed: {e}")
+        return True
+
+    # --- Apple Reminders (native) ---
+
+    elif action == "apple_reminders_list":
+        try:
+            from actions.apple_reminders import get_apple_reminders
+            reminders = await get_apple_reminders()
+            if not reminders:
+                await ctx.reply("No incomplete Apple Reminders found.")
+            else:
+                lines = [f"🍎 Apple Reminders ({len(reminders)}):\n"]
+                for r in reminders:
+                    lines.append(f"  • {r.get('name', '?')}"
+                                 + (f" (due: {r['due_date']})" if r.get('due_date') else ""))
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Apple Reminders failed: {e}")
+        return True
+
+    elif action == "apple_reminders_sync":
+        try:
+            from actions.apple_reminders import sync_to_apple
+            text = intent.get("text", "")
+            if not text:
+                await ctx.reply("What reminder should I sync to Apple Reminders?")
+                return True
+            success = await sync_to_apple(text)
+            if success:
+                await ctx.reply(f"✅ Synced to Apple Reminders: {text}")
+            else:
+                await ctx.reply("❌ Failed to sync to Apple Reminders.")
+        except Exception as e:
+            await ctx.reply(f"❌ Apple Reminders sync failed: {e}")
         return True
 
     return False
