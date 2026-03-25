@@ -21,7 +21,7 @@ from config import (
     HEALING_FAILURE_THRESHOLD,
     KHALIL_DIR,
 )
-from learning import _get_conn, store_insight, get_insights
+from learning import _get_conn, record_signal, store_insight, get_insights
 
 log = logging.getLogger("khalil.healing")
 
@@ -888,7 +888,18 @@ async def run_self_healing(triggers: list[dict], channel, chat_id: int):
             )
             continue
 
-        # 5. Notify
+        # 5. Emit signal for workflow engine (auto-merge evaluation)
+        confidence = score_healing_confidence(diagnosis, patched_func)
+        lines_changed = patched_func.strip().count("\n") + 1
+        record_signal("self_heal_pr_created", {
+            "pr_url": pr_url,
+            "confidence": confidence,
+            "lines_changed": lines_changed,
+            "guardian_blocked": guardian_blocked,
+            "fingerprint": fingerprint,
+        })
+
+        # 6. Notify
         await channel.send_message(
             chat_id,
             f"🔧 Self-Healing: {diagnosis['summary']}\n\n"
@@ -897,7 +908,7 @@ async def run_self_healing(triggers: list[dict], channel, chat_id: int):
             f"Review and merge to apply the fix.",
         )
 
-        # 6. Record insight to prevent re-triggering
+        # 7. Record insight to prevent re-triggering
         store_insight(
             "self_heal",
             diagnosis["summary"],
