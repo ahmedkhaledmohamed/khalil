@@ -93,6 +93,9 @@ MAX_CONCURRENT_AGENTS = 3
 VOICE_REPLY_ENABLED = False  # opt-in: reply with voice audio by default
 TTS_VOICE = "Samantha"  # macOS say voice
 
+# Apple Reminders sync — push Khalil reminders to Reminders.app
+APPLE_REMINDERS_SYNC = True
+
 
 class AutonomyLevel(Enum):
     SUPERVISED = 1   # Ask before every action
