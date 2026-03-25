@@ -610,6 +610,19 @@ async def run_weekly_reflection(ask_llm_fn) -> list[dict]:
             log.info("Auto-applied insight #%d: %s", insight_id, summary)
 
     log.info("Weekly reflection complete: %d insights generated, %d auto-applied", len(stored), auto_applied)
+
+    # Run workflow evolution cycle
+    try:
+        from workflows import WorkflowEvolver, get_engine
+        engine = get_engine()
+        if engine:
+            evolver = WorkflowEvolver(conn, engine, ask_llm_fn, channel=None, chat_id=None)
+            proposals = await evolver.run_evolution_cycle(ask_llm_fn)
+            if proposals:
+                log.info("Workflow evolution: %d proposals generated", len(proposals))
+    except Exception as e:
+        log.debug("Workflow evolution skipped: %s", e)
+
     return stored
 
 
@@ -743,6 +756,18 @@ async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
 
     if not insights:
         log.info("Daily micro-reflection: no quality issues detected")
+
+    # Light escalation pattern check
+    try:
+        from workflows import WorkflowEvolver, get_engine
+        engine = get_engine()
+        if engine:
+            evolver = WorkflowEvolver(conn, engine, ask_llm_fn, channel=None, chat_id=None)
+            escalations = evolver.detect_failure_escalation_patterns(days=1)
+            if escalations:
+                log.info("Daily check: %d failure escalation patterns detected", len(escalations))
+    except Exception as e:
+        log.debug("Daily escalation check skipped: %s", e)
 
     return insights
 

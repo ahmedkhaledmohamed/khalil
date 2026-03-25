@@ -1,12 +1,14 @@
 """Reactive workflow engine — trigger → condition → action chains with autonomy."""
 
 import asyncio
+import glob as _glob
 import json
 import logging
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from config import DB_PATH, WORKFLOW_ENGINE_ENABLED, WORKFLOW_MAX_RUNS_PER_HOUR
@@ -504,6 +506,372 @@ class WorkflowEngine:
             lines.append(f"  {status} {wf.name} [{wf.id}]")
             lines.append(f"     Trigger: {wf.trigger_type} | Runs: {wf.run_count}{last}")
         return "\n".join(lines)
+
+
+# --- Workflow Evolver — pattern detection and workflow proposal ---
+
+
+class WorkflowEvolver:
+    """Detects patterns in interaction signals and proposes new workflows."""
+
+    def __init__(self, conn: sqlite3.Connection, engine: WorkflowEngine,
+                 ask_llm_fn, channel, chat_id: int | None):
+        self._conn = conn
+        self._engine = engine
+        self._ask_llm = ask_llm_fn
+        self._channel = channel
+        self._chat_id = chat_id
+
+    def detect_temporal_patterns(self, days: int = 14) -> list[dict]:
+        """Find signals that repeat at similar times on multiple days.
+
+        Groups by (signal_type, hour, day_of_week) and returns patterns where
+        the same signal occurs 3+ times within a 30-minute window over 5+ distinct days.
+        """
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = self._conn.execute(
+            """SELECT signal_type,
+                      strftime('%%H', created_at) AS hour,
+                      strftime('%%M', created_at) AS minute,
+                      strftime('%%w', created_at) AS dow,
+                      date(created_at) AS day,
+                      created_at
+               FROM interaction_signals
+               WHERE created_at > ?
+               ORDER BY created_at""",
+            (cutoff,),
+        ).fetchall()
+
+        # Group by (signal_type, hour) and cluster within 30-min windows
+        from collections import defaultdict
+        buckets: dict[tuple[str, int], list[dict]] = defaultdict(list)
+        for r in rows:
+            sig = r["signal_type"]
+            hour = int(r["hour"])
+            minute = int(r["minute"])
+            buckets[(sig, hour)].append({
+                "minute": minute, "dow": r["dow"], "day": r["day"],
+            })
+
+        patterns = []
+        for (sig, hour), entries in buckets.items():
+            # Cluster entries within 30-minute windows
+            # Use two windows: :00-:29 and :30-:59
+            for window_start in (0, 30):
+                window_entries = [e for e in entries if window_start <= e["minute"] < window_start + 30]
+                if len(window_entries) < 3:
+                    continue
+                distinct_days = set(e["day"] for e in window_entries)
+                if len(distinct_days) < 5:
+                    continue
+                dow_counts: dict[str, int] = defaultdict(int)
+                for e in window_entries:
+                    dow_counts[e["dow"]] += 1
+                day_names = {
+                    "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed",
+                    "4": "Thu", "5": "Fri", "6": "Sat",
+                }
+                top_days = sorted(dow_counts.items(), key=lambda x: -x[1])[:3]
+                day_pattern = ", ".join(f"{day_names.get(d, d)}({c})" for d, c in top_days)
+
+                patterns.append({
+                    "signal_type": sig,
+                    "hour": hour,
+                    "day_pattern": day_pattern,
+                    "count": len(window_entries),
+                    "evidence": (
+                        f"Signal '{sig}' occurs {len(window_entries)} times around "
+                        f"{hour}:{window_start:02d}-{hour}:{window_start+29:02d} "
+                        f"across {len(distinct_days)} days. Top days: {day_pattern}"
+                    ),
+                })
+
+        return patterns
+
+    def detect_correlation_patterns(self, days: int = 14) -> list[dict]:
+        """Find signal A followed by signal B within 10 minutes, occurring 3+ times."""
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+        rows = self._conn.execute(
+            """SELECT signal_type, created_at
+               FROM interaction_signals
+               WHERE created_at > ?
+               ORDER BY created_at""",
+            (cutoff,),
+        ).fetchall()
+
+        if len(rows) < 2:
+            return []
+
+        # Find sequential pairs within 10-minute window
+        from collections import defaultdict
+        pair_gaps: dict[tuple[str, str], list[float]] = defaultdict(list)
+
+        for i in range(len(rows) - 1):
+            a_type = rows[i]["signal_type"]
+            a_time = datetime.strptime(rows[i]["created_at"], "%Y-%m-%d %H:%M:%S")
+            for j in range(i + 1, min(i + 20, len(rows))):  # Look ahead up to 20 rows
+                b_type = rows[j]["signal_type"]
+                b_time = datetime.strptime(rows[j]["created_at"], "%Y-%m-%d %H:%M:%S")
+                gap = (b_time - a_time).total_seconds() / 60.0
+                if gap > 10:
+                    break
+                if a_type != b_type:
+                    pair_gaps[(a_type, b_type)].append(gap)
+
+        patterns = []
+        for (a, b), gaps in pair_gaps.items():
+            if len(gaps) >= 3:
+                avg_gap = sum(gaps) / len(gaps)
+                patterns.append({
+                    "signal_a": a,
+                    "signal_b": b,
+                    "count": len(gaps),
+                    "avg_gap_minutes": round(avg_gap, 1),
+                })
+
+        return patterns
+
+    def detect_failure_escalation_patterns(self, days: int = 14) -> list[dict]:
+        """Find proactive alerts followed by user actions within 30 minutes.
+
+        Suggests automating the user's response to reduce manual intervention.
+        """
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+        # Proactive alerts are signals with "alert" or "proactive" in the type
+        alerts = self._conn.execute(
+            """SELECT signal_type, created_at
+               FROM interaction_signals
+               WHERE created_at > ?
+                 AND (signal_type LIKE '%%alert%%' OR signal_type LIKE '%%proactive%%'
+                      OR signal_type LIKE '%%monitor%%' OR signal_type LIKE '%%threshold%%')
+               ORDER BY created_at""",
+            (cutoff,),
+        ).fetchall()
+
+        if not alerts:
+            return []
+
+        # User actions are signals with "user_" prefix or action-like types
+        user_actions = self._conn.execute(
+            """SELECT signal_type, created_at
+               FROM interaction_signals
+               WHERE created_at > ?
+                 AND (signal_type LIKE 'user_%%' OR signal_type LIKE '%%_action'
+                      OR signal_type LIKE '%%_executed' OR signal_type LIKE '%%_command')
+               ORDER BY created_at""",
+            (cutoff,),
+        ).fetchall()
+
+        if not user_actions:
+            return []
+
+        from collections import defaultdict
+        escalations: dict[tuple[str, str], int] = defaultdict(int)
+
+        for alert in alerts:
+            alert_time = datetime.strptime(alert["created_at"], "%Y-%m-%d %H:%M:%S")
+            for ua in user_actions:
+                ua_time = datetime.strptime(ua["created_at"], "%Y-%m-%d %H:%M:%S")
+                gap = (ua_time - alert_time).total_seconds() / 60.0
+                if gap < 0:
+                    continue
+                if gap > 30:
+                    break
+                escalations[(alert["signal_type"], ua["signal_type"])] += 1
+
+        patterns = []
+        for (alert_type, response_action), count in escalations.items():
+            if count >= 3:
+                patterns.append({
+                    "alert_type": alert_type,
+                    "response_action": response_action,
+                    "count": count,
+                })
+
+        return patterns
+
+    async def propose_workflow(self, pattern: dict) -> Workflow | None:
+        """Use the LLM to generate a workflow definition from a detected pattern."""
+        # Discover available action modules
+        actions_dir = os.path.join(os.path.dirname(__file__), "actions")
+        action_files = [
+            os.path.basename(f).replace(".py", "")
+            for f in _glob.glob(os.path.join(actions_dir, "*.py"))
+            if not os.path.basename(f).startswith("_")
+        ]
+
+        prompt = f"""Analyze this detected pattern and propose a reactive workflow.
+
+Pattern evidence:
+{json.dumps(pattern, indent=2)}
+
+Available action modules (use as "module.function_name"):
+{', '.join(sorted(action_files))}
+
+Special actions: "notify" (send Telegram message), "shell" (run command), "llm_summarize"
+
+Respond with a single JSON object following this schema:
+{{
+  "name": "Human-readable workflow name",
+  "trigger_type": "signal" | "cron" | "threshold",
+  "trigger_config": {{"signal_type": "..."}} or {{"hour": "*/N"}} or {{"metric": "..."}},
+  "condition": {{"field": "...", "op": "==|>|<|contains|present|absent", "value": "..."}} or null,
+  "actions": [
+    {{"action": "module.function or notify or shell", "params": {{}}, "description": "What this step does"}}
+  ]
+}}
+
+Rules:
+- Be conservative. Default to SUPERVISED autonomy.
+- Prefer READ-only actions (get_, list_, check_) over write actions.
+- Include a "notify" step at the end so the user sees results.
+- Keep workflows to 2-3 steps maximum.
+- Respond with ONLY the JSON object, no markdown."""
+
+        try:
+            response = await self._ask_llm(
+                prompt, "",
+                system_extra="You are designing a workflow automation. Respond with ONLY valid JSON.",
+            )
+            response = response.strip()
+            # Handle markdown code blocks
+            if "```" in response:
+                response = response.split("```")[1]
+                if response.startswith("json"):
+                    response = response[4:]
+                response = response.strip()
+
+            wf_data = json.loads(response)
+        except (json.JSONDecodeError, Exception) as e:
+            log.error("Failed to parse workflow proposal from LLM: %s", e)
+            return None
+
+        wf_id = f"wf_evolved_{uuid.uuid4().hex[:8]}"
+        actions = [
+            WorkflowStep(
+                action=a.get("action", "notify"),
+                params=a.get("params", {}),
+                description=a.get("description", ""),
+            )
+            for a in wf_data.get("actions", [])
+        ]
+
+        if not actions:
+            return None
+
+        condition = wf_data.get("condition")
+        return Workflow(
+            id=wf_id,
+            name=wf_data.get("name", "Evolved workflow"),
+            trigger_type=wf_data.get("trigger_type", "signal"),
+            trigger_config=wf_data.get("trigger_config", {}),
+            actions=actions,
+            condition=condition,
+            autonomy_override="SUPERVISED",
+            enabled=False,  # Not enabled until approved
+            created_by="evolved",
+            confidence=0.5,
+        )
+
+    async def present_proposal(self, workflow: Workflow, evidence: str) -> None:
+        """Send a workflow proposal to Telegram with approve/dismiss buttons."""
+        if not self._channel or not self._chat_id:
+            log.warning("Cannot present proposal — no channel configured")
+            return
+
+        step_descriptions = "\n".join(
+            f"  {i+1}. {s.description or s.action}" for i, s in enumerate(workflow.actions)
+        )
+        msg = (
+            f"\U0001f504 Workflow Proposal: {workflow.name}\n"
+            f"{evidence}\n"
+            f"Actions:\n{step_descriptions}\n"
+            f"Autonomy: SUPERVISED"
+        )
+
+        from channels import ActionButton
+        buttons = [[
+            ActionButton("\u2705 Approve", f"wf_approve:{workflow.id}"),
+            ActionButton("\u274c Dismiss", f"wf_dismiss:{workflow.id}"),
+        ]]
+
+        await self._channel.send_message(self._chat_id, msg, buttons=buttons)
+
+    async def run_evolution_cycle(self, ask_llm_fn) -> list[dict]:
+        """Main entry point. Detect patterns, filter, propose, present.
+
+        Returns list of proposed workflow summaries.
+        """
+        # Run all three detectors
+        temporal = self.detect_temporal_patterns()
+        correlation = self.detect_correlation_patterns()
+        escalation = self.detect_failure_escalation_patterns()
+
+        all_patterns = []
+        for p in temporal:
+            p["detector"] = "temporal"
+            all_patterns.append(p)
+        for p in correlation:
+            p["detector"] = "correlation"
+            all_patterns.append(p)
+        for p in escalation:
+            p["detector"] = "escalation"
+            all_patterns.append(p)
+
+        if not all_patterns:
+            log.info("Workflow evolution: no patterns detected")
+            return []
+
+        # Filter out already-dismissed patterns
+        dismissed = self._conn.execute(
+            """SELECT context FROM interaction_signals
+               WHERE signal_type = 'workflow_proposal_dismissed'"""
+        ).fetchall()
+        dismissed_keys = set()
+        for row in dismissed:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            # Build a key from the pattern that was dismissed
+            dismissed_keys.add(ctx.get("pattern_key", ""))
+
+        proposals = []
+        for pattern in all_patterns:
+            # Build a stable key for dedup
+            if pattern["detector"] == "temporal":
+                key = f"temporal:{pattern['signal_type']}:{pattern['hour']}"
+            elif pattern["detector"] == "correlation":
+                key = f"correlation:{pattern['signal_a']}:{pattern['signal_b']}"
+            else:
+                key = f"escalation:{pattern['alert_type']}:{pattern['response_action']}"
+
+            if key in dismissed_keys:
+                log.debug("Skipping dismissed pattern: %s", key)
+                continue
+
+            # Generate proposal
+            wf = await self.propose_workflow(pattern)
+            if not wf:
+                continue
+
+            # Store the workflow (disabled) so it can be approved later
+            self._engine.register(wf)
+
+            # Build evidence string
+            evidence = pattern.get("evidence", json.dumps(pattern, indent=2))
+
+            # Present to user
+            await self.present_proposal(wf, evidence)
+
+            proposals.append({
+                "workflow_id": wf.id,
+                "name": wf.name,
+                "pattern_key": key,
+                "detector": pattern["detector"],
+            })
+
+        log.info("Workflow evolution: %d patterns found, %d proposals generated",
+                 len(all_patterns), len(proposals))
+        return proposals
 
 
 # --- Module-level engine instance ---
