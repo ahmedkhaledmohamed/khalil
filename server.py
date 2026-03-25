@@ -674,14 +674,18 @@ _ACTION_PATTERNS = [
     (r"\bfind\s+(?:all\s+)?(?:my\s+)?\w+\s+files?\b", "spotlight"),
     (r"\bwhere\s+is\s+(?:my\s+|the\s+)?\w+\b.*\bfile\b", "spotlight"),
     # #52: GitHub issue creation
-    (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
-    (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "gh_issue"),
-    (r"\bfile\s+(?:an?\s+)?(?:github\s+)?issue\b", "gh_issue"),
-    (r"\bnew\s+(?:github\s+)?issue\b", "gh_issue"),
+    (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+    (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+    (r"\bfile\s+(?:an?\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+    (r"\bnew\s+(?:github\s+)?issue\b", "github_create_issue"),
     # #53: GitHub PR status monitoring
-    (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
-    (r"\b(?:pr|pull\s+request)\s+status\b", "gh_pr_status"),
-    (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "gh_pr_status"),
+    (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "github_prs"),
+    (r"\b(?:pr|pull\s+request)\s+status\b", "github_prs"),
+    (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "github_prs"),
+    # GitHub notifications
+    (r"\bgithub\s+notifications?\b", "github_notifications"),
+    (r"\bcheck\s+(?:my\s+)?(?:github\s+)?notifications?\b", "github_notifications"),
+    (r"\bunread\s+(?:github\s+)?notifications?\b", "github_notifications"),
     # #41: Brew package management
     (r"\bbrew\s+(?:list|info|search|install|upgrade|uninstall|cleanup)\b", "shell"),
     (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
@@ -813,6 +817,9 @@ ACTION_REGISTRY = {
     "tasks_list": "tasks todo list show google",
     "tasks_create": "add create task todo",
     "screenshot": "screenshot capture screen window",
+    "github_notifications": "github notifications unread alerts",
+    "github_prs": "github pull requests prs open review",
+    "github_create_issue": "github create new issue file open bug",
 }
 
 
@@ -1982,6 +1989,57 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             return False
         messages = await search_messages(query, limit=10)
         await ctx.reply(f"💬 Messages matching \"{query}\":\n\n{format_messages(messages)}")
+        return True
+
+    # --- GitHub API ---
+
+    elif action == "github_notifications":
+        try:
+            from actions.github_api import get_notifications
+            notifications = await get_notifications()
+            if not notifications:
+                await ctx.reply("No unread GitHub notifications.")
+            else:
+                lines = [f"🔔 GitHub Notifications ({len(notifications)} unread):\n"]
+                for n in notifications[:15]:
+                    lines.append(f"  • [{n['type']}] {n['repo']}: {n['title']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub notifications failed: {e}")
+        return True
+
+    elif action == "github_prs":
+        try:
+            from actions.github_api import list_my_prs
+            prs = await list_my_prs()
+            if not prs:
+                await ctx.reply("No open PRs found.")
+            else:
+                lines = [f"🔀 My Open PRs ({len(prs)}):\n"]
+                for pr in prs[:15]:
+                    lines.append(f"  • {pr['repo']}: {pr['title']}")
+                    lines.append(f"    {pr['url']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub PR fetch failed: {e}")
+        return True
+
+    elif action == "github_create_issue":
+        try:
+            from actions.github_api import create_issue
+            repo = intent.get("repo", "")
+            title = intent.get("title", "")
+            body = intent.get("body", "")
+            if not repo or not title:
+                await ctx.reply(
+                    "I need a repo and title to create an issue.\n"
+                    "Example: create issue in owner/repo titled 'Bug: something broken'"
+                )
+                return True
+            url = await create_issue(repo, title, body)
+            await ctx.reply(f"✅ Issue created: {url}")
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub issue creation failed: {e}")
         return True
 
     return False
