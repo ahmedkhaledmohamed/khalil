@@ -859,6 +859,18 @@ async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
 
         # Commit and push from worktree, open PR
         pr_url = await _commit_and_pr_from_worktree(wt_path, branch, spec, manifest, warnings, pr_title_prefix=guardian_flag)
+
+        # Emit signal for workflow engine (auto-merge evaluation)
+        try:
+            from learning import record_signal
+            record_signal("extension_pr_created", {
+                "pr_url": pr_url,
+                "extension_name": spec["name"],
+                "guardian_blocked": bool(guardian_flag),
+            })
+        except Exception:
+            pass
+
         return module_source, json.dumps(manifest), pr_url
 
     finally:
@@ -1492,6 +1504,7 @@ async def generate_and_pr(payload: dict) -> str:
     try:
         complexity = classify_complexity(spec)
         log.info("Generating %s action module: %s", complexity, name)
+        guardian_blocked = False  # Tracks whether Guardian blocked this extension
 
         if complexity == "complex" and Path(CLAUDE_CODE_BIN).exists():
             # Complex path: Claude Code CLI in a worktree
@@ -1526,6 +1539,7 @@ async def generate_and_pr(payload: dict) -> str:
                 guardian_result = await review_code_patch(module_source, f"actions/{name}.py")
                 if guardian_result.verdict == GuardianVerdict.BLOCK:
                     guardian_flag = "[NEEDS REVIEW] "
+                    guardian_blocked = True
                     log.warning("Guardian blocked extension %s: %s", name, guardian_result.reason)
                     try:
                         from learning import record_signal as _rec
@@ -1541,6 +1555,17 @@ async def generate_and_pr(payload: dict) -> str:
 
             pr_title_prefix = guardian_flag
             pr_url = await create_extension_pr(name, module_source, manifest, warnings, test_source, scheduler_source, pr_title_prefix=pr_title_prefix)
+
+            # Emit signal for workflow engine (auto-merge evaluation)
+            try:
+                from learning import record_signal as _rec_ext
+                _rec_ext("extension_pr_created", {
+                    "pr_url": pr_url,
+                    "extension_name": name,
+                    "guardian_blocked": guardian_blocked,
+                })
+            except Exception:
+                pass
 
         _last_generation_time = time.time()
 
