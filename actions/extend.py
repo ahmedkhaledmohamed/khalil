@@ -626,10 +626,20 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
     template_path = KHALIL_DIR / "actions" / "reminders.py"
     template_source = template_path.read_text() if template_path.exists() else ACTION_TEMPLATE
 
+    # Inject past PR feedback so generation learns from rejections
+    feedback_section = ""
+    past_feedback = get_pr_feedback(spec["name"])
+    if past_feedback:
+        feedback_lines = "\n".join(f"- {fb}" for fb in past_feedback[-3:])
+        feedback_section = (
+            f"\n**Previous attempts were rejected. Address this feedback**:\n{feedback_lines}\n\n"
+        )
+
     prompt = (
         f"Generate a complete Python module for a Khalil action called '{spec['name']}'.\n\n"
         f"**Capability**: {spec['description']}\n"
         f"**Command**: /{spec['command']}\n\n"
+        f"{feedback_section}"
         "**Requirements**:\n"
         "1. Follow the EXACT patterns from the reference module below\n"
         "2. Use SQLite for any persistent state (via `config.DB_PATH`)\n"
