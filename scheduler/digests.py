@@ -83,12 +83,75 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             log.debug("GitHub notifications fetch for brief failed: %s", e)
         return ""
 
-    recent_raw, weather, calendar_text, job_text, github_text = await asyncio.gather(
+    async def _fetch_appstore_summary():
+        try:
+            from actions.appstore import get_app_ratings, get_app_downloads
+            from config import ZIA_APP_ID
+            if not ZIA_APP_ID:
+                return ""
+            ratings, downloads = await asyncio.gather(
+                get_app_ratings(ZIA_APP_ID),
+                get_app_downloads(ZIA_APP_ID, days=7),
+            )
+            parts = []
+            if ratings:
+                parts.append(f"{ratings.get('average_rating', '?')}★")
+            if downloads:
+                parts.append(f"{downloads.get('total', '?')} downloads (7d)")
+            if parts:
+                return f"\n\nZia (App Store): {', '.join(parts)}"
+        except Exception as e:
+            log.debug("App Store fetch for brief failed: %s", e)
+        return ""
+
+    async def _fetch_server_health():
+        try:
+            from actions.digitalocean import get_droplets, get_monthly_spend
+            droplets, spend = await asyncio.gather(get_droplets(), get_monthly_spend())
+            parts = []
+            if droplets:
+                active = [d for d in droplets if d.get("status") == "active"]
+                parts.append(f"{len(active)}/{len(droplets)} droplets active")
+            if spend:
+                parts.append(f"${spend.get('month_to_date_usage', '?')} MTD")
+            if parts:
+                return f"\n\nServers: {', '.join(parts)}"
+        except Exception as e:
+            log.debug("DigitalOcean fetch for brief failed: %s", e)
+        return ""
+
+    async def _fetch_spotify_recent():
+        try:
+            from actions.spotify import get_recently_played
+            tracks = await get_recently_played(limit=3)
+            if tracks:
+                names = [f"{t.get('name', '?')} — {t.get('artist', '?')}" for t in tracks]
+                return f"\n\nRecently played: {'; '.join(names)}"
+        except Exception as e:
+            log.debug("Spotify fetch for brief failed: %s", e)
+        return ""
+
+    async def _fetch_readwise_daily():
+        try:
+            from actions.readwise import get_daily_review
+            highlights = await get_daily_review()
+            if highlights:
+                return f"\n\nReadwise: {len(highlights)} highlight(s) for review today"
+        except Exception as e:
+            log.debug("Readwise fetch for brief failed: %s", e)
+        return ""
+
+    (recent_raw, weather, calendar_text, job_text, github_text,
+     appstore_text, server_text, spotify_text, readwise_text) = await asyncio.gather(
         _fetch_recent(),
         _get_weather_toronto(),
         _fetch_calendar(),
         _fetch_jobs(),
         _fetch_github_notifications(),
+        _fetch_appstore_summary(),
+        _fetch_server_health(),
+        _fetch_spotify_recent(),
+        _fetch_readwise_daily(),
     )
 
     recent_text = "\n".join(
@@ -147,6 +210,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         f"Personal Profile:\n{personal}\n\n"
         f"Recent Items:\n{recent_text}"
         f"{reminder_text}{weather_text}{calendar_text}{job_text}{github_text}"
+        f"{appstore_text}{server_text}{spotify_text}{readwise_text}"
         f"{work_text}{goal_text}{deadline_text}"
     )
 
@@ -161,9 +225,12 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         "- Goal progress (one line if goals exist)\n"
         "- Financial deadlines if any are within 14 days or passed\n"
         "- GitHub unread notifications count (if any)\n"
+        "- App Store stats for Zia if available (one line)\n"
+        "- Server health if available (one line)\n"
+        "- Readwise daily review count if available (one line)\n"
         "- Job matches if any new ones found\n"
         "- A closing line with suggested focus for the day\n"
-        "- Keep it under 15 lines, be direct and actionable.",
+        "- Keep it under 18 lines, be direct and actionable.",
         context,
         system_extra=f"Today's date: {today_iso}, {day_name}",
     )
