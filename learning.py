@@ -4,6 +4,7 @@ Khalil analyzes its own interaction data to identify patterns and adapt behavior
 All changes are transparent (visible via /learn) and safe (hard guardrails immutable).
 """
 
+import asyncio
 import json
 import logging
 import re as _re_module
@@ -91,6 +92,14 @@ def reset_preferences():
 
 # --- Signal Recording ---
 
+_signal_hooks: list = []
+
+
+def register_signal_hook(fn):
+    """Register a callback to be called after each signal is recorded."""
+    _signal_hooks.append(fn)
+
+
 def record_signal(signal_type: str, context: dict | None = None, value: float = 1.0):
     """Record an interaction signal for future reflection."""
     conn = _get_conn()
@@ -99,6 +108,14 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
         (signal_type, json.dumps(context) if context else None, value),
     )
     conn.commit()
+    # Notify workflow engine and other hooks
+    for hook in _signal_hooks:
+        try:
+            result = hook(signal_type, context)
+            if asyncio.iscoroutine(result):
+                asyncio.get_event_loop().create_task(result)
+        except Exception:
+            pass  # Hooks must not break signal recording
 
 
 # --- Goal Progress Signals (M12) ---

@@ -32,13 +32,38 @@ class GitHubWebhookHandler(WebhookHandler):
 
     async def handle(self, payload: dict) -> str | None:
         # Determine event type from payload structure
+        event_type = None
         if "pusher" in payload:
-            return self._handle_push(payload)
+            event_type = "push"
+            result = self._handle_push(payload)
         elif "pull_request" in payload:
-            return self._handle_pr(payload)
+            event_type = "pull_request"
+            result = self._handle_pr(payload)
         elif "issue" in payload:
-            return self._handle_issue(payload)
-        return None
+            event_type = "issue"
+            result = self._handle_issue(payload)
+        else:
+            return None
+
+        # Forward to workflow engine
+        try:
+            from workflows import get_engine
+            engine = get_engine()
+            if engine:
+                await engine.evaluate_trigger("webhook", {
+                    "source": "github",
+                    "event": event_type,
+                    "context": {
+                        "repo": payload.get("repository", {}).get("full_name", ""),
+                        "action": payload.get("action", ""),
+                        "branch": payload.get("pull_request", {}).get("head", {}).get("ref", ""),
+                        "merged": payload.get("pull_request", {}).get("merged", False),
+                    },
+                })
+        except Exception as e:
+            log.debug("Workflow trigger from webhook failed: %s", e)
+
+        return result
 
     def _handle_push(self, payload: dict) -> str:
         repo = payload.get("repository", {}).get("full_name", "unknown")
