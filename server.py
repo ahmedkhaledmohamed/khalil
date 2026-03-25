@@ -2362,6 +2362,46 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "extend_skip":
         await query.edit_message_text("Skipped. Let me know if you change your mind.")
 
+    elif query.data.startswith("insight_apply:"):
+        insight_id = int(query.data.split(":", 1)[1])
+        from learning import apply_insight
+        if apply_insight(insight_id):
+            await query.edit_message_text("Applied. Preference saved.")
+        else:
+            await query.edit_message_text("Could not apply — insight may already be resolved.")
+
+    elif query.data.startswith("insight_dismiss:"):
+        insight_id = int(query.data.split(":", 1)[1])
+        from learning import dismiss_insight
+        if dismiss_insight(insight_id):
+            await query.edit_message_text("Dismissed.")
+        else:
+            await query.edit_message_text("Could not dismiss — insight may already be resolved.")
+
+
+async def cmd_insights(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show pending insights with interactive approve/dismiss buttons."""
+    ctx = _ctx_from_update(update)
+    from learning import get_insights
+    pending = get_insights(status="pending", limit=5)
+    if not pending:
+        await ctx.reply("No pending insights. Check back after the next reflection cycle.")
+        return
+
+    await ctx.reply(f"{len(pending)} pending insight(s):")
+    for insight in pending:
+        buttons = [[
+            ActionButton("Apply", f"insight_apply:{insight['id']}"),
+            ActionButton("Dismiss", f"insight_dismiss:{insight['id']}"),
+        ]]
+        category = insight.get("category", "general")
+        summary = insight.get("summary", "")
+        recommendation = insight.get("recommendation", "")
+        await ctx.reply(
+            f"[{category}] {summary}\nRecommendation: {recommendation}",
+            buttons=buttons,
+        )
+
 
 async def cmd_brief(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
@@ -4320,6 +4360,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("mcp", cmd_mcp))
     application.add_handler(CommandHandler("commitments", cmd_commitments))
     application.add_handler(CommandHandler("tasks", cmd_tasks))
+    application.add_handler(CommandHandler("insights", cmd_insights))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -4357,6 +4398,7 @@ async def start_telegram_bot():
         BotCommand("mcp", "Manage MCP server connections"),
         BotCommand("commitments", "Track meeting commitments"),
         BotCommand("tasks", "View active task plans"),
+        BotCommand("insights", "View/manage pending insights"),
         BotCommand("help", "Show help"),
     ])
 
@@ -4555,6 +4597,27 @@ def _setup_scheduler():
     # Daily micro-reflection + self-healing check (configurable hour)
     async def _micro_reflection_job():
         await run_micro_reflection(ask_claude, channel=channel, chat_id=OWNER_CHAT_ID)
+
+        # Verify past heal outcomes and detect regressions
+        if _can_send():
+            try:
+                from healing import check_heal_outcomes, detect_healing_regressions
+                failed_heals = check_heal_outcomes()
+                for h in failed_heals:
+                    fp = h.get("fingerprint", "unknown")
+                    await channel.send_message(
+                        OWNER_CHAT_ID,
+                        f"Self-heal ineffective: `{fp}` — signals recurred after patch. Will retry on next cycle.",
+                    )
+                regressions = detect_healing_regressions()
+                for r in regressions:
+                    fp = r.get("fingerprint", "unknown")
+                    await channel.send_message(
+                        OWNER_CHAT_ID,
+                        f"Warning: heal for `{fp}` may have caused new failures. Manual review recommended.",
+                    )
+            except Exception as e:
+                log.warning("Heal outcome check failed: %s", e)
 
     scheduler.add_job(
         _micro_reflection_job,

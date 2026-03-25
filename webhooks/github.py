@@ -61,6 +61,24 @@ class GitHubWebhookHandler(WebhookHandler):
         title = pr.get("title", "")
         number = pr.get("number", "")
         user = pr.get("user", {}).get("login", "unknown")
+
+        # Hot-reload extensions when an extension PR is merged
+        if action == "closed" and pr.get("merged"):
+            branch = pr.get("head", {}).get("ref", "")
+            if "ext/" in branch or "extend" in branch:
+                try:
+                    import subprocess
+                    subprocess.run(["git", "pull", "origin", "main"], capture_output=True, timeout=30)
+                    from actions.extend import reload_all_extensions
+                    reloaded = reload_all_extensions()
+                    log.info("Hot-reloaded %d extensions after PR #%s merge", len(reloaded), number)
+                    return (
+                        f"\U0001f4cb PR #{number} merged on {repo}\n{title}\n"
+                        f"Hot-reloaded {len(reloaded)} extension(s): {', '.join(reloaded) if reloaded else 'none'}"
+                    )
+                except Exception as e:
+                    log.warning("Extension hot-reload failed after PR #%s: %s", number, e)
+
         return f"\U0001f4cb PR #{number} {action} on {repo}\n{title}\nBy: {user}"
 
     def _handle_issue(self, payload: dict) -> str:
