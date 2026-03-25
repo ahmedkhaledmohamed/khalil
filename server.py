@@ -2838,6 +2838,37 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await query.edit_message_text("Could not dismiss — insight may already be resolved.")
 
+    elif query.data.startswith("wf_approve:"):
+        wf_id = query.data.split(":", 1)[1]
+        from workflows import get_engine
+        engine = get_engine()
+        if engine:
+            wf = engine.get_workflow(wf_id)
+            if wf:
+                from datetime import datetime as _dt_wf
+                from datetime import timezone as _tz_wf
+                engine._conn.execute(
+                    "UPDATE workflows SET enabled = 1, updated_at = ? WHERE id = ?",
+                    (_dt_wf.now(_tz_wf.utc).isoformat(), wf_id),
+                )
+                engine._conn.commit()
+                await query.edit_message_text(f"Workflow enabled: {wf.name}")
+            else:
+                await query.edit_message_text("Workflow not found.")
+        else:
+            await query.edit_message_text("Workflow engine not available.")
+
+    elif query.data.startswith("wf_dismiss:"):
+        wf_id = query.data.split(":", 1)[1]
+        from learning import record_signal
+        record_signal("workflow_proposal_dismissed", {"workflow_id": wf_id, "pattern_key": wf_id})
+        from workflows import get_engine
+        engine = get_engine()
+        if engine:
+            engine._conn.execute("DELETE FROM workflows WHERE id = ?", (wf_id,))
+            engine._conn.commit()
+        await query.edit_message_text("Dismissed.")
+
 
 async def cmd_insights(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show pending insights with interactive approve/dismiss buttons."""
