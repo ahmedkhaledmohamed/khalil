@@ -44,6 +44,9 @@ slack-bolt>=1.18.0
 # Browser automation
 playwright>=1.40.0
 
+# Spotify Web API
+spotipy>=2.23.0
+
 # Discord (bidirectional channel)
 discord.py>=2.3.0
 
