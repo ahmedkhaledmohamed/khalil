@@ -101,11 +101,22 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             pass
         return ""
 
-    recent_raw, weather, calendar_text, job_text = await asyncio.gather(
+    async def _fetch_github_notifications():
+        try:
+            from actions.github_api import get_notifications
+            notifications = await get_notifications(unread_only=True)
+            if notifications:
+                return f"\n\nGitHub: {len(notifications)} unread notification(s)"
+        except Exception as e:
+            log.debug("GitHub notifications fetch for brief failed: %s", e)
+        return ""
+
+    recent_raw, weather, calendar_text, job_text, github_text = await asyncio.gather(
         _fetch_recent(),
         _get_weather_toronto(),
         _fetch_calendar(),
         _fetch_jobs(),
+        _fetch_github_notifications(),
     )
 
     recent_text = "\n".join(
@@ -163,7 +174,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     context = (
         f"Personal Profile:\n{personal}\n\n"
         f"Recent Items:\n{recent_text}"
-        f"{reminder_text}{weather_text}{calendar_text}{job_text}"
+        f"{reminder_text}{weather_text}{calendar_text}{job_text}{github_text}"
         f"{work_text}{goal_text}{deadline_text}"
     )
 
@@ -177,6 +188,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         "- Work priorities: P0 epics or key in-progress items (1-2 lines)\n"
         "- Goal progress (one line if goals exist)\n"
         "- Financial deadlines if any are within 14 days or passed\n"
+        "- GitHub unread notifications count (if any)\n"
         "- Job matches if any new ones found\n"
         "- A closing line with suggested focus for the day\n"
         "- Keep it under 15 lines, be direct and actionable.",
