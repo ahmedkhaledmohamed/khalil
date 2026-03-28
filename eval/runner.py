@@ -223,6 +223,69 @@ async def run_suite(
     return results
 
 
+async def run_suite_parallel(
+    cases: list[TestCase],
+    server_mod=None,
+    max_concurrent: int = 8,
+) -> list[TestResult]:
+    """Run cases with parallel execution for direct_action, sequential for LLM.
+
+    Direct action cases (expected_path='direct_action') never hit the LLM
+    and can safely run concurrently. LLM cases must be sequential because
+    Ollama is single-threaded.
+    """
+    if server_mod is None:
+        print("Initializing server...", file=sys.stderr)
+        server_mod = await init_server()
+        print("Server ready.", file=sys.stderr)
+
+    # Partition cases with their original indices for re-ordering
+    direct_indexed = [(i, c) for i, c in enumerate(cases) if c.expected_path == "direct_action"]
+    llm_indexed = [(i, c) for i, c in enumerate(cases) if c.expected_path != "direct_action"]
+
+    results: dict[int, TestResult] = {}
+    total = len(cases)
+
+    # Phase A: parallel direct_action cases
+    if direct_indexed:
+        print(f"\n  Phase A: {len(direct_indexed)} direct_action cases (parallel, max {max_concurrent})...", file=sys.stderr)
+        sem = asyncio.Semaphore(max_concurrent)
+        completed_a = 0
+
+        async def run_bounded(idx: int, case: TestCase):
+            nonlocal completed_a
+            async with sem:
+                result = await run_case(server_mod, case)
+                results[idx] = result
+                completed_a += 1
+                status = "OK" if result.error is None else "ERR"
+                print(
+                    f"  [A {completed_a}/{len(direct_indexed)}] {status} {case.id:20s} "
+                    f"{result.latency_s:5.1f}s {result.pipeline_path}",
+                    file=sys.stderr,
+                )
+
+        await asyncio.gather(*[run_bounded(i, c) for i, c in direct_indexed])
+
+    # Phase B: sequential LLM cases
+    if llm_indexed:
+        print(f"\n  Phase B: {len(llm_indexed)} LLM cases (sequential)...", file=sys.stderr)
+        completed_b = 0
+        for idx, case in llm_indexed:
+            result = await run_case(server_mod, case)
+            results[idx] = result
+            completed_b += 1
+            status = "OK" if result.error is None else "ERR"
+            print(
+                f"  [B {completed_b}/{len(llm_indexed)}] {status} {case.id:20s} "
+                f"{result.latency_s:5.1f}s {result.pipeline_path}",
+                file=sys.stderr,
+            )
+
+    # Merge back in original order
+    return [results[i] for i in range(total)]
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------

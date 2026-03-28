@@ -30,6 +30,7 @@ async def run_pipeline(
     output_dir: str = "eval/reports",
     run_llm_judge: bool = False,
     max_cases: int | None = None,
+    parallel: bool = False,
 ) -> dict:
     """Full pipeline: generate/load -> run -> evaluate -> gap -> plan."""
 
@@ -47,7 +48,10 @@ async def run_pipeline(
     server_mod = await runner.init_server()
 
     # 4. Run suite
-    results = await runner.run_suite(cases, server_mod)
+    if parallel:
+        results = await runner.run_suite_parallel(cases, server_mod)
+    else:
+        results = await runner.run_suite(cases, server_mod)
 
     # 5. Evaluate each pair
     evals = []
@@ -156,6 +160,9 @@ def main() -> None:
         else:
             print("--max requires a number argument.")
             sys.exit(1)
+
+    if "--parallel" in args:
+        kwargs["parallel"] = True
 
     result = asyncio.run(run_pipeline(**kwargs))
     print(f"\nDone. Pass rate: {result['pass_rate']:.1%}  Gaps: {result['gaps']}")
