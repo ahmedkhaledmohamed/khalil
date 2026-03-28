@@ -18,6 +18,23 @@ log = logging.getLogger("khalil.actions.readwise")
 
 BASE_URL = "https://readwise.io/api/v2"
 
+SKILL = {
+    "name": "readwise",
+    "description": "Readwise — highlights, books, and daily review",
+    "category": "reading",
+    "patterns": [
+        (r"\breadwise\b", "readwise_highlights"),
+        (r"\bbook\s+highlights?\b", "readwise_highlights"),
+        (r"\bmy\s+highlights?\b", "readwise_highlights"),
+        (r"\bdaily\s+review\b", "readwise_review"),
+    ],
+    "actions": [
+        {"type": "readwise_highlights", "handler": "handle_intent", "keywords": "readwise highlights books reading", "description": "Recent highlights"},
+        {"type": "readwise_review", "handler": "handle_intent", "keywords": "readwise daily review", "description": "Daily review"},
+    ],
+    "examples": ["My Readwise highlights", "Daily review"],
+}
+
 
 def _get_token() -> str:
     """Read Readwise API token from keyring."""
@@ -112,3 +129,38 @@ async def get_daily_review() -> list[dict]:
         resp.raise_for_status()
 
     return resp.json().get("highlights", [])
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "readwise_highlights":
+        try:
+            highlights = await get_highlights(limit=10)
+            if not highlights:
+                await ctx.reply("No Readwise highlights found.")
+            else:
+                lines = ["\U0001f4da Recent Highlights:\n"]
+                for h in highlights:
+                    lines.append(f'  \u2022 "{h.get("text", "")[:100]}"')
+                    if h.get("title"):
+                        lines.append(f"    \u2014 {h['title']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Readwise failed: {e}")
+        return True
+    elif action == "readwise_review":
+        try:
+            highlights = await get_daily_review()
+            if not highlights:
+                await ctx.reply("No daily review highlights today.")
+            else:
+                lines = [f"\U0001f4d6 Daily Review ({len(highlights)} highlights):\n"]
+                for h in highlights:
+                    lines.append(f'  \u2022 "{h.get("text", "")[:120]}"')
+                    if h.get("title"):
+                        lines.append(f"    \u2014 {h['title']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Readwise failed: {e}")
+        return True
+    return False

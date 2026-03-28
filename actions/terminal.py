@@ -20,6 +20,50 @@ from config import DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.terminal")
 
+SKILL = {
+    "name": "terminal",
+    "description": "Terminal and Cursor IDE awareness and control",
+    "category": "development",
+    "patterns": [
+        (r"\bcursor\s+(?:status|windows?|projects?|info)\b", "cursor_status"),
+        (r"\b(?:what.s|which)\s+(?:(?:files?|projects?)\s+)?(?:are\s+)?open\s+in\s+cursor\b", "cursor_status"),
+        (r"\b(?:what|which)\s+(?:am\s+i\s+)?(?:working\s+on|editing)\s+in\s+cursor\b", "cursor_status"),
+        (r"\bcursor\s+extensions?\b", "cursor_extensions"),
+        (r"\bcursor\s+terminal\s+(?:status|list|sessions?)\b", "cursor_terminal_status"),
+        (r"\b(?:what.s|what\s+is)\s+(?:running\s+)?in\s+(?:the\s+)?cursor\s+terminal\b", "cursor_terminal_status"),
+        (r"\b(?:list|show)\s+(?:the\s+)?terminals?\s+in\s+cursor\b", "cursor_terminal_status"),
+        (r"\brun\s+.+\s+in\s+cursor\s+terminal\b", "cursor_terminal_exec"),
+        (r"\bsend\s+.+\s+to\s+cursor\s+terminal\b", "cursor_terminal_exec"),
+        (r"\bnew\s+cursor\s+terminal\b", "cursor_terminal_new"),
+        (r"\bcreate\s+(?:a\s+)?cursor\s+terminal\b", "cursor_terminal_new"),
+        (r"\b(?:what.s|what\s+is)\s+running\s+in\s+(?:my\s+)?(?:terminal|iterm)\b", "terminal_status"),
+        (r"\bterminal\s+(?:status|sessions?)\b", "terminal_status"),
+        (r"\biterm\s+(?:status|sessions?)\b", "terminal_status"),
+        (r"\bactive\s+(?:terminal\s+)?(?:processes|commands)\b", "terminal_status"),
+        (r"\brun\s+.+\s+in\s+(?:the\s+)?(?:terminal|iterm|tab|session)\b", "terminal_exec"),
+        (r"\bsend\s+.+\s+to\s+(?:the\s+)?(?:terminal|iterm)\b", "terminal_exec"),
+        (r"\bnew\s+(?:terminal\s+)?tab\b", "terminal_new_tab"),
+        (r"\bopen\s+(?:a\s+)?(?:new\s+)?terminal(?:\s+tab)?\b", "terminal_new_tab"),
+        (r"\bopen\s+.+\s+in\s+cursor\b", "cursor_open"),
+        (r"\bcursor\s+open\s+", "cursor_open"),
+        (r"\bjump\s+to\s+(?:line\s+)?\d+", "cursor_goto"),
+        (r"\bcursor\s+diff\b", "cursor_diff"),
+    ],
+    "actions": [
+        {"type": "cursor_status", "handler": "handle_intent", "keywords": "cursor ide status windows projects info", "description": "Show Cursor IDE status and open windows"},
+        {"type": "cursor_extensions", "handler": "handle_intent", "keywords": "cursor extensions list", "description": "List installed Cursor extensions"},
+        {"type": "cursor_terminal_status", "handler": "handle_intent", "keywords": "cursor terminal sessions status list terminals", "description": "Show Cursor terminal sessions"},
+        {"type": "cursor_terminal_exec", "handler": None, "keywords": "run send command cursor terminal", "description": "Run a command in Cursor terminal"},
+        {"type": "cursor_terminal_new", "handler": None, "keywords": "create new cursor terminal", "description": "Create a new Cursor terminal"},
+        {"type": "terminal_status", "handler": "handle_intent", "keywords": "terminal iterm sessions running status", "description": "Show iTerm2 terminal sessions and processes"},
+        {"type": "terminal_exec", "handler": None, "keywords": "run send command terminal iterm", "description": "Run a command in iTerm2"},
+        {"type": "terminal_new_tab", "handler": None, "keywords": "new terminal tab", "description": "Open a new iTerm2 tab"},
+        {"type": "cursor_open", "handler": None, "keywords": "open file cursor jump goto line", "description": "Open a file in Cursor"},
+        {"type": "cursor_diff", "handler": "handle_intent", "keywords": "cursor diff files compare", "description": "Open a diff view in Cursor"},
+    ],
+    "examples": ["Cursor status", "What's running in terminal?", "Open file in Cursor"],
+}
+
 
 # --- Cursor IDE ---
 
@@ -706,3 +750,39 @@ def format_cursor_terminal_status(status: dict) -> str:
             lines.append(f"  [{t.get('id', '?')}] {t['name']}{pid}{active}")
 
     return "\n".join(lines)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "cursor_status":
+        status = await get_cursor_status()
+        await ctx.reply(format_cursor_status(status))
+        return True
+    elif action == "cursor_extensions":
+        extensions = await get_cursor_extensions()
+        if extensions:
+            text = f"🧩 Cursor Extensions ({len(extensions)}):\n" + "\n".join(f"  • {e}" for e in extensions)
+        else:
+            text = "🧩 No Cursor extensions found (or Cursor not running)"
+        await ctx.reply(text)
+        return True
+    elif action == "cursor_terminal_status":
+        status = await get_cursor_terminal_status()
+        await ctx.reply(format_cursor_terminal_status(status))
+        return True
+    elif action == "terminal_status":
+        status = await get_terminal_status()
+        await ctx.reply(format_terminal_status(status))
+        return True
+    elif action == "cursor_diff":
+        f1 = intent.get("file1", "")
+        f2 = intent.get("file2", "")
+        if not f1 or not f2:
+            return False
+        result = await cursor_diff(f1, f2)
+        if result["success"]:
+            await ctx.reply(f"🖥 Diff opened in Cursor: {f1} vs {f2}")
+        else:
+            await ctx.reply(f"⚠️ Failed: {result['error']}")
+        return True
+    return False

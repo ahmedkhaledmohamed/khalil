@@ -28,6 +28,26 @@ HEADERS_BASE = {
     "x-restli-protocol-version": "2.0.0",
 }
 
+SKILL = {
+    "name": "linkedin",
+    "description": "LinkedIn — recruiter messages, job search, profile views",
+    "category": "career",
+    "patterns": [
+        (r"\blinkedin\s+(?:messages?|inmail)\b", "linkedin_messages"),
+        (r"\brecruiter\s+messages?\b", "linkedin_messages"),
+        (r"\blinkedin\s+jobs?\b", "linkedin_jobs"),
+        (r"\bjob\s+search\s+linkedin\b", "linkedin_jobs"),
+        (r"\blinkedin\s+(?:views?|profile\s+views?)\b", "linkedin_profile"),
+        (r"\bprofile\s+views?\b", "linkedin_profile"),
+    ],
+    "actions": [
+        {"type": "linkedin_messages", "handler": "handle_intent", "keywords": "linkedin messages recruiter inmail", "description": "Recruiter messages"},
+        {"type": "linkedin_jobs", "handler": "handle_intent", "keywords": "linkedin jobs search openings", "description": "Job search"},
+        {"type": "linkedin_profile", "handler": "handle_intent", "keywords": "linkedin profile views", "description": "Profile views"},
+    ],
+    "examples": ["LinkedIn messages", "Search LinkedIn jobs", "Profile views"],
+}
+
 
 def _get_session_cookie() -> str:
     """Read li_at cookie from keyring. Raises ValueError if missing."""
@@ -163,3 +183,43 @@ async def search_jobs(query: str, location: str = "Toronto") -> list[dict]:
     except Exception as e:
         log.error("LinkedIn job search failed: %s", e)
         raise
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "linkedin_messages":
+        try:
+            messages = await get_recruiter_messages(limit=5)
+            if not messages:
+                await ctx.reply("No recent recruiter messages.")
+            else:
+                lines = [f"\U0001f4bc LinkedIn Messages ({len(messages)}):\n"]
+                for m in messages:
+                    lines.append(f"  \u2022 {m.get('from', '?')}: {m.get('subject', m.get('preview', ''))[:80]}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c LinkedIn failed: {e}")
+        return True
+    elif action == "linkedin_jobs":
+        try:
+            query = intent.get("query", intent.get("text", "product manager"))
+            location = intent.get("location", "Toronto")
+            jobs = await search_jobs(query, location)
+            if not jobs:
+                await ctx.reply(f'No LinkedIn jobs found for "{query}" in {location}.')
+            else:
+                lines = [f'\U0001f50d LinkedIn Jobs \u2014 "{query}" in {location}:\n']
+                for j in jobs[:10]:
+                    lines.append(f"  \u2022 {j.get('title', '?')} @ {j.get('company', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c LinkedIn jobs failed: {e}")
+        return True
+    elif action == "linkedin_profile":
+        try:
+            views = await get_profile_views()
+            await ctx.reply(f"\U0001f440 LinkedIn profile views: {views.get('view_count', '?')}")
+        except Exception as e:
+            await ctx.reply(f"\u274c LinkedIn failed: {e}")
+        return True
+    return False

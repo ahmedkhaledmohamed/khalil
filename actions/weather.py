@@ -14,6 +14,22 @@ log = logging.getLogger("khalil.actions.weather")
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
+SKILL = {
+    "name": "weather",
+    "description": "Current weather, forecasts, and alerts via Open-Meteo",
+    "category": "information",
+    "patterns": [
+        (r"\b(?:what'?s\s+the\s+)?weather\b", "weather"),
+        (r"\btemperature\b", "weather"),
+        (r"\bforecast\b", "weather_forecast"),
+    ],
+    "actions": [
+        {"type": "weather", "handler": "handle_intent", "keywords": "weather temperature outside today toronto", "description": "Current weather"},
+        {"type": "weather_forecast", "handler": "handle_intent", "keywords": "weather forecast days week ahead", "description": "Multi-day forecast"},
+    ],
+    "examples": ["What's the weather in Toronto?", "5-day forecast"],
+}
+
 
 def _weather_code_to_text(code: int) -> str:
     """Map WMO weather code to human-readable text."""
@@ -137,3 +153,31 @@ async def _fetch_summary_data() -> tuple[dict, list[dict]]:
         }
         forecast = [{"high": data["daily"]["temperature_2m_max"][0]}]
         return current, forecast
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "weather":
+        try:
+            summary = await get_weather_summary()
+            await ctx.reply(f"\U0001f324 {summary}")
+        except Exception as e:
+            await ctx.reply(f"\u274c Weather fetch failed: {e}")
+        return True
+    elif action == "weather_forecast":
+        try:
+            days = int(intent.get("days", 3))
+            forecast = await get_forecast(days=days)
+            if not forecast:
+                await ctx.reply("No forecast data available.")
+            else:
+                lines = [f"\U0001f4c5 {days}-Day Forecast:\n"]
+                for day in forecast:
+                    lines.append(f"  {day.get('date', '')}: {day.get('condition', '')} \u2014 "
+                                 f"{day.get('low', '')}°C / {day.get('high', '')}°C"
+                                 + (f", {day['precipitation']}mm rain" if day.get('precipitation') else ""))
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Forecast fetch failed: {e}")
+        return True
+    return False

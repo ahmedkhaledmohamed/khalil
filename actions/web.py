@@ -13,6 +13,21 @@ import httpx
 
 log = logging.getLogger("khalil.actions.web")
 
+SKILL = {
+    "name": "web",
+    "description": "Web search and page fetching via DuckDuckGo",
+    "category": "information",
+    "patterns": [
+        (r"\bsearch\s+(?:the\s+)?(?:web|internet|online)\b", "web_search"),
+        (r"\bgoogle\s+(?!doc|sheet|spreadsheet|slide|drive|form)", "web_search"),
+        (r"\blook\s+up\b", "web_search"),
+    ],
+    "actions": [
+        {"type": "web_search", "handler": "handle_intent", "keywords": "search web internet google look up find", "description": "Search the web"},
+    ],
+    "examples": ["Search the web for Python best practices", "Look up Toronto weather"],
+}
+
 # Try importing duckduckgo-search; gracefully degrade if missing
 try:
     from duckduckgo_search import DDGS
@@ -88,3 +103,20 @@ def format_search_results(results: list[dict]) -> str:
         snippet = r.get("snippet", "")
         lines.append(f"{i}. <b>{title}</b>\n   {snippet}\n   <a href=\"{url}\">Link</a>")
     return "\n\n".join(lines)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "web_search":
+        query = intent.get("query", "")
+        if not query:
+            return False
+        await ctx.reply(f"\U0001f50d Searching: {query}...")
+        results = await web_search(query)
+        await ctx.reply(
+            format_search_results(results),
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+        )
+        return True
+    return False

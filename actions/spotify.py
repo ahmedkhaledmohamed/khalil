@@ -18,6 +18,27 @@ log = logging.getLogger("khalil.actions.spotify")
 
 SCOPES = "user-read-currently-playing user-read-recently-played user-top-read"
 
+SKILL = {
+    "name": "spotify",
+    "description": "Spotify playback — now playing, recently played, top tracks and artists",
+    "category": "media",
+    "patterns": [
+        (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "spotify_now"),
+        (r"\b(?:what\s+am\s+i|what'?s)\s+(?:listening|playing)\b", "spotify_now"),
+        (r"\brecently\s+played\b", "spotify_recent"),
+        (r"\blistening\s+history\b", "spotify_recent"),
+        (r"\btop\s+(?:tracks?|songs?)\b", "spotify_top"),
+        (r"\btop\s+artists?\b", "spotify_top"),
+        (r"\bmost\s+played\b", "spotify_top"),
+    ],
+    "actions": [
+        {"type": "spotify_now", "handler": "handle_intent", "keywords": "playing listening song track music spotify", "description": "Now playing"},
+        {"type": "spotify_recent", "handler": "handle_intent", "keywords": "recently played listening history spotify", "description": "Recently played"},
+        {"type": "spotify_top", "handler": "handle_intent", "keywords": "top tracks artists most played spotify", "description": "Top tracks/artists"},
+    ],
+    "examples": ["What's playing?", "My top artists", "Recently played"],
+}
+
 
 def _get_spotify_client() -> spotipy.Spotify:
     """Build an authenticated Spotify client using keyring credentials."""
@@ -134,3 +155,51 @@ async def get_top_artists(time_range: str = "short_term", limit: int = 10) -> li
     except Exception as e:
         log.error("Failed to get top artists: %s", e)
         return []
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "spotify_now":
+        try:
+            track = await get_now_playing()
+            if not track:
+                await ctx.reply("Nothing playing right now.")
+            else:
+                await ctx.reply(f"\U0001f3b5 Now playing: {track.get('name', '?')} \u2014 {track.get('artist', '?')}"
+                                f"\n   Album: {track.get('album', '?')}"
+                                + (f"\n   {track['url']}" if track.get('url') else ""))
+        except Exception as e:
+            await ctx.reply(f"\u274c Spotify failed: {e}")
+        return True
+    elif action == "spotify_recent":
+        try:
+            tracks = await get_recently_played(limit=10)
+            if not tracks:
+                await ctx.reply("No recent listening history.")
+            else:
+                lines = ["\U0001f3a7 Recently Played:\n"]
+                for t in tracks:
+                    lines.append(f"  \u2022 {t.get('name', '?')} \u2014 {t.get('artist', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Spotify failed: {e}")
+        return True
+    elif action == "spotify_top":
+        try:
+            query_text = intent.get("text", "").lower()
+            if "artist" in query_text:
+                artists = await get_top_artists(limit=10)
+                lines = ["\U0001f3a4 Top Artists:\n"]
+                for a in artists:
+                    lines.append(f"  \u2022 {a.get('name', '?')}")
+                await ctx.reply("\n".join(lines))
+            else:
+                tracks = await get_top_tracks(limit=10)
+                lines = ["\U0001f3c6 Top Tracks:\n"]
+                for t in tracks:
+                    lines.append(f"  \u2022 {t.get('name', '?')} \u2014 {t.get('artist', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Spotify failed: {e}")
+        return True
+    return False

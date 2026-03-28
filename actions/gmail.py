@@ -22,6 +22,28 @@ from config import (
 
 log = logging.getLogger("khalil.actions.gmail")
 
+SKILL = {
+    "name": "gmail",
+    "description": "Gmail integration — search, draft, and send emails",
+    "category": "communication",
+    "patterns": [
+        (r"\bemail\b.*\babout\b", "email"),
+        (r"\bsend\s+(?:an?\s+)?email\b", "email"),
+        (r"\bdraft\s+(?:an?\s+)?email\b", "email"),
+        (r"\bwrite\s+(?:an?\s+)?email\b", "email"),
+        (r"\bsearch\s+(?:my\s+)?work\s+email\b", "email_work"),
+        (r"\bcheck\s+(?:my\s+)?work\s+(?:inbox|email|mail)\b", "email_work"),
+        (r"\bsearch\s+(?:my\s+)?personal\s+email\b", "email_personal"),
+        (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
+    ],
+    "actions": [
+        {"type": "email", "handler": None, "keywords": "email send draft write about", "description": "Send or draft an email"},
+        {"type": "email_work", "handler": None, "keywords": "search check work email inbox", "description": "Search work email"},
+        {"type": "email_personal", "handler": None, "keywords": "search check personal email inbox", "description": "Search personal email"},
+    ],
+    "examples": ["Send an email to John about the meeting", "Check my work inbox"],
+}
+
 SCOPES_READ = ["https://www.googleapis.com/auth/gmail.readonly"]
 SCOPES_COMPOSE = [
     "https://www.googleapis.com/auth/gmail.readonly",

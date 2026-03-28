@@ -20,6 +20,23 @@ _BASE_URL = "https://api.notion.com/v1"
 _TOKEN_KEY = "notion-api-token"
 _NOTION_VERSION = "2022-06-28"
 
+SKILL = {
+    "name": "notion",
+    "description": "Notion — search pages, create pages, query databases",
+    "category": "productivity",
+    "patterns": [
+        (r"\bsearch\s+(?:my\s+)?notion\b", "notion_search"),
+        (r"\bfind\s+in\s+notion\b", "notion_search"),
+        (r"\bnotion\s+search\b", "notion_search"),
+        (r"\bcreate\s+(?:a\s+)?notion\s+page\b", "notion_create"),
+    ],
+    "actions": [
+        {"type": "notion_search", "handler": "handle_intent", "keywords": "notion search find pages notes", "description": "Search Notion pages"},
+        {"type": "notion_create", "handler": "handle_intent", "keywords": "notion create page new", "description": "Create a Notion page"},
+    ],
+    "examples": ["Search my Notion for project ideas", "Create a Notion page"],
+}
+
 
 def _get_token() -> str:
     """Retrieve Notion integration token from system keyring."""
@@ -189,3 +206,43 @@ async def update_page(page_id: str, properties: dict) -> bool:
 
     log.info("Updated Notion page %s", page_id)
     return True
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "notion_search":
+        try:
+            query = intent.get("query", intent.get("text", ""))
+            if not query:
+                await ctx.reply("What should I search for in Notion?")
+                return True
+            pages = await search_pages(query)
+            if not pages:
+                await ctx.reply(f'No Notion pages found for "{query}".')
+            else:
+                lines = [f'\U0001f4dd Notion results for "{query}":\n']
+                for p in pages[:10]:
+                    lines.append(f"  \u2022 {p.get('title', 'Untitled')}")
+                    if p.get("url"):
+                        lines.append(f"    {p['url']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c Notion search failed: {e}")
+        return True
+    elif action == "notion_create":
+        try:
+            title = intent.get("title", intent.get("text", ""))
+            parent_id = intent.get("parent_id", "")
+            if not title:
+                await ctx.reply("What should the page be titled?")
+                return True
+            if not parent_id:
+                await ctx.reply("I need a parent page or database ID. "
+                                "Example: create notion page titled 'Ideas' in <parent_id>")
+                return True
+            url = await create_page(parent_id, title)
+            await ctx.reply(f"\u2705 Notion page created: {url}")
+        except Exception as e:
+            await ctx.reply(f"\u274c Notion page creation failed: {e}")
+        return True
+    return False

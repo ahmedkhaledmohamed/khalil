@@ -24,6 +24,21 @@ from config import TOKEN_FILE_CALENDAR, TIMEZONE
 
 log = logging.getLogger("khalil.actions.calendar")
 
+SKILL = {
+    "name": "calendar",
+    "description": "Google Calendar — read events, check schedule, create events",
+    "category": "productivity",
+    "patterns": [
+        (r"\bcalendar\b", "calendar"),
+        (r"\bwhat'?s\s+on\s+(?:my\s+)?(?:schedule|calendar)\b", "calendar"),
+        (r"\bmeeting(?:s)?\s+today\b", "calendar"),
+    ],
+    "actions": [
+        {"type": "calendar", "handler": None, "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
+    ],
+    "examples": ["What's on my calendar today?", "Any meetings this afternoon?"],
+}
+
 SCOPES_READ = ["https://www.googleapis.com/auth/calendar.readonly"]
 SCOPES_WRITE = [
     "https://www.googleapis.com/auth/calendar.readonly",

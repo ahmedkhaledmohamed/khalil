@@ -17,6 +17,22 @@ log = logging.getLogger("khalil.actions.digitalocean")
 _BASE_URL = "https://api.digitalocean.com/v2"
 _TOKEN_KEY = "digitalocean-api-token"
 
+SKILL = {
+    "name": "digitalocean",
+    "description": "DigitalOcean — droplet status, health, and billing",
+    "category": "infrastructure",
+    "patterns": [
+        (r"\b(?:server|droplet)\s+(?:status|health)\b", "digitalocean_status"),
+        (r"\bdigitalocean\b", "digitalocean_status"),
+        (r"\b(?:server|digitalocean)\s+(?:cost|bill|spend)\b", "digitalocean_spend"),
+    ],
+    "actions": [
+        {"type": "digitalocean_status", "handler": "handle_intent", "keywords": "server droplet status health digitalocean", "description": "Droplet status"},
+        {"type": "digitalocean_spend", "handler": "handle_intent", "keywords": "server cost bill spend digitalocean", "description": "Monthly spend"},
+    ],
+    "examples": ["Server status", "DigitalOcean spending"],
+}
+
 
 def _get_token() -> str:
     """Read the DigitalOcean API token from the system keyring."""
@@ -89,3 +105,30 @@ async def get_deployments(app_id: str) -> list[dict]:
         resp = await client.get(f"{_BASE_URL}/apps/{app_id}/deployments", headers=_headers())
         resp.raise_for_status()
     return resp.json().get("deployments", [])
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "digitalocean_status":
+        try:
+            droplets = await get_droplets()
+            if not droplets:
+                await ctx.reply("No droplets found.")
+            else:
+                lines = [f"\U0001f5a5 Droplets ({len(droplets)}):\n"]
+                for d in droplets:
+                    lines.append(f"  \u2022 {d.get('name', '?')} \u2014 {d.get('status', '?')} "
+                                 f"({d.get('memory', '?')}MB, {d.get('region', '?')})")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c DigitalOcean failed: {e}")
+        return True
+    elif action == "digitalocean_spend":
+        try:
+            spend = await get_monthly_spend()
+            await ctx.reply(f"\U0001f4b5 DigitalOcean MTD: ${spend.get('month_to_date_usage', '?')}\n"
+                            f"   Balance: ${spend.get('account_balance', '?')}")
+        except Exception as e:
+            await ctx.reply(f"\u274c DigitalOcean billing failed: {e}")
+        return True
+    return False

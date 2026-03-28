@@ -19,6 +19,36 @@ log = logging.getLogger("khalil.actions.shell")
 SHELL_TIMEOUT = 30
 MAX_OUTPUT_LENGTH = 3000
 
+SKILL = {
+    "name": "shell",
+    "description": "Execute shell commands with safety classification (safe/risky/blocked)",
+    "category": "system",
+    "patterns": [
+        (r"\bopen\s+(?:the\s+)?(?:Safari|Chrome|Slack|Finder|Terminal|Music|Notes|Calendar|Spotify|Mail)\b", "shell"),
+        (r"\bopen\s+https?://", "shell"),
+        (r"\bcheck\s+(?:disk\s+)?(?:space|storage)\b", "shell"),
+        (r"\brun\s+(?:the\s+)?command\b", "shell"),
+        (r"\bbrew\s+(?:list|info|search|install|upgrade|uninstall|cleanup)\b", "shell"),
+        (r"\blist\s+(?:my\s+)?brew\s+packages?\b", "shell"),
+        (r"\b(?:arrange|tile|put)\s+windows?\s+(?:side\s+by\s+side|split)\b", "shell"),
+        (r"\bresize\s+(?:the\s+)?window\b", "shell"),
+        (r"\bminimize\s+(?:all\s+)?windows?\b", "shell"),
+        (r"\b(?:check|test)\s+(?:my\s+)?(?:network|internet|connection)\b", "shell"),
+        (r"\bping\s+\w+", "shell"),
+        (r"\b(?:list|show|get)\s+(?:my\s+)?(?:login|startup)\s+items?\b", "shell"),
+        (r"\b(?:disk\s+space|storage\s+usage)\b", "shell"),
+        (r"\b(?:large|biggest)\s+files?\b", "shell"),
+        (r"\bclean\s+cache[s]?\b", "shell"),
+        (r"\b(?:play|resume)\s+music\b", "shell"),
+        (r"\b(?:pause|stop)\s+music\b", "shell"),
+        (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
+    ],
+    "actions": [
+        {"type": "shell", "handler": None, "keywords": "run command shell open app brew install network disk space", "description": "Execute shell commands"},
+    ],
+    "examples": ["Open Safari", "Check disk space", "Run brew update"],
+}
+
 # --- Classification ---
 
 BLOCKED_PATTERNS = [

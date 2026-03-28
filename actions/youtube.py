@@ -19,6 +19,24 @@ log = logging.getLogger("khalil.actions.youtube")
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
+SKILL = {
+    "name": "youtube",
+    "description": "YouTube — search videos, liked videos, subscriptions",
+    "category": "media",
+    "patterns": [
+        (r"\bsearch\s+(?:on\s+)?youtube\b", "youtube_search"),
+        (r"\bfind\s+(?:a\s+)?video\b", "youtube_search"),
+        (r"\byoutube\s+search\b", "youtube_search"),
+        (r"\bliked\s+videos?\b", "youtube_liked"),
+        (r"\byoutube\s+(?:history|liked)\b", "youtube_liked"),
+    ],
+    "actions": [
+        {"type": "youtube_search", "handler": "handle_intent", "keywords": "youtube search video find", "description": "Search YouTube"},
+        {"type": "youtube_liked", "handler": "handle_intent", "keywords": "youtube liked videos history", "description": "Liked videos"},
+    ],
+    "examples": ["Search YouTube for Python tutorials", "My liked videos"],
+}
+
 
 def _get_credentials():
     """Get or refresh OAuth credentials for YouTube readonly."""
@@ -149,3 +167,40 @@ async def get_channel_stats(channel_id: str) -> dict:
 async def get_subscriptions(limit: int = 20) -> list[dict]:
     """Get the authenticated user's YouTube subscriptions."""
     return await asyncio.to_thread(_get_subscriptions_sync, limit)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "youtube_search":
+        try:
+            query = intent.get("query", intent.get("text", ""))
+            if not query:
+                await ctx.reply("What should I search for on YouTube?")
+                return True
+            videos = await search_videos(query, limit=5)
+            if not videos:
+                await ctx.reply(f'No YouTube results for "{query}".')
+            else:
+                lines = [f'\u25b6\ufe0f YouTube \u2014 "{query}":\n']
+                for v in videos:
+                    lines.append(f"  \u2022 {v.get('title', '?')}")
+                    if v.get("url"):
+                        lines.append(f"    {v['url']}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c YouTube search failed: {e}")
+        return True
+    elif action == "youtube_liked":
+        try:
+            videos = await get_liked_videos(limit=10)
+            if not videos:
+                await ctx.reply("No liked videos found.")
+            else:
+                lines = ["\U0001f44d Liked Videos:\n"]
+                for v in videos:
+                    lines.append(f"  \u2022 {v.get('title', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c YouTube failed: {e}")
+        return True
+    return False
