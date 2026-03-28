@@ -12,25 +12,11 @@ log = logging.getLogger("khalil.state.calendar")
 
 def _get_calendar_service():
     """Get Calendar API service using existing OAuth tokens."""
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
+    from oauth_utils import load_credentials
 
     scopes = ["https://www.googleapis.com/auth/calendar.readonly"]
-    token_file = TOKEN_FILE_CALENDAR
-
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(token_file, "w") as f:
-                f.write(creds.to_json())
-        else:
-            raise RuntimeError("Calendar OAuth token missing or invalid — run calendar auth first")
-
+    creds = load_credentials(TOKEN_FILE_CALENDAR, scopes, allow_interactive=False)
     return build("calendar", "v3", credentials=creds)
 
 

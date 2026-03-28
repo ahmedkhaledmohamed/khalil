@@ -18,12 +18,9 @@ import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from config import CREDENTIALS_FILE, TOKEN_FILE_CALENDAR, TIMEZONE
+from config import TOKEN_FILE_CALENDAR, TIMEZONE
 
 log = logging.getLogger("khalil.actions.calendar")
 
@@ -41,34 +38,11 @@ TOKEN_FILE_CALENDAR_WRITE = TOKEN_FILE_CALENDAR.parent / "token_calendar_write.j
 
 
 def _get_credentials(write: bool = False):
-    """Get or refresh OAuth credentials for Calendar.
-
-    Args:
-        write: If True, use calendar.events scope for write access.
-    """
+    """Get or refresh OAuth credentials for Calendar."""
+    from oauth_utils import load_credentials
     scopes = SCOPES_WRITE if write else SCOPES_READ
     token_file = TOKEN_FILE_CALENDAR_WRITE if write else TOKEN_FILE_CALENDAR
-
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Missing {CREDENTIALS_FILE}. "
-                    "Download from Google Cloud Console → APIs → Credentials → OAuth 2.0"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
-            creds = flow.run_local_server(port=0)
-
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-
-    return creds
+    return load_credentials(token_file, scopes)
 
 
 def _authorize_write():

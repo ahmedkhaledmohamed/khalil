@@ -20,13 +20,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from config import (
-    CREDENTIALS_FILE,
     DB_PATH,
     SCRIPTS_DIR,
     TIMEZONE,
@@ -36,6 +32,20 @@ from config import (
 log = logging.getLogger("khalil.actions.email_categorizer")
 
 _tables_ensured = False
+
+SKILL = {
+    "name": "email_categorizer",
+    "description": "Categorize and label Gmail inbox emails using AI classification",
+    "category": "productivity",
+    "patterns": [
+        (r"\b(?:categoriz|label|organiz|sort)\w*\s+(?:my\s+)?(?:email|inbox|mail)\b", "label"),
+        (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),
+    ],
+    "actions": [
+        {"type": "label", "handler": None, "keywords": "categorize label organize sort email inbox mail", "description": "Categorize inbox emails"},
+    ],
+    "examples": ["Categorize my inbox", "Label my emails"],
+}
 
 TOKEN_FILE_MODIFY = SCRIPTS_DIR / "token_label.json"
 SCOPES_MODIFY = [
@@ -90,26 +100,8 @@ def _get_conn() -> sqlite3.Connection:
 
 def _get_credentials(scopes: list[str], token_file: Path):
     """Get or refresh OAuth credentials."""
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Missing {CREDENTIALS_FILE}. "
-                    "Download from Google Cloud Console → APIs → Credentials → OAuth 2.0"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
-            creds = flow.run_local_server(port=0)
-
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-
-    return creds
+    from oauth_utils import load_credentials
+    return load_credentials(token_file, scopes)
 
 
 def _get_gmail_read():
