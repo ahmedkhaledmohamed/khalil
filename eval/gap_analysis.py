@@ -16,6 +16,59 @@ from eval.judge import EvalResult
 
 
 # ---------------------------------------------------------------------------
+# Regression tracking
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ReportDiff:
+    regressions: list[str]      # case_ids that passed before but fail now
+    fixes: list[str]            # case_ids that failed before but pass now
+    new_cases: list[str]        # case_ids not in previous run
+    removed_cases: list[str]    # case_ids no longer tested
+
+
+def diff_reports(
+    previous_path: str | None,
+    current_cases: list[TestCase],
+    current_evals: list[EvalResult],
+) -> ReportDiff:
+    """Compare current eval results against the most recent previous report."""
+    current_passed_ids = {e.case_id for e in current_evals if e.passed}
+    current_failed_ids = {e.case_id for e in current_evals if not e.passed}
+    current_all_ids = current_passed_ids | current_failed_ids
+
+    if previous_path is None:
+        return ReportDiff([], [], list(current_all_ids), [])
+
+    import json as _json
+    with open(previous_path) as f:
+        prev = _json.load(f)
+
+    prev_all_ids = set(prev.get("all_case_ids", []))
+    prev_passed_ids = set(prev.get("passed_case_ids", []))
+    prev_failed_ids = {g["case_id"] for g in prev.get("gaps", [])}
+
+    # If the previous report lacks all_case_ids, fall back to gaps only
+    if not prev_all_ids:
+        prev_all_ids = prev_failed_ids
+
+    regressions = []
+    for case_id in current_failed_ids:
+        if case_id in prev_passed_ids or (case_id in prev_all_ids and case_id not in prev_failed_ids):
+            regressions.append(case_id)
+
+    fixes = []
+    for case_id in current_passed_ids:
+        if case_id in prev_failed_ids:
+            fixes.append(case_id)
+
+    new_cases = [cid for cid in current_all_ids if cid not in prev_all_ids]
+    removed = [cid for cid in prev_all_ids if cid not in current_all_ids]
+
+    return ReportDiff(regressions, fixes, new_cases, removed)
+
+
+# ---------------------------------------------------------------------------
 # Gap taxonomy
 # ---------------------------------------------------------------------------
 

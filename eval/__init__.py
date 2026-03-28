@@ -13,12 +13,43 @@ from eval.cases import TestCase, generate_cases, load_cases
 from eval import runner
 from eval import judge
 from eval import gap_analysis
+from eval.gap_analysis import diff_reports
 from eval.plan_gen import generate_plan, format_plan
 
 
 EVAL_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = EVAL_DIR / "fixtures"
 REPORTS_DIR = EVAL_DIR / "reports"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _find_previous_report(reports_dir: Path, current_timestamp: str) -> str | None:
+    """Find the most recent report before the current one."""
+    reports = sorted(reports_dir.glob("*.json"))
+    for r in reversed(reports):
+        if r.stem != current_timestamp:
+            return str(r)
+    return None
+
+
+def _print_trend(reports_dir: Path, n: int = 10) -> None:
+    """Print pass rate trend across last N runs."""
+    reports = sorted(reports_dir.glob("*.json"))[-n:]
+    if not reports:
+        print("No reports found.")
+        return
+    print(f"\nPass Rate Trend (last {len(reports)} runs):")
+    print("-" * 50)
+    for rp in reports:
+        data = json.loads(rp.read_text())
+        ts = data["timestamp"]
+        rate = data.get("pass_rate", 0)
+        total = data.get("total_cases", 0)
+        bar = "\u2588" * int(rate * 30)
+        print(f"  {ts}  {rate:5.1%}  ({total} cases) {bar}")
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +62,7 @@ async def run_pipeline(
     run_llm_judge: bool = False,
     max_cases: int | None = None,
     parallel: bool = False,
+    cycle: int = 0,
 ) -> dict:
     """Full pipeline: generate/load -> run -> evaluate -> gap -> plan."""
 
@@ -68,10 +100,24 @@ async def run_pipeline(
     # 7. Plan
     plan = generate_plan(report, cases)
 
-    # 8. Save results
+    # 8. Regression tracking
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    previous_report = _find_previous_report(out_dir, timestamp)
+    diff = diff_reports(previous_report, cases, evals)
+
+    # Per-skill breakdown
+    skill_stats: dict[str, dict] = {}
+    for case, ev in zip(cases, evals):
+        skill = case.expected_action or case.category
+        if skill not in skill_stats:
+            skill_stats[skill] = {"total": 0, "passed": 0}
+        skill_stats[skill]["total"] += 1
+        if ev.passed:
+            skill_stats[skill]["passed"] += 1
+
+    # 9. Save results
     report_path = out_dir / f"{timestamp}.json"
 
     report_data = {
@@ -80,7 +126,12 @@ async def run_pipeline(
         "passed": report.passed,
         "failed": report.failed,
         "pass_rate": report.passed / max(len(cases), 1),
+        "all_case_ids": [c.id for c in cases],
+        "passed_case_ids": [e.case_id for e in evals if e.passed],
         "gaps": [vars(g) for g in report.gaps],
+        "by_skill": {k: v for k, v in skill_stats.items()},
+        "regressions": diff.regressions,
+        "fixes_since_last": diff.fixes,
         "plan": {
             "total_gaps": plan.total_gaps,
             "auto_fixable_count": plan.auto_fixable_count,
@@ -90,20 +141,79 @@ async def run_pipeline(
     }
     report_path.write_text(json.dumps(report_data, indent=2, default=str))
 
-    # 9. Print summary and plan
+    # 10. Print summary and plan
     print(f"\n{'=' * 60}")
     print(f"EVAL RESULTS — {timestamp}")
     print(f"  Cases: {len(cases)}  Passed: {report.passed}  Failed: {report.failed}")
     print(f"  Pass rate: {report.passed / max(len(cases), 1):.1%}")
+
+    if diff.regressions:
+        print(f"  REGRESSIONS: {len(diff.regressions)} cases regressed since last run")
+    if diff.fixes:
+        print(f"  FIXES: {len(diff.fixes)} cases fixed since last run")
+
     print(f"{'=' * 60}")
+
+    # Per-skill breakdown
+    print(f"\nPer-skill breakdown:")
+    for skill, stats in sorted(skill_stats.items(), key=lambda x: x[1]["passed"] / max(x[1]["total"], 1)):
+        rate = stats["passed"] / max(stats["total"], 1)
+        print(f"  {skill:25s} {stats['passed']:4d}/{stats['total']:<4d} ({rate:.0%})")
+
     print(format_plan(plan))
     print(f"Report saved: {report_path}")
 
-    # 10. Return summary
+    # 11. Auto-fix cycle
+    if cycle > 0:
+        from eval.autofix import run_autofix_cycle, rollback_fix
+        for iteration in range(cycle):
+            print(f"\n{'='*60}")
+            print(f"AUTO-FIX CYCLE {iteration + 1}/{cycle}")
+            print(f"{'='*60}")
+
+            attempts = await run_autofix_cycle(
+                report, cases,
+                confidence_threshold=0.6,
+                dry_run=False,
+            )
+
+            applied = [a for a in attempts if a.applied]
+            if not applied:
+                print("  No fixes applied. Stopping cycle.")
+                break
+
+            # Re-run only to check for regressions
+            print(f"\n  Re-running eval to check for regressions...")
+            re_results = await runner.run_suite(cases, server_mod)
+            re_evals = []
+            for case, result in zip(cases, re_results):
+                if not run_llm_judge and case.eval_strategy == "llm_judge":
+                    case = TestCase(**{**vars(case), "eval_strategy": "heuristic"})
+                ev = await judge.evaluate(case, result)
+                re_evals.append(ev)
+
+            re_report = gap_analysis.analyze(cases, re_results, re_evals)
+
+            new_pass_rate = re_report.passed / max(len(cases), 1)
+            delta = new_pass_rate - (report.passed / max(len(cases), 1))
+
+            print(f"  Pass rate: {new_pass_rate:.1%} (delta: {delta:+.1%})")
+
+            if new_pass_rate < (report.passed / max(len(cases), 1)):
+                print("  REGRESSION DETECTED — rolling back fixes")
+                for a in applied:
+                    rollback_fix(a)
+                break
+
+            report = re_report  # Use new report for next cycle
+
+    # 12. Return summary
     return {
         "pass_rate": report.passed / max(len(cases), 1),
         "gaps": len(report.gaps),
         "plan_path": str(report_path),
+        "regressions": diff.regressions,
+        "fixes": diff.fixes,
     }
 
 
@@ -130,6 +240,14 @@ def main() -> None:
 
     if "--report" in args:
         _print_last_report()
+        return
+
+    if "--trend" in args:
+        n = 10
+        idx = args.index("--trend")
+        if idx + 1 < len(args) and args[idx + 1].isdigit():
+            n = int(args[idx + 1])
+        _print_trend(REPORTS_DIR, n)
         return
 
     if "--generate" in args:
@@ -163,6 +281,13 @@ def main() -> None:
 
     if "--parallel" in args:
         kwargs["parallel"] = True
+
+    if "--cycle" in args:
+        idx = args.index("--cycle")
+        if idx + 1 < len(args):
+            kwargs["cycle"] = int(args[idx + 1])
+        else:
+            kwargs["cycle"] = 1
 
     result = asyncio.run(run_pipeline(**kwargs))
     print(f"\nDone. Pass rate: {result['pass_rate']:.1%}  Gaps: {result['gaps']}")
