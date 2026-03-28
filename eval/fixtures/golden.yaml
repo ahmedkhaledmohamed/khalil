@@ -1,0 +1,1644 @@
+# Golden test cases — hand-curated ground truth for Khalil eval
+# These are the regression anchor. They must always pass.
+#
+# Structure: ~15 cases per skill (21 skills) + ~20 conversational/edge = ~304 cases
+# Each case has: query, expected_action, expected_contains, expected_path, complexity
+
+weather:
+  # Core phrasings
+  - query: "What's the weather?"
+    expected_action: weather
+    expected_contains: ["temperature"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Weather in Toronto"
+    expected_action: weather
+    expected_contains: ["temperature"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's the temperature outside?"
+    expected_action: weather
+    expected_contains: ["°"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Is it raining right now?"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Current weather conditions"
+    expected_action: weather
+    expected_contains: ["temperature"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How hot is it today?"
+    expected_action: weather
+    expected_contains: ["°"]
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Gimme the weather"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Hows the weather looking"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "I'm heading out, what's it like outside?"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Weather NYC"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Forecast variants
+  - query: "Will it rain tomorrow?"
+    expected_action: weather_forecast
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's the forecast for this weekend?"
+    expected_action: weather_forecast
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Weather forecast for the next 3 days"
+    expected_action: weather_forecast
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Do I need an umbrella?"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Should I wear a jacket today?"
+    expected_action: weather
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What's the weather like in Vancouver this week?"
+    expected_action: weather_forecast
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Is it going to snow?"
+    expected_action: weather_forecast
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+calendar:
+  # Core phrasings
+  - query: "What's on my calendar today?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my schedule"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Do I have any meetings today?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my next meeting?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Calendar for tomorrow"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my events this week"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Am I free at 3pm?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "Whats on the cal today"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any meetings this afternoon?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pull up my schedule for Monday"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "I need to see my calendar for next week"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "When is my first meeting?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "How packed is my day?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What time do I need to be somewhere today?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Schedule overview for Thursday"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's between my 2pm and 4pm?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+gmail:
+  # Core phrasings
+  - query: "Check my email"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my inbox"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any new emails?"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my unread emails"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Read my latest email"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my work email"
+    expected_action: email_work
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my personal email"
+    expected_action: email_personal
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Anything in my inbox?"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pull up my emails"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Lemme see my mail"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Did I get any emails from Sarah?"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "What emails came in this morning?"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Anything important in my inbox?"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Check if I got a reply from the recruiter"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show emails from today"
+    expected_action: email
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any Spotify work emails?"
+    expected_action: email_work
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+reminders:
+  # Core phrasings
+  - query: "Remind me to buy milk"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Set a reminder for 5pm to call mom"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Remind me tomorrow to submit the report"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a reminder to pick up dry cleaning"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my reminders"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What reminders do I have?"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Don't let me forget to water the plants"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Set reminder: dentist appointment Friday 2pm"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "I need to remember to renew my passport"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Add a reminder for the team standup at 10am"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Remind me about this later"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Make sure I don't forget the meeting prep"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Ping me at 3pm"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Set a recurring reminder every Monday at 9am"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Delete the milk reminder"
+    expected_action: reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+apple_reminders:
+  # Core phrasings
+  - query: "Show my Apple reminders"
+    expected_action: apple_reminders_sync
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my iCloud reminders"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Add a reminder to my Apple reminders list"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Sync my Apple reminders"
+    expected_action: apple_reminders_sync
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's in my iCloud reminders?"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Pull up my Apple Reminders list"
+    expected_action: apple_reminders_sync
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show reminders from iCloud"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Get my reminders from Apple"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Are there any overdue Apple reminders?"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Sync reminders with iCloud"
+    expected_action: apple_reminders_sync
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Clear completed Apple reminders"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What Apple reminders are due today?"
+    expected_action: icloud_reminder
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+spotify:
+  # Core phrasings
+  - query: "What's playing right now?"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What song is this?"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What am I listening to?"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Now playing on Spotify"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my recently played songs"
+    expected_action: spotify_recent
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What did I listen to recently?"
+    expected_action: spotify_recent
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my top artists"
+    expected_action: spotify_top
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What are my most played songs?"
+    expected_action: spotify_top
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Whats bumping rn"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Current track?"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What have I been listening to lately?"
+    expected_action: spotify_recent
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "My top tracks this month"
+    expected_action: spotify_top
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Am I playing anything on Spotify?"
+    expected_action: spotify_now
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show my listening history"
+    expected_action: spotify_recent
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Who are my favorite artists?"
+    expected_action: spotify_top
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Last 5 songs I played"
+    expected_action: spotify_recent
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+github_api:
+  # Core phrasings
+  - query: "Check my GitHub notifications"
+    expected_action: github_notifications
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my GitHub PRs"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any open pull requests?"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a GitHub issue for the login bug"
+    expected_action: github_create_issue
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show my GitHub notifications"
+    expected_action: github_notifications
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What PRs need my review?"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Open PRs on my repos"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Any GH notifications?"
+    expected_action: github_notifications
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pull requests waiting on me"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "File a bug on GitHub for the crash in settings"
+    expected_action: github_create_issue
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "GitHub PR status"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Anything happening on GitHub?"
+    expected_action: github_notifications
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Do I have any code reviews pending?"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Open an issue about the API rate limiting"
+    expected_action: github_create_issue
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "How many open PRs do I have?"
+    expected_action: github_prs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "GitHub activity today"
+    expected_action: github_notifications
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+shell:
+  # Core phrasings
+  - query: "Run ls in my home directory"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show disk usage"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How much disk space do I have?"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my system uptime"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "List running processes"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my IP address?"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my CPU usage"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Run whoami"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Execute pwd"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How much RAM am I using?"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Check if port 8080 is in use"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "What version of Python is installed?"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Count the files in my Downloads folder"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show me the last 10 lines of my bash history"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Kill the process on port 3000"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show my environment variables"
+    expected_action: shell
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+imessage:
+  # Core phrasings
+  - query: "Check my messages"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my recent iMessages"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any new texts?"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Read my latest messages"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show messages from Sarah"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What texts did I get today?"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Any iMessages?"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pull up my text messages"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Lemme see my texts"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Did anyone text me?"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "What did my wife text me?"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Check the group chat"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show my conversation with Mom"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Unread text messages"
+    expected_action: imessage_read
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+slack_reader:
+  # Core phrasings
+  - query: "Send a Slack message to the team"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Slack the design channel about the new mockups"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Message #engineering on Slack"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Send a Slack DM to Jake"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Post in the standup channel"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "Shoot a message on Slack to #random"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Slack Sarah about the deadline"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Drop a note in #product on Slack"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "Tell the team on Slack that I'll be late"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Ping the channel about the outage"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Let the team know on Slack I'm OOO tomorrow"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Send a Slack message to #general saying hi"
+    expected_action: slack_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+browser:
+  # Core phrasings
+  - query: "Open google.com"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Go to github.com"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Open the Spotify dashboard"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Navigate to twitter.com"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Open my bank's website"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "Pull up reddit.com in the browser"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Take me to youtube.com"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Launch the AWS console"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Open backstage.spotify.net"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "I need to check something on notion.so"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Can you open that Jira link?"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Open localhost:3000"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Go to the Grafana dashboard"
+    expected_action: browser_navigate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+web:
+  # Core phrasings
+  - query: "Search the web for Python async patterns"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Google how to reset AirPods"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search for the best restaurants in Toronto"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Look up the latest iPhone specs"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Web search for Swift concurrency tutorial"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Google it: best noise cancelling headphones 2026"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find me info on the new MacBook Pro"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Search online for flight deals to Japan"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Can you look up how to fix a leaky faucet?"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "What does the internet say about intermittent fasting?"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "I need to research Kubernetes networking"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Search for reviews of the Pixel 9"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How do I fix a 502 bad gateway error?"
+    expected_action: web_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+youtube:
+  # Core phrasings
+  - query: "Search YouTube for cooking tutorials"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find a YouTube video about machine learning"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my liked YouTube videos"
+    expected_action: youtube_liked
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "YouTube search for WWDC 2026 keynote"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What videos have I liked on YouTube?"
+    expected_action: youtube_liked
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search YouTube for system design interview prep"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Find me a YT video on how to make sourdough"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Look up that conference talk on YouTube"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "My liked videos on YT"
+    expected_action: youtube_liked
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "YouTube: best productivity tips"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Is there a good video about Rust programming?"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show me what I've been watching on YouTube"
+    expected_action: youtube_liked
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Find the SwiftUI tutorial series on YouTube"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "YouTube video about home automation"
+    expected_action: youtube_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+notion:
+  # Core phrasings
+  - query: "Search Notion for the product roadmap"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find my meeting notes in Notion"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a new Notion page"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Make a Notion doc for sprint planning"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search Notion for the Q2 OKRs"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Look up the design spec in Notion"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Check Notion for the onboarding checklist"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "New page in Notion for weekly retro notes"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a Notion doc with my project ideas"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "Where did I put that doc in Notion?"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Start a fresh Notion page for brainstorming"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "I need to find something in Notion about the API migration"
+    expected_action: notion_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Add a new Notion page for interview prep"
+    expected_action: notion_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+readwise:
+  # Core phrasings
+  - query: "Show my Readwise highlights"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What did I highlight recently?"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Readwise daily review"
+    expected_action: readwise_review
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my reading highlights"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Review my Readwise highlights"
+    expected_action: readwise_review
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Get my highlights from Readwise"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Pull up my book highlights"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show what I've been reading"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Time for my Readwise review"
+    expected_action: readwise_review
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Any new highlights to review?"
+    expected_action: readwise_review
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What are my best highlights from this week?"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show highlights from Thinking Fast and Slow"
+    expected_action: readwise_highlights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+linkedin:
+  # Core phrasings
+  - query: "Check my LinkedIn messages"
+    expected_action: linkedin_messages
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show LinkedIn job postings"
+    expected_action: linkedin_jobs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "View my LinkedIn profile"
+    expected_action: linkedin_profile
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any new LinkedIn messages?"
+    expected_action: linkedin_messages
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search LinkedIn for PM jobs in Toronto"
+    expected_action: linkedin_jobs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "LinkedIn DMs"
+    expected_action: linkedin_messages
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Job listings on LinkedIn"
+    expected_action: linkedin_jobs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pull up my LinkedIn"
+    expected_action: linkedin_profile
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check if any recruiters messaged me on LinkedIn"
+    expected_action: linkedin_messages
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "Anything new on LinkedIn?"
+    expected_action: linkedin_messages
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show me senior PM roles on LinkedIn"
+    expected_action: linkedin_jobs
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Who viewed my LinkedIn profile?"
+    expected_action: linkedin_profile
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+macos:
+  # Core phrasings
+  - query: "What apps are running?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show running applications"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "List open apps"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's running on my Mac?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show active applications"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Which apps do I have open?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Running apps on my Mac"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my open applications"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Is Chrome running?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What do I have open right now?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Is Slack open?"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Close all apps except Terminal"
+    expected_action: macos_apps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+terminal:
+  # Core phrasings
+  - query: "What's the status of Cursor?"
+    expected_action: cursor_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my terminal status"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Run a command in the terminal"
+    expected_action: terminal_exec
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Is Cursor open?"
+    expected_action: cursor_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's running in my terminal?"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check terminal sessions"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "Cursor status"
+    expected_action: cursor_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my active terminal tabs"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Execute this in terminal"
+    expected_action: terminal_exec
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "What's happening in my dev environment?"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Is my editor running?"
+    expected_action: cursor_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "List my terminal windows"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+email_categorizer:
+  # Core phrasings
+  - query: "Label this email as important"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Categorize my emails"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Tag this email as work"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Label my inbox emails"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Auto-categorize my unread emails"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "Sort my emails into categories"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Mark this email as personal"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Apply labels to my emails"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "Organize my inbox"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Help me clean up my email labels"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Re-label all newsletters"
+    expected_action: label
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+appstore:
+  # Core phrasings
+  - query: "Check my App Store ratings"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show Zia's App Store reviews"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How many downloads does my app have?"
+    expected_action: appstore_downloads
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "App Store download numbers"
+    expected_action: appstore_downloads
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my app ratings"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Variations
+  - query: "What are my App Store reviews saying?"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Zia download stats"
+    expected_action: appstore_downloads
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check the app's rating"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  # Edge phrasings
+  - query: "How is my app doing on the App Store?"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Any new reviews for Zia?"
+    expected_action: appstore_ratings
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "App Store analytics for this week"
+    expected_action: appstore_downloads
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+digitalocean:
+  # Core phrasings
+  - query: "Check my DigitalOcean status"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How much am I spending on DigitalOcean?"
+    expected_action: digitalocean_spend
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "DigitalOcean server status"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my DO spending"
+    expected_action: digitalocean_spend
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Are my droplets running?"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Variations
+  - query: "DigitalOcean bill this month"
+    expected_action: digitalocean_spend
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my DO infrastructure"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How much is my server costing me?"
+    expected_action: digitalocean_spend
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  # Edge phrasings
+  - query: "Is my DigitalOcean stuff healthy?"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What's my cloud spend this month?"
+    expected_action: digitalocean_spend
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Restart my DigitalOcean droplet"
+    expected_action: digitalocean_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+conversational_edge:
+  # Conversational queries that should NOT route to any skill
+  - query: "Hey, how are you?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "What can you do?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Tell me about yourself"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Thanks for the help"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Never mind"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  # Ambiguous queries that could go multiple ways
+  - query: "What time is it?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "How's my day looking?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  - query: "Give me an update"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  - query: "What's new?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  # Multi-skill boundary cases
+  - query: "Check my email and calendar"
+    expected_action: null
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: complex
+    tags: ["golden", "multi_intent"]
+  - query: "Send a message"
+    expected_action: null
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  - query: "Play something good"
+    expected_action: null
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  - query: "I'm bored"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Good morning, give me a briefing"
+    expected_action: null
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: complex
+    tags: ["golden", "multi_intent"]
+  - query: "What should I focus on today?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+  - query: "You're not very helpful"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Forget everything I said"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Who built you?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Remind me... actually never mind"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+    tags: ["golden", "ambiguous"]
+  - query: "Can you help me with something?"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial

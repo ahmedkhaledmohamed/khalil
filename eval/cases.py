@@ -15,6 +15,8 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+import yaml
+
 # eval/ is a subdirectory — add parent to path for skill imports
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -33,6 +35,7 @@ class TestCase:
     expected_not_contains: list[str] = field(default_factory=list)
     eval_strategy: str = "deterministic"  # "deterministic" | "heuristic" | "llm_judge"
     tags: list[str] = field(default_factory=list)
+    source: str = "generated"  # "golden" | "llm_generated" | "generated" | "paraphrase" | "adversarial"
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +423,40 @@ def _generate_paraphrases(source_cases: list[TestCase]) -> list[TestCase]:
 
 
 # ---------------------------------------------------------------------------
+# Golden test cases
+# ---------------------------------------------------------------------------
+
+GOLDEN_PATH = Path(__file__).resolve().parent / "fixtures" / "golden.yaml"
+
+
+def load_golden_cases() -> list[TestCase]:
+    """Load golden test cases from YAML fixture."""
+    if not GOLDEN_PATH.exists():
+        return []
+
+    with open(GOLDEN_PATH) as f:
+        data = yaml.safe_load(f)
+
+    cases = []
+    for category, items in data.items():
+        for i, item in enumerate(items):
+            cases.append(TestCase(
+                id=f"golden-{category}-{i+1:03d}",
+                query=item["query"],
+                category=category,
+                complexity=item.get("complexity", "moderate"),
+                expected_path=item.get("expected_path", "direct_action"),
+                expected_action=item.get("expected_action"),
+                expected_contains=item.get("expected_contains", []),
+                expected_not_contains=item.get("expected_not_contains", []),
+                eval_strategy=item.get("eval_strategy", "deterministic"),
+                tags=item.get("tags", ["golden"]),
+                source="golden",
+            ))
+    return cases
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -438,6 +475,19 @@ def generate_cases() -> list[TestCase]:
     return all_cases
 
 
+def generate_cases_v2() -> list[TestCase]:
+    """Generate cases with golden set merged in. V2 for phase 2."""
+    golden = load_golden_cases()
+    generated = generate_cases()
+
+    # Tag generated cases
+    for c in generated:
+        if not c.source or c.source == "generated":
+            c.source = "generated"
+
+    return golden + generated
+
+
 def save_cases(cases: list[TestCase], path: str) -> None:
     """Serialize cases to JSON."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
@@ -449,7 +499,13 @@ def load_cases(path: str) -> list[TestCase]:
     """Deserialize cases from JSON."""
     with open(path) as f:
         raw = json.load(f)
-    return [TestCase(**item) for item in raw]
+    cases = []
+    for item in raw:
+        # Handle missing source field for backward compatibility
+        if "source" not in item:
+            item["source"] = "generated"
+        cases.append(TestCase(**item))
+    return cases
 
 
 # ---------------------------------------------------------------------------

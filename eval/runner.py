@@ -89,6 +89,8 @@ class TestResult:
     error: str | None
     pipeline_path: str              # "direct_action" | "llm_intent" | "conversational" | "error"
     signals: list[dict] = field(default_factory=list)
+    actual_action: str | None = None    # from trace: the action_type that was dispatched
+    handler_name: str | None = None     # from trace: handler function that was called
 
 
 # ---------------------------------------------------------------------------
@@ -147,19 +149,25 @@ async def run_case(server_mod, case: TestCase) -> TestResult:
     # Timeout: fast for direct_action, generous for conversational/LLM
     timeout = 15.0 if case.expected_path == "direct_action" else 60.0
 
+    from eval.trace import capture_trace
+
     start = time.monotonic()
     error = None
     pipeline_path = "error"
+    trace = None
 
     try:
-        await asyncio.wait_for(
-            server_mod.handle_message_generic(ctx),
-            timeout=timeout,
-        )
+        with capture_trace() as trace:
+            await asyncio.wait_for(
+                server_mod.handle_message_generic(ctx),
+                timeout=timeout,
+            )
         elapsed = time.monotonic() - start
-        # Infer pipeline path from latency + response content
-        if elapsed < 1.0 and channel.messages:
-            pipeline_path = "direct_action"
+        # Use trace for path inference instead of latency
+        if trace and trace.matched_path:
+            pipeline_path = trace.matched_path
+        elif elapsed < 1.0 and channel.messages:
+            pipeline_path = "direct_action"  # fallback
         elif elapsed < 2.0:
             pipeline_path = "llm_intent"
         else:
@@ -180,6 +188,8 @@ async def run_case(server_mod, case: TestCase) -> TestResult:
         error=error,
         pipeline_path=pipeline_path,
         signals=[],
+        actual_action=trace.matched_action if trace else None,
+        handler_name=trace.handler_name if trace else None,
     )
 
 
