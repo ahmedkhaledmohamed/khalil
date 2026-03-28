@@ -13,13 +13,10 @@ import logging
 import re
 from email.mime.text import MIMEText
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
 from config import (
-    CREDENTIALS_FILE, TOKEN_FILE, TOKEN_FILE_COMPOSE, TOKEN_FILE_MODIFY,
+    TOKEN_FILE, TOKEN_FILE_COMPOSE, TOKEN_FILE_MODIFY,
     TOKEN_FILE_CONTACTS, TOKEN_FILE_TASKS, TOKEN_FILE_DRIVE_WRITE, TOKEN_FILE_WORK,
 )
 
@@ -50,27 +47,9 @@ GMAIL_ACCOUNTS = {
 
 
 def _get_credentials(scopes: list[str], token_file):
-    """Get or refresh OAuth credentials. Reused from google_sync.py pattern."""
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Missing {CREDENTIALS_FILE}. "
-                    "Download from Google Cloud Console → APIs → Credentials → OAuth 2.0"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
-            creds = flow.run_local_server(port=0)
-
-        with open(token_file, "w") as f:
-            f.write(creds.to_json())
-
-    return creds
+    """Get or refresh OAuth credentials."""
+    from oauth_utils import load_credentials
+    return load_credentials(token_file, scopes)
 
 
 def _get_gmail_service(write: bool = False, modify: bool = False):

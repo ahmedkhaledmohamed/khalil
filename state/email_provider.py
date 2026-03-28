@@ -12,25 +12,11 @@ log = logging.getLogger("khalil.state.email")
 
 def _get_gmail_service():
     """Get Gmail API service using existing OAuth tokens."""
-    from google.oauth2.credentials import Credentials
-    from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
+    from oauth_utils import load_credentials
 
     scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
-    token_file = TOKEN_FILE
-
-    creds = None
-    if token_file.exists():
-        creds = Credentials.from_authorized_user_file(str(token_file), scopes)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-            with open(token_file, "w") as f:
-                f.write(creds.to_json())
-        else:
-            raise RuntimeError("Gmail OAuth token missing or invalid — run auth first")
-
+    creds = load_credentials(TOKEN_FILE, scopes, allow_interactive=False)
     return build("gmail", "v1", credentials=creds)
 
 

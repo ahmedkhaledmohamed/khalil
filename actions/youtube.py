@@ -11,12 +11,9 @@ All public functions are async — sync Google API calls run in asyncio.to_threa
 import asyncio
 import logging
 
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 
-from config import CREDENTIALS_FILE, TOKEN_FILE_YOUTUBE
+from config import TOKEN_FILE_YOUTUBE
 
 log = logging.getLogger("khalil.actions.youtube")
 
@@ -25,26 +22,8 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 
 def _get_credentials():
     """Get or refresh OAuth credentials for YouTube readonly."""
-    creds = None
-    if TOKEN_FILE_YOUTUBE.exists():
-        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE_YOUTUBE), SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not CREDENTIALS_FILE.exists():
-                raise FileNotFoundError(
-                    f"Missing {CREDENTIALS_FILE}. "
-                    "Download from Google Cloud Console -> APIs -> Credentials -> OAuth 2.0"
-                )
-            flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        with open(TOKEN_FILE_YOUTUBE, "w") as f:
-            f.write(creds.to_json())
-
-    return creds
+    from oauth_utils import load_credentials
+    return load_credentials(TOKEN_FILE_YOUTUBE, SCOPES)
 
 
 def _get_youtube_service():

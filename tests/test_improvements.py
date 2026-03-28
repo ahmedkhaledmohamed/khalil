@@ -194,7 +194,7 @@ class TestOAuthUtils:
         from oauth_utils import check_all_tokens
         results = check_all_tokens()
         assert isinstance(results, list)
-        assert len(results) == 3  # gmail_readonly, gmail_compose, calendar
+        assert len(results) == 9  # all managed token files
         for r in results:
             assert "name" in r
             assert "status" in r
