@@ -504,6 +504,13 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         f"(Q{(_now.month - 1) // 3 + 1} {_now.year})\n\n"
     )
 
+    # --- Selective context injection: only inject relevant skill descriptions ---
+    try:
+        from skills import get_registry
+        _skill_context = get_registry().get_context_for_intent(query)
+    except Exception:
+        _skill_context = ""
+
     system = (
         f"{_temporal}"
         "You are Khalil, Ahmed's personal AI assistant. "
@@ -511,19 +518,14 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         "Answer based on the provided context from his personal archives. "
         "Be direct, specific, and personal — you know him. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
-        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands. "
-        "This means you CAN check running processes (pgrep, ps), count app windows "
-        "(osascript), check disk space (df), list files (ls), open apps (open -a), "
-        "and perform other local system queries. If the user asks about their machine "
-        "state, DO NOT suggest they run a command — just tell them you'll check. "
-        "The shell execution happens automatically through your action system.\n\n"
-        "EXTENSIONS: You also have these capabilities via installed extensions:\n"
-        f"{_get_extension_capabilities_text()}"
-        "If the user asks for something covered by an extension, tell them to use that command.\n\n"
+        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
+        "and access many services through your action system.\n"
+        f"{_skill_context}\n\n"
+        "If the user asks about their machine state, DO NOT suggest they run a command "
+        "— just tell them you'll check. Actions execute automatically.\n\n"
         f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
-        "AND no extension covers it "
-        "(e.g., read Slack messages, post to Twitter, create a Jira ticket, book a flight), "
+        "AND no skill or extension covers it, "
         "include this exact tag in your response:\n"
         "[CAPABILITY_GAP: short_name | /command_name | one-line description]\n"
         "Example: [CAPABILITY_GAP: slack_reader | /slack | Read and search Slack messages]\n"
