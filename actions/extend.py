@@ -132,9 +132,18 @@ async def classify_gap(query: str, ask_llm_fn) -> dict | None:
     Returns spec dict {"name": "...", "command": "...", "description": "..."}
     or None if it's just a knowledge gap or normal conversation.
     """
-    # Add extension capabilities to the list
+    # Add extension capabilities + skill registry to the list
     ext_capabilities = _get_extension_capabilities()
-    all_capabilities = EXISTING_CAPABILITIES + ext_capabilities
+    try:
+        from skills import get_registry
+        registry = get_registry()
+        skill_capabilities = [
+            f"{s.name} — {s.description}"
+            for s in registry.list_skills()
+        ]
+    except Exception:
+        skill_capabilities = []
+    all_capabilities = EXISTING_CAPABILITIES + ext_capabilities + skill_capabilities
 
     capabilities_text = "\n".join(f"- {c}" for c in all_capabilities)
 

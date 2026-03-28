@@ -14,6 +14,30 @@ from config import KEYRING_SERVICE
 
 log = logging.getLogger("khalil.actions.github_api")
 
+SKILL = {
+    "name": "github_api",
+    "description": "GitHub notifications, pull requests, and issue management",
+    "category": "development",
+    "patterns": [
+        (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+        (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+        (r"\bfile\s+(?:an?\s+)?(?:github\s+)?issue\b", "github_create_issue"),
+        (r"\bnew\s+(?:github\s+)?issue\b", "github_create_issue"),
+        (r"\bcheck\s+(?:my\s+)?(?:pull\s+requests?|prs?)\b", "github_prs"),
+        (r"\b(?:pr|pull\s+request)\s+status\b", "github_prs"),
+        (r"\blist\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?)\b", "github_prs"),
+        (r"\bgithub\s+notifications?\b", "github_notifications"),
+        (r"\bcheck\s+(?:my\s+)?(?:github\s+)?notifications?\b", "github_notifications"),
+        (r"\bunread\s+(?:github\s+)?notifications?\b", "github_notifications"),
+    ],
+    "actions": [
+        {"type": "github_notifications", "handler": "handle_intent", "keywords": "github notifications unread alerts", "description": "Check unread GitHub notifications"},
+        {"type": "github_prs", "handler": "handle_intent", "keywords": "github pull requests prs open review", "description": "List open pull requests"},
+        {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue"},
+    ],
+    "examples": ["GitHub notifications", "Check my PRs", "Create issue on khalil repo"],
+}
+
 BASE_URL = "https://api.github.com"
 
 
@@ -198,3 +222,49 @@ async def get_pr_status(repo: str, pr_number: int) -> dict:
             "deletions": pr.get("deletions", 0),
             "changed_files": pr.get("changed_files", 0),
         }
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "github_notifications":
+        try:
+            notifs = await get_notifications(unread_only=True)
+            if not notifs:
+                await ctx.reply("No unread GitHub notifications.")
+            else:
+                lines = [f"🔔 GitHub Notifications ({len(notifs)}):\n"]
+                for n in notifs[:15]:
+                    emoji = {"PullRequest": "📋", "Issue": "🐛"}.get(n.get("type", ""), "📌")
+                    lines.append(f"  {emoji} {n.get('repo', '?')}: {n.get('title', '?')}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub notifications failed: {e}")
+        return True
+    elif action == "github_prs":
+        try:
+            prs = await list_my_prs()
+            if not prs:
+                await ctx.reply("No open pull requests.")
+            else:
+                lines = [f"📋 Open PRs ({len(prs)}):\n"]
+                for pr in prs[:15]:
+                    lines.append(f"  • {pr.get('title', '?')} ({pr.get('repo', '?')})")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub PR check failed: {e}")
+        return True
+    elif action == "github_create_issue":
+        try:
+            repo = intent.get("repo", "")
+            title = intent.get("title", intent.get("text", ""))
+            body = intent.get("body", "")
+            if not repo or not title:
+                await ctx.reply("I need a repo and title to create an issue.\n"
+                                "Example: create issue on user/repo titled 'Bug in login'")
+                return True
+            url = await create_issue(repo, title, body)
+            await ctx.reply(f"✅ Issue created: {url}")
+        except Exception as e:
+            await ctx.reply(f"❌ GitHub issue creation failed: {e}")
+        return True
+    return False

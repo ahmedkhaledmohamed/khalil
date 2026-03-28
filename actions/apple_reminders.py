@@ -10,6 +10,24 @@ import logging
 
 log = logging.getLogger("khalil.actions.apple_reminders")
 
+SKILL = {
+    "name": "apple_reminders",
+    "description": "Read and sync reminders with Apple Reminders.app",
+    "category": "productivity",
+    "patterns": [
+        (r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminder", "icloud_reminder"),
+        (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),
+        (r"\breminders?\s+app\b", "icloud_reminder"),
+        (r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
+        (r"\bsync\s+(?:reminders?\s+)?(?:to\s+)?apple\b", "apple_reminders_sync"),
+    ],
+    "actions": [
+        {"type": "icloud_reminder", "handler": "handle_intent", "keywords": "apple icloud iphone reminders list add show native", "description": "Apple/iCloud Reminders operations"},
+        {"type": "apple_reminders_sync", "handler": "handle_intent", "keywords": "sync reminders apple iphone", "description": "Sync a reminder to Apple Reminders"},
+    ],
+    "examples": ["Show Apple Reminders", "Sync reminder to Apple"],
+}
+
 
 async def _run_osascript(script: str, timeout: float = 10) -> tuple[str, int]:
     """Run an AppleScript snippet and return (stdout, returncode)."""
@@ -160,3 +178,36 @@ async def sync_from_apple(list_name: str = "Khalil") -> list[dict]:
 
     log.info("Fetched %d completed reminders from '%s'", len(completed), list_name)
     return completed
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "icloud_reminder":
+        try:
+            reminders = await get_apple_reminders()
+            if not reminders:
+                await ctx.reply("No incomplete Apple Reminders found.")
+            else:
+                lines = [f"🍎 Apple Reminders ({len(reminders)}):\n"]
+                for r in reminders:
+                    lines.append(f"  • {r.get('name', '?')}"
+                                 + (f" (due: {r['due_date']})" if r.get('due_date') else ""))
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"❌ Apple Reminders failed: {e}")
+        return True
+    elif action == "apple_reminders_sync":
+        try:
+            text = intent.get("text", "")
+            if not text:
+                await ctx.reply("What reminder should I sync to Apple Reminders?")
+                return True
+            success = await sync_to_apple(text)
+            if success:
+                await ctx.reply(f"✅ Synced to Apple Reminders: {text}")
+            else:
+                await ctx.reply("❌ Failed to sync to Apple Reminders.")
+        except Exception as e:
+            await ctx.reply(f"❌ Apple Reminders sync failed: {e}")
+        return True
+    return False

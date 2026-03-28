@@ -836,7 +836,18 @@ _ACTION_PATTERNS = [
 
 
 def _looks_like_action(text: str) -> str | None:
-    """Quick regex check if text looks like an action request. Returns hint or None."""
+    """Quick regex check if text looks like an action request. Returns hint or None.
+
+    Delegates to the skill registry for pattern matching. Falls back to legacy
+    _ACTION_PATTERNS for any patterns not yet migrated to SKILL dicts.
+    """
+    from skills import get_registry
+    registry = get_registry()
+    action_type, _skill = registry.match_intent(text)
+    if action_type:
+        return action_type
+
+    # Fallback: legacy patterns for anything not yet in a SKILL dict
     text_lower = text.lower()
     for pattern, hint in _ACTION_PATTERNS:
         if re.search(pattern, text_lower):
@@ -896,7 +907,16 @@ def find_matching_action(query: str) -> str | None:
 
     Returns action type string or None. Used to detect intent pattern misses
     when a query falls through to the LLM but could have been handled directly.
+
+    Delegates to the skill registry. Falls back to legacy ACTION_REGISTRY.
     """
+    from skills import get_registry
+    registry = get_registry()
+    result = registry.find_keyword_match(query)
+    if result:
+        return result
+
+    # Fallback: legacy registry
     query_words = set(re.findall(r'\b\w+\b', query.lower()))
     best_action = None
     best_score = 0
@@ -1580,7 +1600,11 @@ async def _interpret_shell_output(user_query: str, cmd: str, result: dict) -> st
 
 
 async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
-    """Handle a detected action intent. Returns True if handled."""
+    """Handle a detected action intent. Returns True if handled.
+
+    First tries skill-registry handlers (from SKILL dicts in action modules).
+    Falls back to legacy elif chain for actions not yet migrated.
+    """
     action = intent.get("action")
 
     # #10: Track capability usage for heatmap
@@ -1603,6 +1627,22 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
                 record_goal_progress(related_goal, domain, description[:200])
     except Exception:
         pass
+
+    # --- Skill registry dispatch ---
+    # Try skill handlers first (from SKILL dicts in action modules).
+    # If a handler exists and returns True, we're done.
+    if action:
+        try:
+            from skills import get_registry
+            handler = get_registry().get_handler(action)
+            if handler is not None:
+                result = await handler(action, intent, ctx)
+                if result:
+                    return True
+        except Exception as e:
+            log.debug("Skill handler dispatch failed for %s: %s", action, e)
+
+    # --- Legacy dispatch (for actions not yet migrated to skill handlers) ---
 
     if action == "reminder":
         from actions.reminders import _parse_relative_time, create_reminder

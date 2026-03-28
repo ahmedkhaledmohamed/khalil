@@ -13,6 +13,40 @@ from pathlib import Path
 
 log = logging.getLogger("khalil.actions.macos")
 
+SKILL = {
+    "name": "macos",
+    "description": "macOS system awareness — running apps, system info, screenshots, Spotlight search, browser tabs",
+    "category": "system",
+    "patterns": [
+        (r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", "macos_apps"),
+        (r"\b(?:running|open)\b.*\b(?:on\s+my\s+(?:mac|machine|computer)|right\s+now)\b", "macos_apps"),
+        (r"\bhow\s+many\b.*\b(?:open|running|active)\b", "macos_apps"),
+        (r"\b(?:frontmost|active|focused)\s+(?:app|window)\b", "macos_frontmost"),
+        (r"\bwhat\s+(?:am\s+i|is)\s+(?:focused\s+on|looking\s+at)\b", "macos_frontmost"),
+        (r"\b(?:battery|cpu|memory|ram|uptime)\b.*\b(?:status|level|usage)\b", "macos_system_info"),
+        (r"\bwhat'?s\s+my\s+(?:battery|uptime)\b", "macos_system_info"),
+        (r"\bsystem\s+info\b", "macos_system_info"),
+        (r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", "screenshot"),
+        (r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", "screenshot"),
+        (r"\bcapture\s+(?:the\s+)?screen\b", "screenshot"),
+        (r"\bscreenshot\b", "screenshot"),
+        (r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?file\b", "spotlight"),
+        (r"\bfind\s+(?:all\s+)?(?:my\s+)?\w+\s+files?\b", "spotlight"),
+        (r"\bwhere\s+is\s+(?:my\s+|the\s+)?\w+\b.*\bfile\b", "spotlight"),
+        (r"\b(?:browser\s+)?tabs?\b.*\b(?:open|list|show)\b", "macos_browser_tabs"),
+        (r"\b(?:safari|chrome)\s+tabs?\b", "macos_browser_tabs"),
+    ],
+    "actions": [
+        {"type": "macos_apps", "handler": "handle_intent", "keywords": "running apps processes programs open mac", "description": "List running applications"},
+        {"type": "macos_frontmost", "handler": "handle_intent", "keywords": "frontmost active focused app window", "description": "Get frontmost app and window"},
+        {"type": "macos_system_info", "handler": "handle_intent", "keywords": "battery cpu memory ram storage system info status", "description": "System info (battery, storage, CPU)"},
+        {"type": "screenshot", "handler": "handle_intent", "keywords": "screenshot capture screen window", "description": "Take a screenshot"},
+        {"type": "spotlight", "handler": "handle_intent", "keywords": "find search locate file spotlight", "description": "Search files via Spotlight"},
+        {"type": "macos_browser_tabs", "handler": "handle_intent", "keywords": "browser tabs safari chrome open list", "description": "List browser tabs"},
+    ],
+    "examples": ["What apps are running?", "Take a screenshot", "Find my resume file"],
+}
+
 
 async def _run(cmd: list[str], timeout: float = 10) -> tuple[str, str, int]:
     """Run a subprocess and return (stdout, stderr, returncode)."""
@@ -340,3 +374,78 @@ async def get_browser_tabs(browser: str = "Safari") -> list[dict]:
     except Exception as e:
         log.warning("get_browser_tabs(%s) error: %s", browser, e)
         return []
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "macos_apps":
+        apps = await get_running_apps()
+        if apps:
+            text = f"\U0001f5a5 Running Apps ({len(apps)}):\n" + "\n".join(f"  \u2022 {a}" for a in sorted(apps))
+        else:
+            text = "\u26a0\ufe0f Couldn't retrieve running apps."
+        await ctx.reply(text)
+        return True
+    elif action == "macos_frontmost":
+        app = await get_frontmost_app()
+        title = await get_active_window_title()
+        if app:
+            text = f"\U0001f5a5 Frontmost: {app}"
+            if title:
+                text += f"\n\U0001f4c4 Window: {title}"
+        else:
+            text = "\u26a0\ufe0f Couldn't determine frontmost app."
+        await ctx.reply(text)
+        return True
+    elif action == "macos_system_info":
+        info = await get_system_info()
+        lines = ["\U0001f4bb System Info:"]
+        if "battery_percent" in info:
+            charge = "\u26a1 charging" if info.get("battery_charging") else "\U0001f50b"
+            lines.append(f"  Battery: {info['battery_percent']}% {charge}")
+        if "storage_available" in info:
+            lines.append(f"  Storage: {info['storage_used']} used / {info['storage_total']} total ({info['storage_available']} free)")
+        if "memory_total_gb" in info:
+            lines.append(f"  Memory: {info['memory_total_gb']} GB")
+        if "cpu_brand" in info:
+            lines.append(f"  CPU: {info['cpu_brand']}")
+        await ctx.reply("\n".join(lines) if len(lines) > 1 else "\u26a0\ufe0f Couldn't retrieve system info.")
+        return True
+    elif action == "screenshot":
+        path = await capture_screenshot()
+        if path:
+            await ctx.reply_photo(str(path), caption="Screenshot captured")
+        else:
+            await ctx.reply("\u26a0\ufe0f Screenshot failed.")
+        return True
+    elif action == "spotlight":
+        query = intent.get("query", "")
+        if not query:
+            return False
+        results = await spotlight_search(query)
+        if results:
+            lines = [f'\U0001f50d Spotlight: {len(results)} results for "{query}":\n']
+            for r in results:
+                size_str = ""
+                if r.get("size"):
+                    kb = r["size"] / 1024
+                    size_str = f" ({kb:.0f} KB)" if kb < 1024 else f" ({kb/1024:.1f} MB)"
+                lines.append(f"  \U0001f4c4 {r['name']}{size_str}\n     {r['path']}")
+            text = "\n".join(lines)
+        else:
+            text = f'\U0001f50d No files found for "{query}".'
+        await ctx.reply(text[:4000])
+        return True
+    elif action == "macos_browser_tabs":
+        browser = intent.get("browser", "Safari")
+        tabs = await get_browser_tabs(browser)
+        if tabs:
+            lines = [f"\U0001f310 {browser} Tabs ({len(tabs)}):"]
+            for t in tabs[:20]:
+                lines.append(f"  \u2022 {t['title'][:60]}\n    {t['url']}")
+            text = "\n".join(lines)
+        else:
+            text = f"\U0001f310 No tabs found in {browser} (or {browser} not running)."
+        await ctx.reply(text[:4000])
+        return True
+    return False

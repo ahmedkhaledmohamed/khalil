@@ -25,6 +25,24 @@ _KEY_ID_KEY = "appstore-key-id"
 _ISSUER_ID_KEY = "appstore-issuer-id"
 _PRIVATE_KEY_KEY = "appstore-private-key"
 
+SKILL = {
+    "name": "appstore",
+    "description": "App Store Connect — ratings, reviews, and download stats",
+    "category": "apps",
+    "patterns": [
+        (r"\bapp\s+store\s+(?:rating|reviews?)\b", "appstore_ratings"),
+        (r"\bzia\s+(?:rating|reviews?)\b", "appstore_ratings"),
+        (r"\bapp\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+        (r"\bzia\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+        (r"\bhow\s+is\s+zia\b", "appstore_ratings"),
+    ],
+    "actions": [
+        {"type": "appstore_ratings", "handler": "handle_intent", "keywords": "app store rating reviews zia", "description": "App ratings and reviews"},
+        {"type": "appstore_downloads", "handler": "handle_intent", "keywords": "app store downloads stats zia", "description": "Download stats"},
+    ],
+    "examples": ["Zia App Store ratings", "App download stats"],
+}
+
 
 def _generate_jwt() -> str:
     """Create a signed JWT for App Store Connect API authentication."""
@@ -169,3 +187,35 @@ async def get_app_revenue(app_id: str, days: int = 30) -> dict:
     except httpx.HTTPStatusError as e:
         log.error("Failed to fetch revenue for %s: %s", app_id, e)
         return {"error": str(e), "status_code": e.response.status_code}
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "appstore_ratings":
+        try:
+            from config import ZIA_APP_ID
+            app_id = intent.get("app_id", ZIA_APP_ID)
+            if not app_id:
+                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                return True
+            ratings = await get_app_ratings(app_id)
+            avg = ratings.get("rating", "?")
+            count = ratings.get("review_count", "?")
+            await ctx.reply(f"\u2b50 App Store: {avg}\u2605 ({count} reviews)")
+        except Exception as e:
+            await ctx.reply(f"\u274c App Store fetch failed: {e}")
+        return True
+    elif action == "appstore_downloads":
+        try:
+            from config import ZIA_APP_ID
+            app_id = intent.get("app_id", ZIA_APP_ID)
+            if not app_id:
+                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                return True
+            downloads = await get_app_downloads(app_id)
+            await ctx.reply(f"\U0001f4ca Downloads (7d): {downloads.get('total', '?')}\n"
+                            f"   Daily avg: {downloads.get('daily_avg', '?')}")
+        except Exception as e:
+            await ctx.reply(f"\u274c App Store fetch failed: {e}")
+        return True
+    return False

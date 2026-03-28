@@ -24,6 +24,24 @@ log = logging.getLogger("khalil.actions.slack_reader")
 SLACK_API = "https://slack.com/api"
 _TOKEN_KEY = "slack-bot-token"
 
+SKILL = {
+    "name": "slack",
+    "description": "Read Slack messages and send messages via Slack Web API",
+    "category": "communication",
+    "patterns": [
+        (r"\bsend\s+(?:a\s+)?slack\s+message\b", "slack_send"),
+        (r"\bpost\s+to\s+slack\b", "slack_send"),
+        (r"\bmessage\s+on\s+slack\b", "slack_send"),
+        (r"\bread\s+slack\b", "slack_read"),
+        (r"\bslack\s+(?:messages?|channel)\b", "slack_read"),
+    ],
+    "actions": [
+        {"type": "slack_send", "handler": None, "keywords": "send post slack message channel", "description": "Send a Slack message"},
+        {"type": "slack_read", "handler": None, "keywords": "read slack messages channel", "description": "Read Slack messages"},
+    ],
+    "examples": ["Send a Slack message to #general", "Read Slack messages"],
+}
+
 # --- DB helpers ---
 
 def ensure_tables(conn: sqlite3.Connection):

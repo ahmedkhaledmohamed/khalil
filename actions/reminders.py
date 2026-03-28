@@ -11,6 +11,22 @@ from config import APPLE_REMINDERS_SYNC, DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.reminders")
 
+SKILL = {
+    "name": "reminders",
+    "description": "Local reminders stored in SQLite, delivered via Telegram push",
+    "category": "productivity",
+    "command": "remind",
+    "patterns": [
+        (r"\bremind\s+me\b", "reminder"),
+        (r"\bset\s+(?:a\s+)?reminder\b", "reminder"),
+        (r"\bdon'?t\s+(?:let\s+me\s+)?forget\b", "reminder"),
+    ],
+    "actions": [
+        {"type": "reminder", "handler": None, "keywords": "remind reminder set forget", "description": "Create a reminder"},
+    ],
+    "examples": ["Remind me to call Sarah in 2 hours", "Set a reminder for tomorrow 9am"],
+}
+
 
 def _parse_relative_time(time_str: str) -> datetime | None:
     """Parse relative time expressions like 'in 2 hours', 'in 30 minutes', 'tomorrow 9am'."""

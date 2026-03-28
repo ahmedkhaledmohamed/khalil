@@ -11,6 +11,23 @@ from urllib.parse import urlparse
 
 log = logging.getLogger("khalil.actions.browser")
 
+SKILL = {
+    "name": "browser",
+    "description": "Browser automation — navigate pages, take screenshots, extract text",
+    "category": "system",
+    "patterns": [
+        (r"\bnavigate\s+to\b", "browser_navigate"),
+        (r"\bextract\s+(?:text|content)\s+from\b", "browser_extract"),
+        (r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?(?:page|website|url)\b", "browser_screenshot"),
+    ],
+    "actions": [
+        {"type": "browser_navigate", "handler": "handle_intent", "keywords": "navigate browse open page website url", "description": "Navigate to a URL and screenshot"},
+        {"type": "browser_extract", "handler": "handle_intent", "keywords": "extract text content page website scrape", "description": "Extract text from a page"},
+        {"type": "browser_screenshot", "handler": "handle_intent", "keywords": "screenshot page website url capture", "description": "Screenshot a webpage"},
+    ],
+    "examples": ["Navigate to example.com", "Extract text from this URL"],
+}
+
 # Hard guardrail: never automate financial sites
 FINANCIAL_DOMAINS = {
     "chase.com", "bankofamerica.com", "wellsfargo.com", "citibank.com",
@@ -117,3 +134,28 @@ async def fill_form(url: str, fields: dict[str, str]) -> dict:
     finally:
         await browser.close()
         await pw.stop()
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    url = intent.get("url", "")
+
+    if action in ("browser_navigate", "browser_screenshot"):
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        path, title = await navigate_and_screenshot(url)
+        if path:
+            await ctx.reply_photo(path, caption=f"Page: {title}\nURL: {url}")
+        else:
+            await ctx.reply(f"Navigation result: {title}")
+        return True
+    elif action == "browser_extract":
+        if is_financial_url(url):
+            await ctx.reply("Blocked: Cannot automate financial sites.")
+            return True
+        selector = intent.get("selector")
+        text = await extract_page_text(url, selector)
+        await ctx.reply(text[:4000])
+        return True
+    return False

@@ -18,6 +18,25 @@ log = logging.getLogger("khalil.actions.imessage")
 CHAT_DB = Path.home() / "Library" / "Messages" / "chat.db"
 APPLE_EPOCH = datetime(2001, 1, 1)
 
+SKILL = {
+    "name": "imessage",
+    "description": "Read and search iMessage conversations on macOS",
+    "category": "communication",
+    "patterns": [
+        (r"\b(?:imessage|iMessage)\s+(?:from|with)\b", "imessage_read"),
+        (r"\bread\s+(?:my\s+)?(?:messages?|texts?|imessage)\b", "imessage_read"),
+        (r"\brecent\s+(?:messages?|texts?|contacts?)\b", "imessage_recent"),
+        (r"\bwho\s+(?:texted|messaged)\s+me\b", "imessage_recent"),
+        (r"\bsearch\s+(?:my\s+)?(?:messages?|texts?|imessage)\b", "imessage_search"),
+    ],
+    "actions": [
+        {"type": "imessage_read", "handler": "handle_intent", "keywords": "imessage messages texts read from contact", "description": "Read messages from a contact"},
+        {"type": "imessage_recent", "handler": "handle_intent", "keywords": "recent messages texts contacts who texted", "description": "List recent contacts"},
+        {"type": "imessage_search", "handler": "handle_intent", "keywords": "search messages texts imessage find", "description": "Search messages"},
+    ],
+    "examples": ["Recent messages", "Search iMessages for dinner plans"],
+}
+
 
 def _apple_ts_to_dt(ns: int | None) -> datetime | None:
     """Convert Apple CoreData timestamp (nanoseconds since 2001-01-01) to datetime."""
@@ -153,3 +172,29 @@ def format_messages(messages: list[dict]) -> str:
         text = m["text"][:200] or "(attachment)"
         lines.append(f"[{time_str}] {sender}: {text}")
     return "\n".join(lines)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "imessage_read":
+        contact = intent.get("contact")
+        messages = await get_recent_messages(contact=contact, limit=15)
+        header = f"\U0001f4ac Messages from {contact}:" if contact else "\U0001f4ac Recent messages:"
+        await ctx.reply(f"{header}\n\n{format_messages(messages)}")
+        return True
+    elif action == "imessage_recent":
+        contacts = await get_recent_contacts(limit=15)
+        if contacts:
+            text = "\U0001f4ac Recent contacts:\n" + "\n".join(f"  \u2022 {c}" for c in contacts)
+        else:
+            text = "\U0001f4ac No recent contacts found (check Full Disk Access permission)."
+        await ctx.reply(text)
+        return True
+    elif action == "imessage_search":
+        query = intent.get("query", "")
+        if not query:
+            return False
+        messages = await search_messages(query, limit=10)
+        await ctx.reply(f'\U0001f4ac Messages matching "{query}":\n\n{format_messages(messages)}')
+        return True
+    return False
