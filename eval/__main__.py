@@ -3,6 +3,11 @@ import sys
 if "--shell-safety" in sys.argv:
     from eval.shell_safety_runner import run_shell_safety_tests
     run_shell_safety_tests()
+elif "--commands" in sys.argv:
+    import asyncio, logging
+    logging.basicConfig(level=logging.WARNING)
+    from eval.command_runner import run_command_tests
+    asyncio.run(run_command_tests())
 elif "--conversational" in sys.argv:
     # Filter cases.json to conversational only, then run pipeline
     import json
