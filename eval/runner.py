@@ -73,6 +73,18 @@ class InstrumentedChannel(Channel):
     async def delete_message(self, chat_id: int | str, message_id: int | str) -> None:
         pass
 
+    async def send_photo(
+        self,
+        chat_id: int | str,
+        photo_path: str,
+        caption: str = "",
+    ) -> SentMessage:
+        """Capture photo captions as messages for eval."""
+        self._msg_counter += 1
+        text = caption if caption else f"[photo: {photo_path}]"
+        self.messages.append(text)
+        return SentMessage(chat_id=chat_id, message_id=self._msg_counter, channel=self)
+
     async def send_typing(self, chat_id: int | str) -> None:
         pass
 
@@ -146,8 +158,9 @@ async def run_case(server_mod, case: TestCase) -> TestResult:
         ),
     )
 
-    # Timeout: fast for direct_action, generous for conversational/LLM
-    timeout = 15.0 if case.expected_path == "direct_action" else 60.0
+    # Timeout: direct handlers need time for AppleScript/HTTP (up to ~18s observed),
+    # but should still catch LLM fallback (30s+). Generous for conversational/LLM.
+    timeout = 20.0 if case.expected_path == "direct_action" else 60.0
 
     from eval.trace import capture_trace
 
