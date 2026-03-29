@@ -83,7 +83,7 @@ def _build_llm_prompt(skill, count: int = 80) -> str:
     )
 
 
-def _parse_llm_response(raw: str, skill_name: str, category: str) -> list[TestCase]:
+def _parse_llm_response(raw: str, skill_name: str, category: str, actions_with_handler: set[str] | None = None) -> list[TestCase]:
     """Parse LLM JSON response into TestCase objects."""
     # Try to extract JSON array from response (handle markdown fences)
     text = raw.strip()
@@ -107,17 +107,20 @@ def _parse_llm_response(raw: str, skill_name: str, category: str) -> list[TestCa
     if not isinstance(items, list):
         return []
 
+    actions_with_handler = actions_with_handler or set()
     cases = []
     for item in items:
         if not isinstance(item, dict) or "query" not in item:
             continue
+        action = item.get("action_type")
+        path = "direct_action" if action in actions_with_handler else "llm_intent"
         cases.append(TestCase(
             id=_next_id("llm"),
             query=item["query"],
             category=category,
             complexity="moderate",
-            expected_path="direct_action",
-            expected_action=item.get("action_type"),
+            expected_path=path,
+            expected_action=action,
             expected_contains=item.get("expected_contains", []),
             expected_not_contains=[],
             eval_strategy="heuristic",
@@ -140,6 +143,13 @@ def generate_llm_cases(ask_llm_fn: Callable[[str], str]) -> list[TestCase]:
     skills = registry.list_skills()
     all_cases: list[TestCase] = []
 
+    # Build set of action_types that have handlers (direct dispatch, no LLM needed)
+    actions_with_handler: set[str] = set()
+    for skill in skills:
+        for action_type in skill.actions:
+            if registry.get_handler(action_type) is not None:
+                actions_with_handler.add(action_type)
+
     # Process skills in batches of 5
     batch_size = 5
     for i in range(0, len(skills), batch_size):
@@ -151,7 +161,7 @@ def generate_llm_cases(ask_llm_fn: Callable[[str], str]) -> list[TestCase]:
 
             try:
                 response = ask_llm_fn(prompt)
-                cases = _parse_llm_response(response, skill.name, skill.category)
+                cases = _parse_llm_response(response, skill.name, skill.category, actions_with_handler)
                 all_cases.extend(cases)
                 print(f"  {skill.name}: {len(cases)} cases", file=sys.stderr)
             except Exception as e:
