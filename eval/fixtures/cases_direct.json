@@ -1,0 +1,5038 @@
+[
+  {
+    "id": "apple_reminders-001",
+    "query": "add :to :appleicloud reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-003",
+    "query": ":apple reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-004",
+    "query": "icloud reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-006",
+    "query": "reminders app",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-008",
+    "query": "show :my :appleicloud reminders",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-010",
+    "query": "sync :reminders :to apple",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "apple_reminders_sync",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-001",
+    "query": "app store :rating",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-002",
+    "query": "app store reviews",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-004",
+    "query": "zia :rating",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-005",
+    "query": "zia reviews",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-007",
+    "query": "app :downloads",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-008",
+    "query": "app stats",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-010",
+    "query": "zia :downloads",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-011",
+    "query": "zia stats",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-013",
+    "query": "how is zia",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-001",
+    "query": "navigate to",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_navigate",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-003",
+    "query": "extract :text from",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-004",
+    "query": "extract content from",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-006",
+    "query": "screenshot :of :the :pagewebsiteurl",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-001",
+    "query": ":server :statushealth",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-002",
+    "query": "droplet :statushealth",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-004",
+    "query": "digitalocean",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-006",
+    "query": ":server :costbillspend",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-007",
+    "query": "digitalocean :costbillspend",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-001",
+    "query": "create :a :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-003",
+    "query": "open :a :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-005",
+    "query": "file :an :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-007",
+    "query": "new :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-009",
+    "query": "check :my :pull requestsprs",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-011",
+    "query": ":pr status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-012",
+    "query": "pull request status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-014",
+    "query": "list :my :open :pull requestsprs",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-016",
+    "query": "github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-018",
+    "query": "check :my :github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-020",
+    "query": "unread :github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-001",
+    "query": ":imessage :fromwith",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-002",
+    "query": "iMessage :fromwith",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-004",
+    "query": "read :my :messagestextsimessage",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-006",
+    "query": "recent :messages",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-007",
+    "query": "recent texts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-008",
+    "query": "recent contacts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-010",
+    "query": "who :texted me",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-011",
+    "query": "who messaged me",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-013",
+    "query": "search :my :messagestextsimessage",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-001",
+    "query": "linkedin :messages",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-002",
+    "query": "linkedin inmail",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-004",
+    "query": "recruiter messages",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-006",
+    "query": "linkedin jobs",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-008",
+    "query": "job search linkedin",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-010",
+    "query": "linkedin :views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-011",
+    "query": "linkedin profile views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-013",
+    "query": "profile views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-001",
+    "query": ":what :appsprocessesprograms :are :runningopen",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-002",
+    "query": "which :appsprocessesprograms :are :runningopen",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-004",
+    "query": ":running :on my :macmachinecomputerright now",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-005",
+    "query": "open :on my :macmachinecomputerright now",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-007",
+    "query": "how many :open",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-008",
+    "query": "how many running",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-009",
+    "query": "how many active",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-011",
+    "query": ":frontmost :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-012",
+    "query": "active :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-013",
+    "query": "focused :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-015",
+    "query": "what :am i :focused onlooking at",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-016",
+    "query": "what is :focused onlooking at",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-018",
+    "query": ":battery :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-019",
+    "query": "cpu :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-020",
+    "query": "memory :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-022",
+    "query": "what's my :battery",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-023",
+    "query": "what's my uptime",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-025",
+    "query": "system info",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-027",
+    "query": ":take :a screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-028",
+    "query": "capture :a screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-030",
+    "query": "screenshot :of :the window",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-032",
+    "query": "capture :the screen",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-034",
+    "query": "screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-036",
+    "query": ":find :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-037",
+    "query": "search for :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-038",
+    "query": "locate :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-040",
+    "query": "find :all :my w files",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-042",
+    "query": "where is :my w file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-043",
+    "query": "where is the w file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-045",
+    "query": ":browser tabs :openlistshow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-047",
+    "query": ":safari tabs",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-048",
+    "query": "chrome tabs",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-001",
+    "query": "search :my notion",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-003",
+    "query": "find in notion",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-005",
+    "query": "notion search",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-007",
+    "query": "create :a notion page",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_create",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-001",
+    "query": "readwise",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-003",
+    "query": "book highlights",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-005",
+    "query": "my highlights",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-007",
+    "query": "daily review",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_review",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-001",
+    "query": "cursor :status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-002",
+    "query": "cursor windows",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-003",
+    "query": "cursor projects",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-005",
+    "query": ":whats ::filesprojects :are open in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-006",
+    "query": "which ::filesprojects :are open in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-008",
+    "query": ":what :am i :working onediting in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-009",
+    "query": "which :am i :working onediting in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-011",
+    "query": "cursor extensions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_extensions",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-013",
+    "query": "cursor terminal :status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-014",
+    "query": "cursor terminal list",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-015",
+    "query": "cursor terminal sessions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-017",
+    "query": ":whats :running in :the cursor terminal",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-018",
+    "query": "what is :running in :the cursor terminal",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-020",
+    "query": ":list :the terminals in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-021",
+    "query": "show :the terminals in cursor",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-031",
+    "query": ":whats running in :my :terminaliterm",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-032",
+    "query": "what is running in :my :terminaliterm",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-034",
+    "query": "terminal :status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-035",
+    "query": "terminal sessions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-037",
+    "query": "iterm :status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-038",
+    "query": "iterm sessions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-040",
+    "query": "active :terminal :processescommands",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-056",
+    "query": "cursor diff",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_diff",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-001",
+    "query": ":what's the weather",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-003",
+    "query": "temperature",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-005",
+    "query": "forecast",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather_forecast",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-001",
+    "query": "search :the :webinternetonline",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-003",
+    "query": "google !doc",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-004",
+    "query": "google sheet",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-005",
+    "query": "google spreadsheet",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-007",
+    "query": "look up",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-001",
+    "query": "search :on youtube",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-003",
+    "query": "find :a video",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-005",
+    "query": "youtube search",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-007",
+    "query": "liked videos",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_liked",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-009",
+    "query": "youtube :history",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_liked",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-010",
+    "query": "youtube liked",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_liked",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "pattern"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-012",
+    "query": "apple icloud iphone",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-013",
+    "query": "iphone reminders list",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-014",
+    "query": "list add show",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-015",
+    "query": "show native",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-016",
+    "query": "sync reminders apple",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "apple_reminders_sync",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "apple_reminders-017",
+    "query": "apple iphone",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "apple_reminders_sync",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-015",
+    "query": "app store rating",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-016",
+    "query": "rating reviews zia",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-017",
+    "query": "app store downloads",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "appstore-018",
+    "query": "downloads stats zia",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-008",
+    "query": "navigate browse open",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_navigate",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-009",
+    "query": "open page website",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_navigate",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-010",
+    "query": "website url",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_navigate",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-011",
+    "query": "extract text content",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-012",
+    "query": "content page website",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-013",
+    "query": "website scrape",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-014",
+    "query": "screenshot page website",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "browser-015",
+    "query": "website url capture",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-009",
+    "query": "server droplet status",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-010",
+    "query": "status health digitalocean",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-011",
+    "query": "server cost bill",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "digitalocean-012",
+    "query": "bill spend digitalocean",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-022",
+    "query": "github notifications unread",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-023",
+    "query": "unread alerts",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-024",
+    "query": "github pull requests",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-025",
+    "query": "requests prs open",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-026",
+    "query": "open review",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-027",
+    "query": "github create new",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-028",
+    "query": "new issue file",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "github_api-029",
+    "query": "file open bug",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-015",
+    "query": "imessage messages texts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-016",
+    "query": "texts read from",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-017",
+    "query": "from contact",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-018",
+    "query": "recent messages texts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-019",
+    "query": "texts contacts who",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-020",
+    "query": "who texted",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-021",
+    "query": "search messages texts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "imessage-022",
+    "query": "texts imessage find",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-015",
+    "query": "linkedin messages recruiter",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-016",
+    "query": "recruiter inmail",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-017",
+    "query": "linkedin jobs search",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-018",
+    "query": "search openings",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "linkedin-019",
+    "query": "linkedin profile views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-050",
+    "query": "running apps processes",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-051",
+    "query": "processes programs open",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-052",
+    "query": "open mac",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-053",
+    "query": "frontmost active focused",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-054",
+    "query": "focused app window",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-055",
+    "query": "battery cpu memory",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-056",
+    "query": "memory ram storage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-057",
+    "query": "storage system info",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-058",
+    "query": "info status",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-059",
+    "query": "screenshot capture screen",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-060",
+    "query": "screen window",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-061",
+    "query": "find search locate",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-062",
+    "query": "locate file spotlight",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-063",
+    "query": "browser tabs safari",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-064",
+    "query": "safari chrome open",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "macos-065",
+    "query": "open list",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-009",
+    "query": "notion search find",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-010",
+    "query": "find pages notes",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-011",
+    "query": "notion create page",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_create",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "notion-012",
+    "query": "page new",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_create",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-009",
+    "query": "readwise highlights books",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-010",
+    "query": "books reading",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "readwise-011",
+    "query": "readwise daily review",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_review",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-058",
+    "query": "cursor ide status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-059",
+    "query": "status windows projects",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-060",
+    "query": "projects info",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-061",
+    "query": "cursor extensions list",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_extensions",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-062",
+    "query": "cursor terminal sessions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-063",
+    "query": "sessions status list",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-064",
+    "query": "list terminals",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-069",
+    "query": "terminal iterm sessions",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-070",
+    "query": "sessions running status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "terminal_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-077",
+    "query": "cursor diff files",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_diff",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "terminal-078",
+    "query": "files compare",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "cursor_diff",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-007",
+    "query": "weather temperature outside",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-008",
+    "query": "outside today toronto",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-009",
+    "query": "weather forecast days",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather_forecast",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "weather-010",
+    "query": "days week ahead",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "weather_forecast",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-009",
+    "query": "search web internet",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-010",
+    "query": "internet google look",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "web-011",
+    "query": "look up find",
+    "category": "information",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "web_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-012",
+    "query": "youtube search video",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-013",
+    "query": "video find",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-014",
+    "query": "youtube liked videos",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_liked",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "youtube-015",
+    "query": "videos history",
+    "category": "media",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "youtube_liked",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "deterministic",
+    "tags": [
+      "routing",
+      "keyword"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-001",
+    "query": "please add :to :appleicloud reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-003",
+    "query": "please :apple reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-004",
+    "query": "please icloud reminder",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-006",
+    "query": "please reminders app",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-008",
+    "query": "display :my :appleicloud reminders",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "icloud_reminder",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-010",
+    "query": "please sync :reminders :to apple",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "apple_reminders_sync",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-012",
+    "query": "please app store :rating",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-013",
+    "query": "please app store reviews",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-015",
+    "query": "please zia :rating",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-016",
+    "query": "please zia reviews",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-018",
+    "query": "please app :downloads",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-019",
+    "query": "please app stats",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-021",
+    "query": "please zia :downloads",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-022",
+    "query": "please zia stats",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_downloads",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-024",
+    "query": "please how is zia",
+    "category": "apps",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "appstore_ratings",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-026",
+    "query": "please navigate to",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_navigate",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-028",
+    "query": "please extract :text from",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-029",
+    "query": "please extract content from",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_extract",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-031",
+    "query": "screenshot :of : :pagewebsiteurl",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "browser_screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-039",
+    "query": "please :server :statushealth",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-040",
+    "query": "please droplet :statushealth",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-042",
+    "query": "please digitalocean",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_status",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-044",
+    "query": "please :server :costbillspend",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-045",
+    "query": "please digitalocean :costbillspend",
+    "category": "infrastructure",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "digitalocean_spend",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-055",
+    "query": "make :a :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-057",
+    "query": "launch :a :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-059",
+    "query": "please file :an :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-061",
+    "query": "please new :github issue",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_create_issue",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-063",
+    "query": "look at :my :pull requestsprs",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-065",
+    "query": "please :pr status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-066",
+    "query": "please pull request status",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-068",
+    "query": "list :my :launch :pull requestsprs",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_prs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-070",
+    "query": "please github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-072",
+    "query": "look at :my :github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-074",
+    "query": "please unread :github notifications",
+    "category": "development",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "github_notifications",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-092",
+    "query": "please :imessage :fromwith",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-093",
+    "query": "please iMessage :fromwith",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-095",
+    "query": "read : :messagestextsimessage",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_read",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-097",
+    "query": "please recent :messages",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-098",
+    "query": "please recent texts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-099",
+    "query": "please recent contacts",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-101",
+    "query": "please who :texted me",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-102",
+    "query": "please who messaged me",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_recent",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-104",
+    "query": "look up :my :messagestextsimessage",
+    "category": "communication",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "imessage_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-106",
+    "query": "please linkedin :messages",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-107",
+    "query": "please linkedin inmail",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-109",
+    "query": "please recruiter messages",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_messages",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-111",
+    "query": "please linkedin jobs",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-113",
+    "query": "job look up linkedin",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_jobs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-115",
+    "query": "please linkedin :views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-116",
+    "query": "please linkedin profile views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-118",
+    "query": "please profile views",
+    "category": "career",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "linkedin_profile",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-120",
+    "query": ":what :appsprocessesprograms :are :runninglaunch",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-121",
+    "query": "which :appsprocessesprograms :are :runninglaunch",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-123",
+    "query": ":running :on :macmachinecomputerright now",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-124",
+    "query": "launch :on my :macmachinecomputerright now",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-126",
+    "query": "how many :launch",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-127",
+    "query": "please how many running",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-128",
+    "query": "please how many active",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_apps",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-130",
+    "query": "please :frontmost :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-131",
+    "query": "please active :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-132",
+    "query": "please focused :appwindow",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-134",
+    "query": "please what :am i :focused onlooking at",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-135",
+    "query": "what's :focused onlooking at",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_frontmost",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-137",
+    "query": "please :battery :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-138",
+    "query": "please cpu :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-139",
+    "query": "please memory :statuslevelusage",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-141",
+    "query": "what is my :battery",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-142",
+    "query": "what is my uptime",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-144",
+    "query": "please system info",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_system_info",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-146",
+    "query": "please :take :a screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-147",
+    "query": "please capture :a screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-149",
+    "query": "screenshot :of : window",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-151",
+    "query": "capture : screen",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-153",
+    "query": "please screenshot",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "screenshot",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-155",
+    "query": ":search for :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-156",
+    "query": "look up for :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-157",
+    "query": "please locate :a file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-159",
+    "query": "search for :all :my w files",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-161",
+    "query": "where is : w file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-162",
+    "query": "where is w file",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "spotlight",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-164",
+    "query": ":browser tabs :openlistdisplay",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-166",
+    "query": "please :safari tabs",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-167",
+    "query": "please chrome tabs",
+    "category": "system",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "macos_browser_tabs",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-169",
+    "query": "look up :my notion",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-171",
+    "query": "search for in notion",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-173",
+    "query": "notion look up",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_search",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-175",
+    "query": "make :a notion page",
+    "category": "productivity",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "notion_create",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-177",
+    "query": "please readwise",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-179",
+    "query": "please book highlights",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-181",
+    "query": "highlights",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_highlights",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  },
+  {
+    "id": "para-183",
+    "query": "please daily review",
+    "category": "reading",
+    "complexity": "trivial",
+    "expected_path": "direct_action",
+    "expected_action": "readwise_review",
+    "expected_contains": [],
+    "expected_not_contains": [],
+    "eval_strategy": "heuristic",
+    "tags": [
+      "routing",
+      "pattern",
+      "paraphrase"
+    ],
+    "source": "generated"
+  }
+]

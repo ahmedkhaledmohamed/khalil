@@ -1,0 +1,2362 @@
+{
+  "timestamp": "20260329_125445",
+  "total_cases": 309,
+  "passed": 116,
+  "failed": 193,
+  "pass_rate": 0.37540453074433655,
+  "all_case_ids": [
+    "apple_reminders-001",
+    "apple_reminders-003",
+    "apple_reminders-004",
+    "apple_reminders-006",
+    "apple_reminders-008",
+    "apple_reminders-010",
+    "appstore-001",
+    "appstore-002",
+    "appstore-004",
+    "appstore-005",
+    "appstore-007",
+    "appstore-008",
+    "appstore-010",
+    "appstore-011",
+    "appstore-013",
+    "browser-001",
+    "browser-003",
+    "browser-004",
+    "browser-006",
+    "digitalocean-001",
+    "digitalocean-002",
+    "digitalocean-004",
+    "digitalocean-006",
+    "digitalocean-007",
+    "github_api-001",
+    "github_api-003",
+    "github_api-005",
+    "github_api-007",
+    "github_api-009",
+    "github_api-011",
+    "github_api-012",
+    "github_api-014",
+    "github_api-016",
+    "github_api-018",
+    "github_api-020",
+    "imessage-001",
+    "imessage-002",
+    "imessage-004",
+    "imessage-006",
+    "imessage-007",
+    "imessage-008",
+    "imessage-010",
+    "imessage-011",
+    "imessage-013",
+    "linkedin-001",
+    "linkedin-002",
+    "linkedin-004",
+    "linkedin-006",
+    "linkedin-008",
+    "linkedin-010",
+    "linkedin-011",
+    "linkedin-013",
+    "macos-001",
+    "macos-002",
+    "macos-004",
+    "macos-005",
+    "macos-007",
+    "macos-008",
+    "macos-009",
+    "macos-011",
+    "macos-012",
+    "macos-013",
+    "macos-015",
+    "macos-016",
+    "macos-018",
+    "macos-019",
+    "macos-020",
+    "macos-022",
+    "macos-023",
+    "macos-025",
+    "macos-027",
+    "macos-028",
+    "macos-030",
+    "macos-032",
+    "macos-034",
+    "macos-036",
+    "macos-037",
+    "macos-038",
+    "macos-040",
+    "macos-042",
+    "macos-043",
+    "macos-045",
+    "macos-047",
+    "macos-048",
+    "notion-001",
+    "notion-003",
+    "notion-005",
+    "notion-007",
+    "readwise-001",
+    "readwise-003",
+    "readwise-005",
+    "readwise-007",
+    "terminal-001",
+    "terminal-002",
+    "terminal-003",
+    "terminal-005",
+    "terminal-006",
+    "terminal-008",
+    "terminal-009",
+    "terminal-011",
+    "terminal-013",
+    "terminal-014",
+    "terminal-015",
+    "terminal-017",
+    "terminal-018",
+    "terminal-020",
+    "terminal-021",
+    "terminal-031",
+    "terminal-032",
+    "terminal-034",
+    "terminal-035",
+    "terminal-037",
+    "terminal-038",
+    "terminal-040",
+    "terminal-056",
+    "weather-001",
+    "weather-003",
+    "weather-005",
+    "web-001",
+    "web-003",
+    "web-004",
+    "web-005",
+    "web-007",
+    "youtube-001",
+    "youtube-003",
+    "youtube-005",
+    "youtube-007",
+    "youtube-009",
+    "youtube-010",
+    "apple_reminders-012",
+    "apple_reminders-013",
+    "apple_reminders-014",
+    "apple_reminders-015",
+    "apple_reminders-016",
+    "apple_reminders-017",
+    "appstore-015",
+    "appstore-016",
+    "appstore-017",
+    "appstore-018",
+    "browser-008",
+    "browser-009",
+    "browser-010",
+    "browser-011",
+    "browser-012",
+    "browser-013",
+    "browser-014",
+    "browser-015",
+    "digitalocean-009",
+    "digitalocean-010",
+    "digitalocean-011",
+    "digitalocean-012",
+    "github_api-022",
+    "github_api-023",
+    "github_api-024",
+    "github_api-025",
+    "github_api-026",
+    "github_api-027",
+    "github_api-028",
+    "github_api-029",
+    "imessage-015",
+    "imessage-016",
+    "imessage-017",
+    "imessage-018",
+    "imessage-019",
+    "imessage-020",
+    "imessage-021",
+    "imessage-022",
+    "linkedin-015",
+    "linkedin-016",
+    "linkedin-017",
+    "linkedin-018",
+    "linkedin-019",
+    "macos-050",
+    "macos-051",
+    "macos-052",
+    "macos-053",
+    "macos-054",
+    "macos-055",
+    "macos-056",
+    "macos-057",
+    "macos-058",
+    "macos-059",
+    "macos-060",
+    "macos-061",
+    "macos-062",
+    "macos-063",
+    "macos-064",
+    "macos-065",
+    "notion-009",
+    "notion-010",
+    "notion-011",
+    "notion-012",
+    "readwise-009",
+    "readwise-010",
+    "readwise-011",
+    "terminal-058",
+    "terminal-059",
+    "terminal-060",
+    "terminal-061",
+    "terminal-062",
+    "terminal-063",
+    "terminal-064",
+    "terminal-069",
+    "terminal-070",
+    "terminal-077",
+    "terminal-078",
+    "weather-007",
+    "weather-008",
+    "weather-009",
+    "weather-010",
+    "web-009",
+    "web-010",
+    "web-011",
+    "youtube-012",
+    "youtube-013",
+    "youtube-014",
+    "youtube-015",
+    "para-001",
+    "para-003",
+    "para-004",
+    "para-006",
+    "para-008",
+    "para-010",
+    "para-012",
+    "para-013",
+    "para-015",
+    "para-016",
+    "para-018",
+    "para-019",
+    "para-021",
+    "para-022",
+    "para-024",
+    "para-026",
+    "para-028",
+    "para-029",
+    "para-031",
+    "para-039",
+    "para-040",
+    "para-042",
+    "para-044",
+    "para-045",
+    "para-055",
+    "para-057",
+    "para-059",
+    "para-061",
+    "para-063",
+    "para-065",
+    "para-066",
+    "para-068",
+    "para-070",
+    "para-072",
+    "para-074",
+    "para-092",
+    "para-093",
+    "para-095",
+    "para-097",
+    "para-098",
+    "para-099",
+    "para-101",
+    "para-102",
+    "para-104",
+    "para-106",
+    "para-107",
+    "para-109",
+    "para-111",
+    "para-113",
+    "para-115",
+    "para-116",
+    "para-118",
+    "para-120",
+    "para-121",
+    "para-123",
+    "para-124",
+    "para-126",
+    "para-127",
+    "para-128",
+    "para-130",
+    "para-131",
+    "para-132",
+    "para-134",
+    "para-135",
+    "para-137",
+    "para-138",
+    "para-139",
+    "para-141",
+    "para-142",
+    "para-144",
+    "para-146",
+    "para-147",
+    "para-149",
+    "para-151",
+    "para-153",
+    "para-155",
+    "para-156",
+    "para-157",
+    "para-159",
+    "para-161",
+    "para-162",
+    "para-164",
+    "para-166",
+    "para-167",
+    "para-169",
+    "para-171",
+    "para-173",
+    "para-175",
+    "para-177",
+    "para-179",
+    "para-181",
+    "para-183"
+  ],
+  "passed_case_ids": [
+    "appstore-002",
+    "appstore-005",
+    "appstore-008",
+    "appstore-011",
+    "appstore-013",
+    "browser-006",
+    "digitalocean-004",
+    "digitalocean-007",
+    "github_api-011",
+    "github_api-012",
+    "github_api-016",
+    "github_api-018",
+    "github_api-020",
+    "imessage-007",
+    "imessage-008",
+    "imessage-011",
+    "linkedin-002",
+    "linkedin-004",
+    "linkedin-006",
+    "linkedin-008",
+    "linkedin-011",
+    "linkedin-013",
+    "macos-007",
+    "macos-008",
+    "macos-009",
+    "macos-025",
+    "macos-027",
+    "macos-028",
+    "macos-030",
+    "macos-045",
+    "macos-047",
+    "macos-048",
+    "notion-005",
+    "readwise-001",
+    "readwise-003",
+    "readwise-005",
+    "readwise-007",
+    "terminal-002",
+    "terminal-003",
+    "terminal-011",
+    "terminal-014",
+    "terminal-015",
+    "terminal-035",
+    "terminal-038",
+    "weather-001",
+    "weather-003",
+    "weather-005",
+    "web-003",
+    "web-004",
+    "web-005",
+    "web-007",
+    "youtube-005",
+    "youtube-007",
+    "youtube-010",
+    "apple_reminders-016",
+    "appstore-015",
+    "digitalocean-009",
+    "digitalocean-010",
+    "digitalocean-011",
+    "digitalocean-012",
+    "github_api-022",
+    "github_api-028",
+    "imessage-018",
+    "imessage-020",
+    "imessage-021",
+    "linkedin-015",
+    "linkedin-017",
+    "linkedin-019",
+    "macos-050",
+    "macos-054",
+    "macos-057",
+    "macos-063",
+    "notion-009",
+    "readwise-009",
+    "readwise-011",
+    "terminal-061",
+    "terminal-062",
+    "terminal-069",
+    "weather-007",
+    "weather-009",
+    "web-009",
+    "web-010",
+    "web-011",
+    "youtube-012",
+    "youtube-014",
+    "para-003",
+    "para-004",
+    "para-006",
+    "para-013",
+    "para-016",
+    "para-019",
+    "para-022",
+    "para-024",
+    "para-042",
+    "para-045",
+    "para-065",
+    "para-066",
+    "para-070",
+    "para-072",
+    "para-074",
+    "para-098",
+    "para-099",
+    "para-102",
+    "para-107",
+    "para-109",
+    "para-111",
+    "para-116",
+    "para-118",
+    "para-127",
+    "para-128",
+    "para-144",
+    "para-164",
+    "para-166",
+    "para-177",
+    "para-179",
+    "para-183"
+  ],
+  "gaps": [
+    {
+      "case_id": "apple_reminders-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-003",
+      "category": "routing_wrong",
+      "detail": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-004",
+      "category": "routing_wrong",
+      "detail": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-006",
+      "category": "routing_wrong",
+      "detail": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-008",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "apple_reminders_sync"
+    },
+    {
+      "case_id": "appstore-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_ratings"
+    },
+    {
+      "case_id": "appstore-004",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_ratings"
+    },
+    {
+      "case_id": "appstore-007",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "appstore-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "browser-001",
+      "category": "handler_error",
+      "detail": "error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing, no_error",
+      "affected_skill": "browser_navigate"
+    },
+    {
+      "case_id": "browser-003",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "browser-004",
+      "category": "handler_error",
+      "detail": "error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing, no_error",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "digitalocean-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "digitalocean_status"
+    },
+    {
+      "case_id": "digitalocean-002",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "digitalocean_status"
+    },
+    {
+      "case_id": "digitalocean-006",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "digitalocean_spend"
+    },
+    {
+      "case_id": "github_api-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "github_api-003",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "github_api-005",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "github_api-007",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "github_api-009",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "github_api-014",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "imessage-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-002",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-004",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-006",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_recent"
+    },
+    {
+      "case_id": "imessage-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_recent"
+    },
+    {
+      "case_id": "imessage-013",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_search"
+    },
+    {
+      "case_id": "linkedin-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "linkedin_messages"
+    },
+    {
+      "case_id": "linkedin-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "linkedin_profile"
+    },
+    {
+      "case_id": "macos-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-002",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-004",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-005",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-011",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-012",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-013",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-016",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-018",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-019",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-020",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-022",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-023",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-032",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "macos-034",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "macos-036",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-037",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-038",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-040",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-042",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-043",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "notion-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "notion-003",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "notion-007",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "notion_create"
+    },
+    {
+      "case_id": "terminal-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-005",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-006",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-008",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-009",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-013",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-017",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-018",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-020",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-021",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-031",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-032",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-034",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-037",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-040",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-056",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_diff"
+    },
+    {
+      "case_id": "web-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "web_search"
+    },
+    {
+      "case_id": "youtube-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "youtube_search"
+    },
+    {
+      "case_id": "youtube-003",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "youtube_search"
+    },
+    {
+      "case_id": "youtube-009",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "youtube_liked"
+    },
+    {
+      "case_id": "apple_reminders-012",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-013",
+      "category": "routing_wrong",
+      "detail": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-014",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "apple_reminders-017",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "apple_reminders_sync"
+    },
+    {
+      "case_id": "appstore-016",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_ratings"
+    },
+    {
+      "case_id": "appstore-017",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "appstore-018",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "browser-008",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_navigate"
+    },
+    {
+      "case_id": "browser-009",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_navigate"
+    },
+    {
+      "case_id": "browser-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_navigate"
+    },
+    {
+      "case_id": "browser-011",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "browser-012",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "browser-013",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "browser-014",
+      "category": "handler_error",
+      "detail": "error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing, no_error",
+      "affected_skill": "browser_screenshot"
+    },
+    {
+      "case_id": "browser-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "browser_screenshot"
+    },
+    {
+      "case_id": "github_api-023",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_notifications"
+    },
+    {
+      "case_id": "github_api-024",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "github_api-025",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "github_api-026",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "github_api-027",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "github_api-029",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "imessage-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-016",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-017",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "imessage-019",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_recent"
+    },
+    {
+      "case_id": "imessage-022",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "imessage_search"
+    },
+    {
+      "case_id": "linkedin-016",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "linkedin_messages"
+    },
+    {
+      "case_id": "linkedin-018",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "linkedin_jobs"
+    },
+    {
+      "case_id": "macos-051",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-052",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "macos-053",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "macos-055",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-056",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-058",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "macos-059",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "macos-060",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "macos-061",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-062",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "macos-064",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_browser_tabs"
+    },
+    {
+      "case_id": "macos-065",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "macos_browser_tabs"
+    },
+    {
+      "case_id": "notion-010",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: routing, no_error",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "notion-011",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "notion_create"
+    },
+    {
+      "case_id": "notion-012",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "notion_create"
+    },
+    {
+      "case_id": "readwise-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "readwise_highlights"
+    },
+    {
+      "case_id": "terminal-058",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-059",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-060",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_status"
+    },
+    {
+      "case_id": "terminal-063",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-064",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_terminal_status"
+    },
+    {
+      "case_id": "terminal-070",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "terminal_status"
+    },
+    {
+      "case_id": "terminal-077",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_diff"
+    },
+    {
+      "case_id": "terminal-078",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "cursor_diff"
+    },
+    {
+      "case_id": "weather-008",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "weather"
+    },
+    {
+      "case_id": "weather-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "weather_forecast"
+    },
+    {
+      "case_id": "youtube-013",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "youtube_search"
+    },
+    {
+      "case_id": "youtube-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: routing, no_error, latency",
+      "affected_skill": "youtube_liked"
+    },
+    {
+      "case_id": "para-001",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "para-008",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "icloud_reminder"
+    },
+    {
+      "case_id": "para-010",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "apple_reminders_sync"
+    },
+    {
+      "case_id": "para-012",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "appstore_ratings"
+    },
+    {
+      "case_id": "para-015",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "appstore_ratings"
+    },
+    {
+      "case_id": "para-018",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "para-021",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "appstore_downloads"
+    },
+    {
+      "case_id": "para-026",
+      "category": "handler_error",
+      "detail": "error: ModuleNotFoundError: No module named 'playwright'; failed checks: non_empty, no_error",
+      "affected_skill": "browser_navigate"
+    },
+    {
+      "case_id": "para-028",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "para-029",
+      "category": "handler_error",
+      "detail": "error: ModuleNotFoundError: No module named 'playwright'; failed checks: non_empty, no_error",
+      "affected_skill": "browser_extract"
+    },
+    {
+      "case_id": "para-031",
+      "category": "routing_wrong",
+      "detail": "failed checks: non_empty; expected 'browser_screenshot', routed to 'skill_pattern'",
+      "affected_skill": "browser_screenshot"
+    },
+    {
+      "case_id": "para-039",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "digitalocean_status"
+    },
+    {
+      "case_id": "para-040",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "digitalocean_status"
+    },
+    {
+      "case_id": "para-044",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "digitalocean_spend"
+    },
+    {
+      "case_id": "para-055",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "para-057",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "para-059",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "para-061",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_create_issue"
+    },
+    {
+      "case_id": "para-063",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "para-068",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "github_prs"
+    },
+    {
+      "case_id": "para-092",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "para-093",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "para-095",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "imessage_read"
+    },
+    {
+      "case_id": "para-097",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "imessage_recent"
+    },
+    {
+      "case_id": "para-101",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "imessage_recent"
+    },
+    {
+      "case_id": "para-104",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'imessage_search', routed to 'direct_shell'",
+      "affected_skill": "imessage_search"
+    },
+    {
+      "case_id": "para-106",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "linkedin_messages"
+    },
+    {
+      "case_id": "para-113",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'linkedin_jobs', routed to 'direct_shell'",
+      "affected_skill": "linkedin_jobs"
+    },
+    {
+      "case_id": "para-115",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "linkedin_profile"
+    },
+    {
+      "case_id": "para-120",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "para-121",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "para-123",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "para-124",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "para-126",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_apps"
+    },
+    {
+      "case_id": "para-130",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "para-131",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "para-132",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "para-134",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "para-135",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_frontmost"
+    },
+    {
+      "case_id": "para-137",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "para-138",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "para-139",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "para-141",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "para-142",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: non_empty, no_error",
+      "affected_skill": "macos_system_info"
+    },
+    {
+      "case_id": "para-146",
+      "category": "routing_wrong",
+      "detail": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "para-147",
+      "category": "routing_wrong",
+      "detail": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "para-149",
+      "category": "routing_wrong",
+      "detail": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "para-151",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "para-153",
+      "category": "routing_wrong",
+      "detail": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+      "affected_skill": "screenshot"
+    },
+    {
+      "case_id": "para-155",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: non_empty, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-156",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'spotlight', routed to 'direct_shell'",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-157",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: non_empty, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-159",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: non_empty, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-161",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-162",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "spotlight"
+    },
+    {
+      "case_id": "para-167",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'macos_browser_tabs', routed to 'direct_shell'",
+      "affected_skill": "macos_browser_tabs"
+    },
+    {
+      "case_id": "para-169",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'notion_search', routed to 'direct_shell'",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "para-171",
+      "category": "handler_bad_output",
+      "detail": "error: NameError: name 'update' is not defined; failed checks: non_empty, no_error",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "para-173",
+      "category": "routing_wrong",
+      "detail": "failed checks: length_appropriate; expected 'notion_search', routed to 'direct_shell'",
+      "affected_skill": "notion_search"
+    },
+    {
+      "case_id": "para-175",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "notion_create"
+    },
+    {
+      "case_id": "para-181",
+      "category": "timeout",
+      "detail": "error: Timeout after 15s; failed checks: non_empty, no_error",
+      "affected_skill": "readwise_highlights"
+    }
+  ],
+  "by_skill": {
+    "icloud_reminder": {
+      "total": 14,
+      "passed": 3
+    },
+    "apple_reminders_sync": {
+      "total": 4,
+      "passed": 1
+    },
+    "appstore_ratings": {
+      "total": 12,
+      "passed": 7
+    },
+    "appstore_downloads": {
+      "total": 10,
+      "passed": 4
+    },
+    "browser_navigate": {
+      "total": 5,
+      "passed": 0
+    },
+    "browser_extract": {
+      "total": 7,
+      "passed": 0
+    },
+    "browser_screenshot": {
+      "total": 4,
+      "passed": 1
+    },
+    "digitalocean_status": {
+      "total": 8,
+      "passed": 4
+    },
+    "digitalocean_spend": {
+      "total": 6,
+      "passed": 4
+    },
+    "github_create_issue": {
+      "total": 11,
+      "passed": 1
+    },
+    "github_prs": {
+      "total": 11,
+      "passed": 4
+    },
+    "github_notifications": {
+      "total": 8,
+      "passed": 7
+    },
+    "imessage_read": {
+      "total": 9,
+      "passed": 0
+    },
+    "imessage_recent": {
+      "total": 13,
+      "passed": 8
+    },
+    "imessage_search": {
+      "total": 4,
+      "passed": 1
+    },
+    "linkedin_messages": {
+      "total": 8,
+      "passed": 5
+    },
+    "linkedin_jobs": {
+      "total": 6,
+      "passed": 4
+    },
+    "linkedin_profile": {
+      "total": 7,
+      "passed": 5
+    },
+    "macos_apps": {
+      "total": 17,
+      "passed": 6
+    },
+    "macos_frontmost": {
+      "total": 12,
+      "passed": 1
+    },
+    "macos_system_info": {
+      "total": 16,
+      "passed": 3
+    },
+    "screenshot": {
+      "total": 12,
+      "passed": 3
+    },
+    "spotlight": {
+      "total": 14,
+      "passed": 0
+    },
+    "macos_browser_tabs": {
+      "total": 9,
+      "passed": 6
+    },
+    "notion_search": {
+      "total": 8,
+      "passed": 2
+    },
+    "notion_create": {
+      "total": 4,
+      "passed": 0
+    },
+    "readwise_highlights": {
+      "total": 8,
+      "passed": 6
+    },
+    "readwise_review": {
+      "total": 3,
+      "passed": 3
+    },
+    "cursor_status": {
+      "total": 10,
+      "passed": 2
+    },
+    "cursor_extensions": {
+      "total": 2,
+      "passed": 2
+    },
+    "cursor_terminal_status": {
+      "total": 10,
+      "passed": 3
+    },
+    "terminal_status": {
+      "total": 9,
+      "passed": 3
+    },
+    "cursor_diff": {
+      "total": 3,
+      "passed": 0
+    },
+    "weather": {
+      "total": 4,
+      "passed": 3
+    },
+    "weather_forecast": {
+      "total": 3,
+      "passed": 2
+    },
+    "web_search": {
+      "total": 8,
+      "passed": 7
+    },
+    "youtube_search": {
+      "total": 5,
+      "passed": 2
+    },
+    "youtube_liked": {
+      "total": 5,
+      "passed": 3
+    }
+  },
+  "regressions": [],
+  "fixes_since_last": [
+    "digitalocean-007",
+    "appstore-005",
+    "appstore-002",
+    "appstore-008",
+    "browser-006",
+    "digitalocean-004",
+    "appstore-011",
+    "appstore-013"
+  ],
+  "plan": {
+    "total_gaps": 193,
+    "auto_fixable_count": 0,
+    "estimated_pass_rate_after": 0.37540453074433655,
+    "tasks": [
+      {
+        "id": "task-001",
+        "title": "Fix handler errors in browser_navigate (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 2,
+        "target_file": "actions/browser_navigate.py",
+        "description": "2 cases failing with handler errors.\n  - error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing\n  - error: ModuleNotFoundError: No module named 'playwright'; failed checks: non_emp",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "HANDLER_ERROR"
+      },
+      {
+        "id": "task-002",
+        "title": "Fix handler errors in browser_extract (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 2,
+        "target_file": "actions/browser_extract.py",
+        "description": "2 cases failing with handler errors.\n  - error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing\n  - error: ModuleNotFoundError: No module named 'playwright'; failed checks: non_emp",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "HANDLER_ERROR"
+      },
+      {
+        "id": "task-003",
+        "title": "Fix handler errors in browser_screenshot (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 2,
+        "target_file": "actions/browser_screenshot.py",
+        "description": "1 cases failing with handler errors.\n  - error: ModuleNotFoundError: No module named 'playwright'; failed checks: routing",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "HANDLER_ERROR"
+      },
+      {
+        "id": "task-033",
+        "title": "Fix timeout in macos_apps handler (11 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/macos_apps.py",
+        "description": "11 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 11,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-034",
+        "title": "Fix timeout in macos_frontmost handler (11 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/macos_frontmost.py",
+        "description": "11 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 11,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-035",
+        "title": "Fix timeout in macos_system_info handler (11 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/macos_system_info.py",
+        "description": "11 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 11,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-026",
+        "title": "Fix timeout in github_create_issue handler (10 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/github_create_issue.py",
+        "description": "10 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 10,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-028",
+        "title": "Fix timeout in imessage_read handler (9 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/imessage_read.py",
+        "description": "9 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 9,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-040",
+        "title": "Fix timeout in cursor_status handler (8 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/cursor_status.py",
+        "description": "8 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 8,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-019",
+        "title": "Fix timeout in icloud_reminder handler (7 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/icloud_reminder.py",
+        "description": "7 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 7,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-027",
+        "title": "Fix timeout in github_prs handler (7 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/github_prs.py",
+        "description": "7 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 7,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-041",
+        "title": "Fix timeout in cursor_terminal_status handler (7 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/cursor_terminal_status.py",
+        "description": "7 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 7,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-022",
+        "title": "Fix timeout in appstore_downloads handler (6 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/appstore_downloads.py",
+        "description": "6 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 6,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-042",
+        "title": "Fix timeout in terminal_status handler (6 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/terminal_status.py",
+        "description": "6 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 6,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-021",
+        "title": "Fix timeout in appstore_ratings handler (5 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/appstore_ratings.py",
+        "description": "5 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 5,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-023",
+        "title": "Fix timeout in browser_extract handler (5 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/browser_extract.py",
+        "description": "5 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 5,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-029",
+        "title": "Fix timeout in imessage_recent handler (5 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/imessage_recent.py",
+        "description": "5 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 5,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-024",
+        "title": "Fix timeout in digitalocean_status handler (4 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/digitalocean_status.py",
+        "description": "4 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 4,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-037",
+        "title": "Fix timeout in spotlight handler (4 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/spotlight.py",
+        "description": "4 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 4,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-039",
+        "title": "Fix timeout in notion_create handler (4 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/notion_create.py",
+        "description": "4 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 4,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-020",
+        "title": "Fix timeout in apple_reminders_sync handler (3 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/apple_reminders_sync.py",
+        "description": "3 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 3,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-031",
+        "title": "Fix timeout in linkedin_messages handler (3 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/linkedin_messages.py",
+        "description": "3 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 3,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-036",
+        "title": "Fix timeout in screenshot handler (3 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/screenshot.py",
+        "description": "3 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 3,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-043",
+        "title": "Fix timeout in cursor_diff handler (3 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/cursor_diff.py",
+        "description": "3 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 3,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-047",
+        "title": "Fix timeout in browser_navigate handler (3 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/browser_navigate.py",
+        "description": "3 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 3,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-025",
+        "title": "Fix timeout in digitalocean_spend handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/digitalocean_spend.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-030",
+        "title": "Fix timeout in imessage_search handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/imessage_search.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-032",
+        "title": "Fix timeout in linkedin_profile handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/linkedin_profile.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-045",
+        "title": "Fix timeout in youtube_search handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/youtube_search.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-046",
+        "title": "Fix timeout in youtube_liked handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/youtube_liked.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-051",
+        "title": "Fix timeout in macos_browser_tabs handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/macos_browser_tabs.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-052",
+        "title": "Fix timeout in readwise_highlights handler (2 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/readwise_highlights.py",
+        "description": "2 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 2,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-004",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-005",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-006",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-007",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: latency; expected 'icloud_reminder', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-008",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: non_empty; expected 'browser_screenshot', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-009",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'imessage_search', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-010",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'linkedin_jobs', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-011",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-012",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-013",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-014",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: non_empty; expected 'screenshot', routed to 'skill_pattern'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-015",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'spotlight', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-016",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'macos_browser_tabs', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-017",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'notion_search', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-018",
+        "title": "Fix routing conflict: ? hits ? instead of ?",
+        "task_type": "improve_prompt",
+        "priority": 3,
+        "target_file": "core/router.py",
+        "description": "failed checks: length_appropriate; expected 'notion_search', routed to 'direct_shell'",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "ROUTING_WRONG"
+      },
+      {
+        "id": "task-038",
+        "title": "Fix timeout in notion_search handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/notion_search.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-044",
+        "title": "Fix timeout in web_search handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/web_search.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-048",
+        "title": "Fix timeout in browser_screenshot handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/browser_screenshot.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-049",
+        "title": "Fix timeout in github_notifications handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/github_notifications.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-050",
+        "title": "Fix timeout in linkedin_jobs handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/linkedin_jobs.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-053",
+        "title": "Fix timeout in weather handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/weather.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      },
+      {
+        "id": "task-054",
+        "title": "Fix timeout in weather_forecast handler (1 cases)",
+        "task_type": "fix_handler",
+        "priority": 3,
+        "target_file": "actions/weather_forecast.py",
+        "description": "1 cases timing out. Check handler performance or increase timeout.",
+        "affected_cases": 1,
+        "auto_fixable": false,
+        "gap_category": "TIMEOUT"
+      }
+    ]
+  }
+}
