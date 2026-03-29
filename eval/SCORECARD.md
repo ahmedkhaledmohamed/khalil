@@ -8,7 +8,9 @@ Tracking pass rates across improvement iterations. Run `python -m eval --trend` 
 |---|------|--------|-------|--------|------|-------|--------|
 | 0 | 2026-03-28 | pre-fix | 50 (mixed) | 13 | 26% | — | Initial run, all failures were LLM timeouts |
 | 1 | 2026-03-29 | `ebf5d3b` | 309 (direct_action) | 116 | 37.5% | +11.5pp | Baseline: direct dispatch fix, handler-aware case classification |
-| 2 | **2026-03-29** | pending | **323 (direct_action)** | **214** | **66.3%** | **+28.8pp** | Query generator fix, NameError fix, routing priority fix |
+| 2 | 2026-03-29 | pending | 323 (direct_action) | 214 | 66.3% | +28.8pp | Query generator fix, NameError fix, routing priority fix |
+| 3 | **2026-03-29** | pending | **245 (pattern-only)** | **186** | **75.9%** | **+9.6pp** | Keyword cases → llm_intent, natural query templates |
+| — | 2026-03-29 | claude | 323 (direct_action) | 242 | 74.9% | +8.6pp | Claude API comparison: timeouts 89→29, ceiling ~93% |
 
 ## What Changed (Run #2)
 

@@ -222,21 +222,35 @@ def _generate_from_patterns(registry) -> list[TestCase]:
     return cases
 
 
+# Templates to wrap keywords into natural-sounding queries
+_KEYWORD_TEMPLATES = [
+    "show me {kw}",
+    "check {kw}",
+    "what's my {kw}",
+    "{kw} status",
+    "list {kw}",
+]
+
+
 def _generate_from_keywords(registry) -> list[TestCase]:
-    """~200 cases from skill keyword dicts."""
+    """~200 cases from skill keyword dicts — natural queries from keywords."""
     cases = []
     for skill in registry.list_skills():
         for action_type, keyword_string in skill.keywords.items():
             words = keyword_string.split()
             if len(words) < 2:
                 continue
-            has_handler = registry.get_handler(action_type) is not None
-            needs_llm = action_type in _NEEDS_LLM_PARAMS
-            path = "direct_action" if (has_handler and not needs_llm) else "llm_intent"
-            # Generate combinations of 2-3 keywords as queries
-            for i in range(0, len(words) - 1, 2):
-                combo = words[i : i + 3]
-                query = " ".join(combo)
+            # Keyword queries need LLM to map to the right action — they
+            # don't match skill regex patterns, so direct dispatch won't work.
+            path = "llm_intent"
+            # Pick 1-2 keywords and wrap in natural templates
+            used = set()
+            for i, kw in enumerate(words):
+                if kw in used or len(kw) < 3:
+                    continue
+                used.add(kw)
+                template = _KEYWORD_TEMPLATES[i % len(_KEYWORD_TEMPLATES)]
+                query = template.format(kw=kw)
                 cases.append(TestCase(
                     id=_next_id(skill.name),
                     query=query,
