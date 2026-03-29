@@ -66,12 +66,16 @@ CLAUDE_MODEL = "claude-sonnet-4-20250514"
 CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
 MAX_CONTEXT_TOKENS = 8000
 
+# Owner identity (for personalized prompts)
+OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
+
 # Timezone
-TIMEZONE = "America/Toronto"
+TIMEZONE = os.getenv("KHALIL_TIMEZONE", "UTC")
 
 # Weather (Open-Meteo, free, no API key)
-WEATHER_LAT = 43.6532
-WEATHER_LON = -79.3832
+# Set to your coordinates, or leave unset to skip weather features
+WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT")) if os.getenv("KHALIL_WEATHER_LAT") else None
+WEATHER_LON = float(os.getenv("KHALIL_WEATHER_LON")) if os.getenv("KHALIL_WEATHER_LON") else None
 
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed

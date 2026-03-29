@@ -3034,7 +3034,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await ctx.reply("Usage: /email draft <to> <subject words...>")
             return
 
-        # Strip optional "to" keyword: "/email draft to ahmed@gmail.com ..." → skip "to"
+        # Strip optional "to" keyword: "/email draft to user@example.com ..." → skip "to"
         remaining = args[1:]
         if remaining and remaining[0].lower() == "to":
             remaining = remaining[1:]
@@ -3389,7 +3389,7 @@ async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /project command: view project status."""
     ctx = _ctx_from_update(update)
-    from actions.projects import resolve_project, get_project_status, list_projects, get_open_tasks
+    from actions.projects import resolve_project, get_project_status, list_projects, get_open_tasks, KNOWN_PROJECTS
 
     args = context.args or []
     if not args:
@@ -3405,7 +3405,7 @@ async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = resolve_project(name)
     if not key:
         await ctx.reply(
-            f"Unknown project: {name}\n\nKnown: zia, tiny-grounds, bezier, khalil"
+            f"Unknown project: {name}\n\nKnown: {', '.join(KNOWN_PROJECTS)}"
         )
         return
 

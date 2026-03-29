@@ -62,11 +62,11 @@ def get_relevant_context(query: str, max_chars: int = 3000) -> str:
 
     # Keywords → section mapping heuristics
     relevance_keywords = {
-        "career": ["career", "work", "spotify", "experience", "role"],
-        "family": ["family", "wife", "kids", "heba", "ella", "leo"],
-        "finance": ["finance", "investment", "rrsp", "tfsa", "tax", "rsu"],
-        "projects": ["project", "zia", "bezier", "tiny grounds", "side"],
-        "education": ["education", "university", "degree", "guc"],
+        "career": ["career", "work", "experience", "role", "job"],
+        "family": ["family", "spouse", "kids", "children"],
+        "finance": ["finance", "investment", "tax", "portfolio"],
+        "projects": ["project", "side project", "app", "tool"],
+        "education": ["education", "university", "degree"],
         "immigration": ["immigration", "visa", "pr", "citizenship", "canada"],
         "values": ["values", "principles", "believe", "philosophy"],
     }

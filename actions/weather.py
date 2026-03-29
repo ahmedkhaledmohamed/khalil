@@ -117,12 +117,14 @@ async def get_forecast(days: int = 3) -> list[dict]:
 
 
 async def get_weather_summary() -> str:
-    """One-liner for morning brief — e.g. 'Toronto: 5°C (feels 2°C), partly cloudy. High 8°C today.'"""
+    """One-liner for morning brief — e.g. '5°C (feels 2°C), partly cloudy. High 8°C today.'"""
+    if WEATHER_LAT is None or WEATHER_LON is None:
+        return ""
     try:
         current, forecast = await _fetch_summary_data()
         today_high = forecast[0]["high"] if forecast else "?"
         return (
-            f"Toronto: {current['temp']}°C (feels {current['feels_like']}°C), "
+            f"Weather: {current['temp']}°C (feels {current['feels_like']}°C), "
             f"{current['condition'].lower()}. High {today_high}°C today."
         )
     except Exception as e:
