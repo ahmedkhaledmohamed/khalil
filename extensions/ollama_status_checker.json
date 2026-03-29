@@ -1,0 +1,9 @@
+{
+    "name": "ollama_status_checker",
+    "command": "ollama_status",
+    "description": "Check real-time status of Ollama/Claude services",
+    "action_module": "actions.ollama_status_checker",
+    "handler_function": "handle_ollama_status",
+    "generated_at": "2026-03-28T12:00:00",
+    "generated_for": "Is Claude still running?"
+}
