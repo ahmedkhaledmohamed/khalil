@@ -159,6 +159,8 @@ def _generate_from_patterns(registry) -> list[TestCase]:
     cases = []
     for skill in registry.list_skills():
         for pattern, action_type in skill.patterns:
+            has_handler = registry.get_handler(action_type) is not None
+            path = "direct_action" if has_handler else "llm_intent"
             positives = _positive_query_from_regex(pattern)
             for q in positives:
                 cases.append(TestCase(
@@ -166,7 +168,7 @@ def _generate_from_patterns(registry) -> list[TestCase]:
                     query=q,
                     category=skill.category,
                     complexity="trivial",
-                    expected_path="direct_action",
+                    expected_path=path,
                     expected_action=action_type,
                     expected_contains=[],
                     expected_not_contains=[],
@@ -200,6 +202,8 @@ def _generate_from_keywords(registry) -> list[TestCase]:
             words = keyword_string.split()
             if len(words) < 2:
                 continue
+            has_handler = registry.get_handler(action_type) is not None
+            path = "direct_action" if has_handler else "llm_intent"
             # Generate combinations of 2-3 keywords as queries
             for i in range(0, len(words) - 1, 2):
                 combo = words[i : i + 3]
@@ -209,7 +213,7 @@ def _generate_from_keywords(registry) -> list[TestCase]:
                     query=query,
                     category=skill.category,
                     complexity="trivial",
-                    expected_path="direct_action",
+                    expected_path=path,
                     expected_action=action_type,
                     expected_contains=[],
                     expected_not_contains=[],
@@ -437,16 +441,28 @@ def load_golden_cases() -> list[TestCase]:
     with open(GOLDEN_PATH) as f:
         data = yaml.safe_load(f)
 
+    # Build set of action_types with handlers for correct path classification
+    registry = get_registry()
+    actions_with_handler: set[str] = set()
+    for skill in registry.list_skills():
+        for action_type in skill.actions:
+            if registry.get_handler(action_type) is not None:
+                actions_with_handler.add(action_type)
+
     cases = []
     for category, items in data.items():
         for i, item in enumerate(items):
+            action = item.get("expected_action")
+            yaml_path = item.get("expected_path", "direct_action")
+            if yaml_path == "direct_action" and action and action not in actions_with_handler:
+                yaml_path = "llm_intent"
             cases.append(TestCase(
                 id=f"golden-{category}-{i+1:03d}",
                 query=item["query"],
                 category=category,
                 complexity=item.get("complexity", "moderate"),
-                expected_path=item.get("expected_path", "direct_action"),
-                expected_action=item.get("expected_action"),
+                expected_path=yaml_path,
+                expected_action=action,
                 expected_contains=item.get("expected_contains", []),
                 expected_not_contains=item.get("expected_not_contains", []),
                 eval_strategy=item.get("eval_strategy", "deterministic"),
