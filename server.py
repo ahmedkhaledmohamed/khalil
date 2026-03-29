@@ -4213,10 +4213,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         handled = await handle_action_intent(direct_intent, ctx)
         if handled:
             return
-    # 2. LLM-based detection for ambiguous patterns
+    # 2. Skill-pattern matching → try direct dispatch before LLM
     if action_hint is None:
         action_hint = _looks_like_action(query)
     if action_hint:
+        # Try direct handler dispatch — skip LLM for pattern-matched skills
+        direct_intent = {"action": action_hint, "action_type": action_hint, "user_query": query, "llm_generated": False}
+        handled = await handle_action_intent(direct_intent, ctx)
+        if handled:
+            return
+        # Handler didn't handle it — fall through to LLM for parameter extraction
         intent = await detect_intent(query)
         if intent:
             # #3: Track intent detection accuracy — pattern hint vs LLM result
