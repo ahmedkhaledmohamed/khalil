@@ -1,3 +1,25 @@
-from eval import main
+import sys
 
-main()
+if "--shell-safety" in sys.argv:
+    from eval.shell_safety_runner import run_shell_safety_tests
+    run_shell_safety_tests()
+elif "--conversational" in sys.argv:
+    # Filter cases.json to conversational only, then run pipeline
+    import json
+    from pathlib import Path
+    fixtures = Path(__file__).parent / "fixtures" / "cases.json"
+    if not fixtures.exists():
+        print(f"No cases.json found. Run: python -m eval --generate")
+        sys.exit(1)
+    cases = json.load(open(fixtures))
+    conv = [c for c in cases if c.get("expected_path") == "conversational"]
+    tmp = Path(__file__).parent / "fixtures" / "cases_conversational.json"
+    tmp.write_text(json.dumps(conv, indent=2))
+    print(f"Filtered {len(conv)} conversational cases -> {tmp}")
+    # Inject into argv for the main pipeline
+    sys.argv = [sys.argv[0], "--cases", str(tmp)]
+    from eval import main
+    main()
+else:
+    from eval import main
+    main()

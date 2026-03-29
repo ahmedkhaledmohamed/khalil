@@ -69,9 +69,9 @@ BLOCKED_PATTERNS = [
     r">\s*/dev/disk",
     r":\(\)\s*\{",                # fork bomb
     r"\blaunchctl\s+unload\b",
-    r"\bkillall\s+Finder\b",
-    r"\bkillall\s+Dock\b",
-    r"\bkillall\s+SystemUIServer\b",
+    r"\bkillall\s+finder\b",
+    r"\bkillall\s+dock\b",
+    r"\bkillall\s+systemuiserver\b",
 ]
 
 SAFE_PREFIXES = [

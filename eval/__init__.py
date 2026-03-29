@@ -9,12 +9,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from eval.cases import TestCase, generate_cases, load_cases
-from eval import runner
-from eval import judge
-from eval import gap_analysis
-from eval.gap_analysis import diff_reports
-from eval.plan_gen import generate_plan, format_plan
+# Heavy imports deferred to main() / run_pipeline() to allow
+# lightweight subcommands (--shell-safety) without pulling in yaml, etc.
 
 
 EVAL_DIR = Path(__file__).resolve().parent
@@ -65,6 +61,10 @@ async def run_pipeline(
     cycle: int = 0,
 ) -> dict:
     """Full pipeline: generate/load -> run -> evaluate -> gap -> plan."""
+    from eval.cases import TestCase, generate_cases, load_cases
+    from eval import runner, judge, gap_analysis
+    from eval.gap_analysis import diff_reports
+    from eval.plan_gen import generate_plan, format_plan
 
     # 1. Generate or load cases
     if cases_path:
@@ -251,6 +251,7 @@ def main() -> None:
         return
 
     if "--generate" in args:
+        from eval.cases import generate_cases
         cases = generate_cases()
         FIXTURES_DIR.mkdir(parents=True, exist_ok=True)
         out = FIXTURES_DIR / "cases.json"
