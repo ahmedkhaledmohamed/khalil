@@ -21,8 +21,8 @@ DAY_STYLE = {
 }
 
 
-async def _get_weather_toronto() -> str:
-    """Fetch current Toronto weather via actions.weather module."""
+async def _get_weather() -> str:
+    """Fetch current weather via actions.weather module."""
     from actions.weather import get_weather_summary
     return await get_weather_summary()
 
@@ -144,7 +144,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     (recent_raw, weather, calendar_text, job_text, github_text,
      appstore_text, server_text, spotify_text, readwise_text) = await asyncio.gather(
         _fetch_recent(),
-        _get_weather_toronto(),
+        _get_weather(),
         _fetch_calendar(),
         _fetch_jobs(),
         _fetch_github_notifications(),

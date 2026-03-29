@@ -114,10 +114,10 @@ async def _process_query(server_mod, channel: CLIChannel, query: str):
     ctx = MessageContext(
         channel=channel,
         chat_id="cli",
-        user_id="ahmed",
+        user_id="cli_user",
         channel_type=ChannelType.TELEGRAM,
         incoming=IncomingMessage(
-            text=query, chat_id="cli", user_id="ahmed",
+            text=query, chat_id="cli", user_id="cli_user",
             channel_type=ChannelType.TELEGRAM,
         ),
     )

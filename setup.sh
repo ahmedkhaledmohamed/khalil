@@ -76,10 +76,15 @@ echo "7. To start Khalil:"
 echo "   source .venv/bin/activate"
 echo "   python3 server.py"
 
-# 8. launchd (always-on)
+# 8. launchd (always-on) — generate plist from template with real paths
+KHALIL_DIR="$(cd "$(dirname "$0")" && pwd)"
+PERSONAL_REPO="$(dirname "$(dirname "$KHALIL_DIR")")"
+sed -e "s|__KHALIL_DIR__|${KHALIL_DIR}|g" \
+    -e "s|__PERSONAL_REPO__|${PERSONAL_REPO}|g" \
+    com.khalil.daemon.plist > /tmp/com.khalil.daemon.plist
 echo ""
 echo "8. To install as always-on daemon:"
-echo "   cp com.khalil.daemon.plist ~/Library/LaunchAgents/"
+echo "   cp /tmp/com.khalil.daemon.plist ~/Library/LaunchAgents/"
 echo "   launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist"
 
 echo ""

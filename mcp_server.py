@@ -222,8 +222,8 @@ async def get_morning_brief_data() -> str:
 
     # Weather
     try:
-        from scheduler.digests import _get_weather_toronto
-        weather = await _get_weather_toronto()
+        from scheduler.digests import _get_weather
+        weather = await _get_weather()
         if weather:
             sections.append(f"Weather: {weather}")
     except Exception:

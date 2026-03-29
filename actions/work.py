@@ -1,14 +1,17 @@
-"""Sprint planning and work status — reads spring-2026-planning.csv directly."""
+"""Sprint planning and work status — reads planning CSV directly."""
 
 import csv
 import logging
+import os
 from pathlib import Path
 
 from config import WORK_DIR
 
 log = logging.getLogger("khalil.actions.work")
 
-PLANNING_CSV = WORK_DIR / "spotify" / "spring-2026-planning.csv"
+_EMPLOYER = os.getenv("KHALIL_EMPLOYER", "employer")
+_PLANNING_FILE = os.getenv("KHALIL_PLANNING_CSV", "planning.csv")
+PLANNING_CSV = WORK_DIR / _EMPLOYER / _PLANNING_FILE
 
 
 def _load_epics() -> list[dict]:
