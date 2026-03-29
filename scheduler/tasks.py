@@ -260,3 +260,27 @@ async def send_mid_quarter_review(channel: "Channel", chat_id: int, ask_claude_f
     except Exception as e:
         log.error(f"Mid-quarter review failed: {e}")
         _record_scheduler_failure("mid_quarter_review", e)
+
+
+async def run_knowledge_enrichment(channel: "Channel", chat_id: int):
+    """Detect knowledge gaps and fill them via web search."""
+    from knowledge.indexer import init_db
+    from scheduler.enrichment import enrich_knowledge
+
+    async def _notify(msg: str):
+        await channel.send_message(chat_id, msg)
+
+    try:
+        conn = init_db()
+        result = await enrich_knowledge(conn, notify_fn=_notify)
+        if result["docs_indexed"] == 0:
+            log.info("Knowledge enrichment: no gaps to fill")
+        else:
+            log.info(
+                "Knowledge enrichment: %d gaps, %d pages, %d docs indexed",
+                result["gaps_found"], result["urls_fetched"], result["docs_indexed"],
+            )
+        _record_digest_sent("knowledge_enrichment")
+    except Exception as e:
+        log.error("Knowledge enrichment failed: %s", e)
+        _record_scheduler_failure("knowledge_enrichment", e)

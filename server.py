@@ -3340,6 +3340,40 @@ async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ctx.reply(f"❌ Email sync failed: {e}")
 
 
+async def cmd_enrich(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /enrich [topic] — manually trigger knowledge enrichment."""
+    ctx = _ctx_from_update(update)
+    topic = " ".join(context.args) if context.args else None
+
+    if topic:
+        await ctx.reply(f"🔍 Enriching knowledge for: {topic}...")
+        forced = [topic]
+    else:
+        await ctx.reply("🔍 Detecting knowledge gaps and enriching...")
+        forced = None
+
+    try:
+        from knowledge.indexer import init_db
+        from scheduler.enrichment import enrich_knowledge
+        conn = init_db()
+        result = await enrich_knowledge(conn, forced_queries=forced)
+
+        if result["docs_indexed"] == 0:
+            if forced:
+                await ctx.reply(f"No useful content found for \"{topic}\".")
+            else:
+                await ctx.reply("No knowledge gaps detected in the last 7 days.")
+        else:
+            lines = [f"✅ Enrichment complete: {result['docs_indexed']} docs indexed\n"]
+            for d in result["details"]:
+                if d["indexed"] > 0:
+                    lines.append(f"  • {d['query']}: {d['indexed']} docs from {len(d['urls'])} pages")
+            await ctx.reply("\n".join(lines))
+    except Exception as e:
+        log.error("Enrichment failed: %s", e)
+        await ctx.reply(f"❌ Enrichment failed: {e}")
+
+
 async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
     await ctx.reply("💼 Checking for new job matches...")
@@ -4931,6 +4965,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("audit", cmd_audit))
     application.add_handler(CommandHandler("clear", cmd_clear))
     application.add_handler(CommandHandler("sync", cmd_sync))
+    application.add_handler(CommandHandler("enrich", cmd_enrich))
     application.add_handler(CommandHandler("jobs", cmd_jobs))
     application.add_handler(CommandHandler("calendar", cmd_calendar))
     application.add_handler(CommandHandler("project", cmd_project))
@@ -5393,6 +5428,20 @@ def _setup_scheduler():
         CronTrigger(hour=9, minute=45, timezone=TIMEZONE),
         id="mid_quarter_review",
         name="M12: Mid-Quarter Review Check",
+        replace_existing=True,
+    )
+
+    # Knowledge enrichment — Wed + Sat at 2 PM
+    async def _knowledge_enrichment_job():
+        if _can_send():
+            from scheduler.tasks import run_knowledge_enrichment
+            await run_knowledge_enrichment(channel, OWNER_CHAT_ID)
+
+    scheduler.add_job(
+        _knowledge_enrichment_job,
+        CronTrigger(day_of_week="wed,sat", hour=14, minute=0, timezone=TIMEZONE),
+        id="knowledge_enrichment",
+        name="Knowledge Enrichment",
         replace_existing=True,
     )
 

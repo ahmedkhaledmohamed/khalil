@@ -201,6 +201,72 @@ async def hybrid_search(query: str, limit: int = 8, category: str | None = None)
     return merged[:limit]
 
 
+def detect_knowledge_gaps(conn: sqlite3.Connection, days: int = 7, max_gaps: int = 5) -> list[dict]:
+    """Detect recent queries where knowledge was lacking.
+
+    Looks at `search_miss` and `capability_gap_detected` signals from the last N days.
+    Deduplicates by normalized query text.
+
+    Returns [{query, signal_type, timestamp}] sorted by recency.
+    """
+    import json
+
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        """
+        SELECT signal_type, context, created_at
+        FROM interaction_signals
+        WHERE signal_type IN ('search_miss', 'capability_gap_detected')
+          AND created_at > ?
+        ORDER BY created_at DESC
+        """,
+        (cutoff,),
+    ).fetchall()
+
+    seen_queries: set[str] = set()
+    # Check what's already been enriched to avoid re-fetching
+    enriched_queries = set()
+    try:
+        enriched_rows = conn.execute(
+            "SELECT DISTINCT metadata FROM documents WHERE metadata LIKE '%enrichment=autonomous%'"
+        ).fetchall()
+        for r in enriched_rows:
+            meta = r[0] if isinstance(r, tuple) else r["metadata"]
+            for part in meta.split(";"):
+                part = part.strip()
+                if part.startswith("gap_query="):
+                    enriched_queries.add(part[len("gap_query="):].strip().lower())
+    except Exception:
+        pass
+
+    gaps = []
+    for row in rows:
+        try:
+            ctx = json.loads(row[1] if isinstance(row, tuple) else row["context"])
+            query = ctx.get("query", "").strip()
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if not query or len(query) < 5:
+            continue
+
+        normalized = query.lower().strip()
+        if normalized in seen_queries or normalized in enriched_queries:
+            continue
+        seen_queries.add(normalized)
+
+        gaps.append({
+            "query": query,
+            "signal_type": row[0] if isinstance(row, tuple) else row["signal_type"],
+            "timestamp": row[2] if isinstance(row, tuple) else row["created_at"],
+        })
+
+        if len(gaps) >= max_gaps:
+            break
+
+    return gaps
+
+
 def get_stats() -> dict:
     """Get database statistics."""
     conn = get_db()
