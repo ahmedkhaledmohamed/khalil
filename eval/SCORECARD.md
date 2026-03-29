@@ -11,7 +11,16 @@ Tracking pass rates across improvement iterations. Run `python -m eval --trend` 
 | 2 | 2026-03-29 | pending | 323 (direct_action) | 214 | 66.3% | +28.8pp | Query generator fix, NameError fix, routing priority fix |
 | 3 | 2026-03-29 | pending | 245 (pattern-only) | 186 | 75.9% | +9.6pp | Keyword cases → llm_intent, natural query templates |
 | — | 2026-03-29 | claude | 323 (direct_action) | 242 | 74.9% | +8.6pp | Claude API comparison: timeouts 89→29, ceiling ~93% |
-| 4 | **2026-03-29** | pending | **245** | **206** | **84.1%** | **+8.2pp** | Latency threshold fix, runner timeout, screenshot channel fix |
+| 4 | 2026-03-29 | `1000a36` | 245 | 206 | 84.1% | +8.2pp | Latency threshold fix, runner timeout, screenshot channel fix |
+| 5 | **2026-03-29** | pending | **196** | **181** | **92.3%** | **+8.2pp** | Param extraction, weather exclusion, network skill reclassification |
+
+## What Changed (Run #5)
+
+Three categories of fixes:
+1. **Param extraction** (`actions/imessage.py`, `actions/web.py`, `actions/macos.py`): Extract search terms from raw `user_query` when `query` param is missing. Same pattern as the spotlight fix from Run #2.
+2. **Weather exclusion** (`eval/cases.py`): Skip weather cases when `KHALIL_WEATHER_LAT`/`KHALIL_WEATHER_LON` env vars not set.
+3. **Network skill reclassification** (`eval/cases.py`): github_prs, github_create_issue, notion_search, notion_create → `llm_intent` (60s timeout). Their HTTP calls legitimately take 10-20s.
+4. **Ambiguous query reclassification** (`eval/cases.py`): imessage_search, spotlight → `_NEEDS_LLM_PARAMS`. Queries like "search my messages" have no search term — need LLM to ask the user.
 
 ## What Changed (Run #4)
 

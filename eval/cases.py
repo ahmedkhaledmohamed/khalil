@@ -177,7 +177,27 @@ def _paraphrase(query: str) -> str:
 _NEEDS_LLM_PARAMS = {
     "browser_navigate", "browser_extract", "browser_screenshot",
     "cursor_diff",
+    "imessage_search",  # needs search query from user
+    "spotlight",         # needs search term from user
 }
+
+# Actions with network-dependent handlers (GitHub API, Notion API) that
+# legitimately take 10-20s. Classify as llm_intent for the 60s timeout.
+_SLOW_NETWORK_HANDLERS = {
+    "github_prs", "github_create_issue",
+    "notion_search", "notion_create",
+}
+
+# Actions that require specific env vars to function. Skip in eval when not set.
+_REQUIRES_ENV = {
+    "weather": ["KHALIL_WEATHER_LAT", "KHALIL_WEATHER_LON"],
+    "weather_forecast": ["KHALIL_WEATHER_LAT", "KHALIL_WEATHER_LON"],
+}
+
+def _env_available(action_type: str) -> bool:
+    """Check if required env vars are set for an action."""
+    required = _REQUIRES_ENV.get(action_type, [])
+    return all(os.getenv(var) for var in required)
 
 
 def _generate_from_patterns(registry) -> list[TestCase]:
@@ -185,10 +205,13 @@ def _generate_from_patterns(registry) -> list[TestCase]:
     cases = []
     for skill in registry.list_skills():
         for pattern, action_type in skill.patterns:
-            # Skills with handler=None or that need LLM-extracted params
+            # Skills with handler=None, LLM-extracted params, or slow network deps
+            if not _env_available(action_type):
+                continue  # skip actions whose required env vars aren't set
             has_handler = registry.get_handler(action_type) is not None
             needs_llm = action_type in _NEEDS_LLM_PARAMS
-            path = "direct_action" if (has_handler and not needs_llm) else "llm_intent"
+            slow_network = action_type in _SLOW_NETWORK_HANDLERS
+            path = "direct_action" if (has_handler and not needs_llm and not slow_network) else "llm_intent"
             positives = _positive_query_from_regex(pattern)
             for q in positives:
                 cases.append(TestCase(

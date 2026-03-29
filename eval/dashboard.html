@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khalil Eval Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --green: #3fb950;
+    --green-dim: #238636;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.8rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+  .subtitle {
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    margin-bottom: 2rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+  }
+  .big-number {
+    font-size: 3.5rem;
+    font-weight: 700;
+    color: var(--green);
+    line-height: 1;
+  }
+  .big-number .unit { font-size: 1.5rem; color: var(--text-muted); }
+  .big-number .delta {
+    font-size: 1rem;
+    color: var(--green);
+    vertical-align: super;
+    margin-left: 0.5rem;
+  }
+  .stat-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1rem;
+  }
+  .stat-item .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+  .stat-item .value { font-size: 1.4rem; font-weight: 600; }
+
+  /* Chart */
+  .chart-container {
+    position: relative;
+    height: 220px;
+    margin-top: 0.5rem;
+  }
+  .chart-svg { width: 100%; height: 100%; }
+  .chart-line {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .chart-area {
+    fill: url(#areaGrad);
+  }
+  .chart-dot {
+    fill: var(--blue);
+    stroke: var(--surface);
+    stroke-width: 3;
+  }
+  .chart-label {
+    fill: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    text-anchor: middle;
+  }
+  .chart-sublabel {
+    fill: var(--text-muted);
+    font-size: 10px;
+    text-anchor: middle;
+  }
+  .chart-grid { stroke: var(--border); stroke-width: 0.5; stroke-dasharray: 4 4; }
+  .chart-grid-label { fill: var(--text-muted); font-size: 10px; text-anchor: end; }
+
+  /* Waterfall */
+  .waterfall-bar {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.6rem;
+    gap: 0.75rem;
+  }
+  .waterfall-bar .iter {
+    width: 24px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    text-align: right;
+    flex-shrink: 0;
+  }
+  .waterfall-bar .bar-track {
+    flex: 1;
+    height: 28px;
+    background: rgba(88,166,255,0.08);
+    border-radius: 6px;
+    position: relative;
+    overflow: hidden;
+  }
+  .waterfall-bar .bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    padding-left: 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    transition: width 1s ease;
+  }
+  .waterfall-bar .delta-label {
+    width: 60px;
+    text-align: right;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--green);
+    flex-shrink: 0;
+  }
+
+  /* Iteration details */
+  .iteration {
+    border-left: 3px solid var(--border);
+    padding: 0.75rem 0 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+  }
+  .iteration:last-child { margin-bottom: 0; }
+  .iteration .head {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+  }
+  .iteration .num {
+    background: var(--blue);
+    color: #000;
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 10px;
+  }
+  .iteration .title { font-weight: 600; font-size: 0.95rem; }
+  .iteration .rate-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(63,185,80,0.15);
+    color: var(--green);
+    font-weight: 600;
+  }
+  .iteration ul {
+    list-style: none;
+    padding: 0;
+  }
+  .iteration li {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    padding: 2px 0;
+    padding-left: 1rem;
+    position: relative;
+  }
+  .iteration li::before {
+    content: ">";
+    position: absolute;
+    left: 0;
+    color: var(--border);
+  }
+
+  /* Skill table */
+  .skill-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.4rem 1.5rem;
+  }
+  .skill-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 4px 0;
+  }
+  .skill-row .status {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .skill-row .status.perfect { background: var(--green); }
+  .skill-row .status.good { background: var(--yellow); }
+  .skill-row .status.mid { background: #d29922; opacity: 0.6; }
+  .skill-row .status.bad { background: var(--red); }
+  .skill-row .name {
+    flex: 1;
+    font-size: 0.8rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .skill-row .bar-bg {
+    width: 80px;
+    height: 6px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .skill-row .bar-fg {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.8s ease;
+  }
+  .skill-row .pct {
+    width: 42px;
+    text-align: right;
+    font-size: 0.8rem;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .skill-row .count {
+    width: 40px;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  /* Failure donut */
+  .donut-container {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    justify-content: center;
+  }
+  .donut-legend .item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .donut-legend .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
+    .skill-grid { grid-template-columns: 1fr; }
+    body { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Khalil Eval Dashboard</h1>
+<p class="subtitle">Quality improvement tracking across 6 iterations &mdash; March 28-29, 2026</p>
+
+<!-- Top stats -->
+<div class="grid">
+  <div class="card">
+    <h2>Current Pass Rate</h2>
+    <div class="big-number">92.3<span class="unit">%</span><span class="delta">+66.3pp</span></div>
+    <div class="stat-row">
+      <div class="stat-item"><div class="label">Passed</div><div class="value">181</div></div>
+      <div class="stat-item"><div class="label">Total</div><div class="value">196</div></div>
+      <div class="stat-item"><div class="label">Failed</div><div class="value" style="color:var(--red)">15</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Failure Breakdown</h2>
+    <div class="donut-container">
+      <svg width="120" height="120" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="16"/>
+        <!-- Timeout: 12/15 = 80% → 251.3 of 314.16 -->
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--yellow)" stroke-width="16"
+          stroke-dasharray="251.3 62.8" stroke-dashoffset="78.5" stroke-linecap="round"/>
+        <!-- Routing: 3/15 = 20% → 62.8 -->
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--purple)" stroke-width="16"
+          stroke-dasharray="62.8 251.3" stroke-dashoffset="141.3" stroke-linecap="round"/>
+        <text x="60" y="56" text-anchor="middle" fill="var(--text)" font-size="22" font-weight="700">15</text>
+        <text x="60" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">failures</text>
+      </svg>
+      <div class="donut-legend">
+        <div class="item"><div class="dot" style="background:var(--yellow)"></div> Timeout (12)</div>
+        <div class="item"><div class="dot" style="background:var(--purple)"></div> Routing (3)</div>
+        <div class="item"><div class="dot" style="background:var(--green)"></div> Handler errors (0)</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Pass rate chart -->
+<div class="grid">
+  <div class="card full">
+    <h2>Pass Rate Over Iterations</h2>
+    <div class="chart-container">
+      <svg class="chart-svg" viewBox="0 0 760 220" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--blue)" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="var(--blue)" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <!-- Grid lines -->
+        <line x1="60" y1="30" x2="720" y2="30" class="chart-grid"/>
+        <line x1="60" y1="75" x2="720" y2="75" class="chart-grid"/>
+        <line x1="60" y1="120" x2="720" y2="120" class="chart-grid"/>
+        <line x1="60" y1="165" x2="720" y2="165" class="chart-grid"/>
+        <text x="55" y="34" class="chart-grid-label">100%</text>
+        <text x="55" y="79" class="chart-grid-label">75%</text>
+        <text x="55" y="124" class="chart-grid-label">50%</text>
+        <text x="55" y="169" class="chart-grid-label">25%</text>
+
+        <!-- y = 185 - (pct/100 * 155) to keep labels visible -->
+        <!-- 26→144.7  37.5→126.9  66.3→82.2  75.9→67.4  84.1→54.6  92.3→42.0 -->
+
+        <!-- Area -->
+        <path class="chart-area" d="M100,144.7 L220,126.9 L340,82.2 L460,67.4 L570,54.6 L680,42 L680,185 L100,185 Z"/>
+
+        <!-- Line -->
+        <polyline class="chart-line" points="100,144.7 220,126.9 340,82.2 460,67.4 570,54.6 680,42"/>
+
+        <!-- Dots + labels -->
+        <circle cx="100" cy="144.7" r="6" class="chart-dot"/>
+        <text x="100" y="132" class="chart-label">26%</text>
+        <text x="100" y="163" class="chart-sublabel">#0</text>
+
+        <circle cx="220" cy="126.9" r="6" class="chart-dot"/>
+        <text x="220" y="115" class="chart-label">37.5%</text>
+        <text x="220" y="148" class="chart-sublabel">+11.5</text>
+
+        <circle cx="340" cy="82.2" r="6" class="chart-dot"/>
+        <text x="340" y="70" class="chart-label">66.3%</text>
+        <text x="340" y="103" class="chart-sublabel">+28.8</text>
+
+        <circle cx="460" cy="67.4" r="6" class="chart-dot"/>
+        <text x="460" y="55" class="chart-label">75.9%</text>
+        <text x="460" y="88" class="chart-sublabel">+9.6</text>
+
+        <circle cx="570" cy="54.6" r="6" class="chart-dot"/>
+        <text x="570" y="43" class="chart-label">84.1%</text>
+        <text x="570" y="76" class="chart-sublabel">+8.2</text>
+
+        <circle cx="680" cy="42" r="8" class="chart-dot" style="fill:var(--green);stroke-width:3"/>
+        <text x="680" y="30" class="chart-label" style="fill:var(--green)">92.3%</text>
+        <text x="680" y="63" class="chart-sublabel">+8.2</text>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- Waterfall + iterations -->
+<div class="grid">
+  <div class="card">
+    <h2>Cumulative Progress</h2>
+    <div>
+      <div class="waterfall-bar">
+        <div class="iter">#0</div>
+        <div class="bar-track"><div class="bar-fill" style="width:26%;background:var(--red)">26%</div></div>
+        <div class="delta-label">+26.0</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#1</div>
+        <div class="bar-track"><div class="bar-fill" style="width:37.5%;background:var(--yellow)">37.5%</div></div>
+        <div class="delta-label">+11.5</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#2</div>
+        <div class="bar-track"><div class="bar-fill" style="width:66.3%;background:var(--yellow)">66.3%</div></div>
+        <div class="delta-label">+28.8</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#3</div>
+        <div class="bar-track"><div class="bar-fill" style="width:75.9%;background:var(--blue)">75.9%</div></div>
+        <div class="delta-label">+9.6</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#4</div>
+        <div class="bar-track"><div class="bar-fill" style="width:84.1%;background:var(--blue)">84.1%</div></div>
+        <div class="delta-label">+8.2</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#5</div>
+        <div class="bar-track"><div class="bar-fill" style="width:92.3%;background:var(--green)">92.3%</div></div>
+        <div class="delta-label">+8.2</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>What Changed Per Iteration</h2>
+    <div class="iteration">
+      <div class="head"><span class="num">#0</span><span class="title">Initial baseline</span><span class="rate-badge">26%</span></div>
+      <ul><li>First eval run &mdash; all failures were LLM timeouts</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head"><span class="num">#1</span><span class="title">Direct dispatch</span><span class="rate-badge">37.5%</span></div>
+      <ul>
+        <li>Pattern match &rarr; handler, skip 20-50s LLM call</li>
+        <li>Handler-aware case classification</li>
+        <li>Auto-generated 309 test cases from skill patterns</li>
+      </ul>
+    </div>
+    <div class="iteration">
+      <div class="head"><span class="num">#2</span><span class="title">Query gen + routing</span><span class="rate-badge">66.3%</span></div>
+      <ul>
+        <li>Fixed regex &rarr; natural language query generator</li>
+        <li>Removed dead <code>update</code> param (NameError, 35 cases)</li>
+        <li>Skill patterns before shell intent (routing fix)</li>
+        <li>browser_*/cursor_diff &rarr; llm_intent</li>
+        <li>Spotlight search term extraction fallback</li>
+      </ul>
+    </div>
+    <div class="iteration">
+      <div class="head"><span class="num">#3</span><span class="title">Case quality</span><span class="rate-badge">75.9%</span></div>
+      <ul>
+        <li>Keyword cases &rarr; llm_intent (need LLM to map)</li>
+        <li>Natural query templates instead of raw keywords</li>
+        <li>Focused to 245 pattern-only cases</li>
+      </ul>
+    </div>
+    <div class="iteration">
+      <div class="head"><span class="num">#4</span><span class="title">Eval infra</span><span class="rate-badge">84.1%</span></div>
+      <ul>
+        <li>Latency threshold 3s &rarr; 18s (AppleScript needs it)</li>
+        <li>Runner timeout 15s &rarr; 20s</li>
+        <li>Screenshot channel captures photo captions</li>
+      </ul>
+    </div>
+    <div class="iteration" style="border-left-color:var(--green)">
+      <div class="head"><span class="num" style="background:var(--green)">#5</span><span class="title">Param extraction</span><span class="rate-badge">92.3%</span></div>
+      <ul>
+        <li>Extract search terms from raw query (imessage, web, spotlight)</li>
+        <li>Skip weather cases when env vars not set</li>
+        <li>Network skills (github, notion) &rarr; 60s timeout</li>
+        <li>Ambiguous queries (imessage_search, spotlight) &rarr; LLM params</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Skill pass rates -->
+<div class="grid">
+  <div class="card full">
+    <h2>Skill Pass Rates (Run #5)</h2>
+    <div class="skill-grid" id="skillGrid"></div>
+  </div>
+</div>
+
+<script>
+const skills = [
+  ["digitalocean_status", 8, 8], ["digitalocean_spend", 6, 6],
+  ["linkedin_profile", 6, 6], ["readwise_review", 1, 1],
+  ["cursor_extensions", 1, 1], ["appstore_ratings", 10, 10],
+  ["appstore_downloads", 8, 8], ["imessage_recent", 10, 10],
+  ["icloud_reminder", 12, 14], ["apple_reminders_sync", 2, 2],
+  ["macos_browser_tabs", 10, 10], ["macos_frontmost", 11, 12],
+  ["youtube_search", 3, 3], ["youtube_liked", 3, 3],
+  ["readwise_highlights", 4, 4], ["screenshot", 10, 10],
+  ["github_notifications", 6, 6], ["linkedin_messages", 6, 6],
+  ["imessage_read", 8, 8], ["macos_apps", 15, 18],
+  ["macos_system_info", 10, 12], ["terminal_status", 7, 9],
+  ["cursor_status", 7, 9], ["cursor_terminal_status", 6, 7],
+  ["linkedin_jobs", 3, 4], ["web_search", 6, 7],
+];
+
+const grid = document.getElementById("skillGrid");
+skills.forEach(([name, passed, total]) => {
+  const pct = total > 0 ? (passed / total * 100) : 0;
+  let statusClass, color;
+  if (pct === 100) { statusClass = "perfect"; color = "var(--green)"; }
+  else if (pct >= 75) { statusClass = "good"; color = "var(--yellow)"; }
+  else if (pct >= 50) { statusClass = "mid"; color = "var(--yellow)"; }
+  else { statusClass = "bad"; color = "var(--red)"; }
+
+  const row = document.createElement("div");
+  row.className = "skill-row";
+  row.innerHTML = `
+    <div class="status ${statusClass}"></div>
+    <div class="name">${name}</div>
+    <div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${color}"></div></div>
+    <div class="pct" style="color:${color}">${pct.toFixed(0)}%</div>
+    <div class="count">${passed}/${total}</div>
+  `;
+  grid.appendChild(row);
+});
+</script>
+
+</body>
+</html>

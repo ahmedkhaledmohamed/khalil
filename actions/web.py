@@ -110,6 +110,11 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     if action == "web_search":
         query = intent.get("query", "")
         if not query:
+            raw = intent.get("user_query", "")
+            query = re.sub(r"\b(?:search|google|look\s+up|find|web\s+search)\b", "", raw, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:the|for|about|on)\b", "", query, flags=re.IGNORECASE)
+            query = query.strip()
+        if not query:
             return False
         await ctx.reply(f"\U0001f50d Searching: {query}...")
         results = await web_search(query)

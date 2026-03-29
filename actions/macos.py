@@ -423,8 +423,9 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         if not query:
             # Extract search term from raw user query: "find my resume file" → "resume"
             raw = intent.get("user_query", "")
-            query = re.sub(r"\b(?:find|search|locate|search\s+for|look\s+up)\b", "", raw, flags=re.IGNORECASE)
-            query = re.sub(r"\b(?:a|an|the|my|all|file|files)\b", "", query, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:find|search|locate|search\s+for|look\s+up|look\s+for|use\s+spotlight)\b", "", raw, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:spotlight|mdfind)\b", "", query, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:a|an|the|my|all|file|files|to|for|in|on|please|can\s+you)\b", "", query, flags=re.IGNORECASE)
             query = query.strip()
         if not query:
             return False
