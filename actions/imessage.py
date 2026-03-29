@@ -6,6 +6,7 @@ All public functions are async — sync SQLite calls run in asyncio.to_thread().
 
 import asyncio
 import logging
+import re
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -192,6 +193,12 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
     elif action == "imessage_search":
         query = intent.get("query", "")
+        if not query:
+            raw = intent.get("user_query", "")
+            query = re.sub(r"\b(?:search|find|look\s+up|look\s+for)\b", "", raw, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:my|the|in|for|a|an|all)\b", "", query, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:messages?|texts?|imessages?|conversations?)\b", "", query, flags=re.IGNORECASE)
+            query = query.strip()
         if not query:
             return False
         messages = await search_messages(query, limit=10)
