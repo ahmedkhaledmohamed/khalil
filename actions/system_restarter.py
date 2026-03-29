@@ -1,7 +1,7 @@
-"""Restart Khalil (the bot process) or the host machine via SSH.
+"""Restart PharoClaw (the bot process) or the host machine via SSH.
 
 This capability uses the Telegram Bot API to confirm restart actions,
-then triggers the restart. For Khalil restarts, the process exits with
+then triggers the restart. For PharoClaw restarts, the process exits with
 code 0 so the process manager (systemd/launchd) can restart it. For
 host machine restarts, an SSH command is sent to the configured host.
 
@@ -21,7 +21,7 @@ import keyring
 
 from config import DB_PATH, KEYRING_SERVICE, TIMEZONE
 
-log = logging.getLogger("khalil.actions.system_restarter")
+log = logging.getLogger("pharoclaw.actions.system_restarter")
 
 _tables_ensured = False
 
@@ -117,8 +117,8 @@ async def handle_restart(update, context):
 
     Subcommands:
         /restart              — show usage help
-        /restart khalil       — preview: show what restarting Khalil would do
-        /restart khalil confirm — restart the Khalil bot process
+        /restart pharoclaw       — preview: show what restarting PharoClaw would do
+        /restart pharoclaw confirm — restart the PharoClaw bot process
         /restart host         — preview: show what restarting the host would do
         /restart host confirm — restart the host machine via SSH
         /restart history      — show recent restart history
@@ -131,8 +131,8 @@ async def handle_restart(update, context):
     if not args:
         await update.message.reply_text(
             "Usage:\n"
-            "  /restart khalil         — preview Khalil restart\n"
-            "  /restart khalil confirm — restart Khalil process\n"
+            "  /restart pharoclaw         — preview PharoClaw restart\n"
+            "  /restart pharoclaw confirm — restart PharoClaw process\n"
             "  /restart host           — preview host restart\n"
             "  /restart host confirm   — restart host machine\n"
             "  /restart history [N]    — show restart history"
@@ -154,24 +154,24 @@ async def handle_restart(update, context):
         await update.message.reply_text(_format_history(records))
         return
 
-    # --- Khalil restart ---
-    if subcmd == "khalil":
+    # --- PharoClaw restart ---
+    if subcmd == "pharoclaw":
         confirm = len(args) > 1 and args[1].lower() == "confirm"
         if not confirm:
             await update.message.reply_text(
-                "DRY RUN — Restart Khalil\n\n"
+                "DRY RUN — Restart PharoClaw\n\n"
                 "This will:\n"
                 "  1. Log the restart request\n"
                 "  2. Send a goodbye message\n"
                 "  3. Exit the process (code 0)\n"
-                "  4. The process manager (systemd/launchd) will restart Khalil\n\n"
-                "To proceed: /restart khalil confirm"
+                "  4. The process manager (systemd/launchd) will restart PharoClaw\n\n"
+                "To proceed: /restart pharoclaw confirm"
             )
             return
 
-        await _async_log_restart("khalil", "initiated", requested_by=user_label)
-        await update.message.reply_text("Restarting Khalil... I'll be back shortly.")
-        log.info("Khalil restart requested by %s — exiting process", user_label)
+        await _async_log_restart("pharoclaw", "initiated", requested_by=user_label)
+        await update.message.reply_text("Restarting PharoClaw... I'll be back shortly.")
+        log.info("PharoClaw restart requested by %s — exiting process", user_label)
 
         # Give Telegram time to deliver the message before exiting
         await asyncio.sleep(1)
@@ -184,7 +184,7 @@ async def handle_restart(update, context):
             await update.message.reply_text(
                 "Host restart not configured.\n\n"
                 "Set the SSH host in keyring:\n"
-                "  keyring set khalil-assistant restart-ssh-host"
+                "  keyring set pharoclaw restart-ssh-host"
             )
             return
 

@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from config import DB_PATH, SWARM_ENABLED
 
-log = logging.getLogger("khalil.orchestrator")
+log = logging.getLogger("pharoclaw.orchestrator")
 
 # Heuristic: skip LLM decomposition if none of these signals are present
 _MULTI_STEP_SIGNALS = re.compile(

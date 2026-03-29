@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from config import APPLE_REMINDERS_SYNC, DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.reminders")
+log = logging.getLogger("pharoclaw.actions.reminders")
 
 SKILL = {
     "name": "reminders",

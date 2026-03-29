@@ -1,6 +1,6 @@
 """Self-healing engine — detect recurring failures, generate patches, open PRs.
 
-When Khalil's existing functionality fails repeatedly (e.g., LLM returns garbage
+When PharoClaw's existing functionality fails repeatedly (e.g., LLM returns garbage
 instead of JSON for intent detection), this module detects the pattern, uses Claude
 Opus to generate a targeted code fix, validates it, and opens a PR for review.
 
@@ -19,11 +19,11 @@ import anthropic
 from config import (
     CLAUDE_MODEL_COMPLEX,
     HEALING_FAILURE_THRESHOLD,
-    KHALIL_DIR,
+    PHAROCLAW_DIR,
 )
 from learning import _get_conn, record_signal, store_insight, get_insights
 
-log = logging.getLogger("khalil.healing")
+log = logging.getLogger("pharoclaw.healing")
 
 # Maps failure fingerprints to relevant source files + functions
 FAILURE_CODE_MAP = {
@@ -290,15 +290,15 @@ def _extract_targets_from_traceback(signals: list[dict]) -> list[tuple[str, str]
         # Match Python traceback frames: File "path/to/file.py", line N, in func_name
         frames = _re.findall(r'File "([^"]+)", line \d+, in (\w+)', error)
         if frames:
-            # Use the last frame that's inside the khalil directory
-            khalil_frames = [
+            # Use the last frame that's inside the pharoclaw directory
+            pharoclaw_frames = [
                 (f, func) for f, func in frames
-                if "khalil" in f and func not in ("wrapper", "<module>")
+                if "pharoclaw" in f and func not in ("wrapper", "<module>")
             ]
-            if khalil_frames:
-                filepath, func = khalil_frames[-1]
+            if pharoclaw_frames:
+                filepath, func = pharoclaw_frames[-1]
                 # Convert absolute path to relative
-                rel = filepath.split("khalil/")[-1] if "khalil/" in filepath else filepath
+                rel = filepath.split("pharoclaw/")[-1] if "pharoclaw/" in filepath else filepath
                 return [(rel, func)]
     return None
 
@@ -329,7 +329,7 @@ def build_diagnosis(trigger: dict) -> dict | None:
     source_context = []
     primary_target = None
     for rel_path, func_name in code_targets:
-        file_path = KHALIL_DIR / rel_path
+        file_path = PHAROCLAW_DIR / rel_path
         result = extract_function_source(file_path, func_name)
         if result:
             func_source, start, end = result
@@ -405,7 +405,7 @@ async def generate_healing_patch(diagnosis: dict) -> tuple[str, str] | None:
             if matched_action:
                 break
 
-        prompt = f"""You are adding regex patterns to Khalil's intent detection function.
+        prompt = f"""You are adding regex patterns to PharoClaw's intent detection function.
 
 ## Problem
 These queries should route to action "{matched_action}" but the existing regex patterns don't match them:
@@ -462,7 +462,7 @@ IMPORTS: none
             f"### Function `{s['function']}` in {s['file']}\n```python\n{s['source']}\n```"
             for s in diagnosis["source_context"]
         )
-        prompt = f"""You are fixing a bug in Khalil, a Python Telegram bot assistant.
+        prompt = f"""You are fixing a bug in PharoClaw, a Python Telegram bot assistant.
 
 ## Problem
 {diagnosis['summary']}
@@ -495,7 +495,7 @@ Output each fixed function separated by a line containing only ---FUNCTION---:
 <complete fixed function 2>
 ```"""
     else:
-        prompt = f"""You are fixing a bug in Khalil, a Python Telegram bot assistant.
+        prompt = f"""You are fixing a bug in PharoClaw, a Python Telegram bot assistant.
 
 ## Problem
 {diagnosis['summary']}
@@ -734,7 +734,7 @@ async def create_healing_pr(target_file: str, patched_content: str, diagnosis: d
     from actions.extend import _run_git, _run_gh
 
     fingerprint = diagnosis["fingerprint"].replace(":", "-")
-    branch_name = f"khalil-heal/{fingerprint}"
+    branch_name = f"pharoclaw-heal/{fingerprint}"
 
     def _git_workflow():
         _run_gh("auth", "status")
@@ -742,7 +742,7 @@ async def create_healing_pr(target_file: str, patched_content: str, diagnosis: d
         stashed = False
         status = _run_git("status", "--porcelain").stdout.strip()
         if status:
-            _run_git("stash", "push", "-m", f"khalil-heal-{fingerprint}")
+            _run_git("stash", "push", "-m", f"pharoclaw-heal-{fingerprint}")
             stashed = True
         try:
             _run_git("checkout", "main")
@@ -750,22 +750,22 @@ async def create_healing_pr(target_file: str, patched_content: str, diagnosis: d
             _run_git("checkout", "-b", branch_name)
 
             # Write patched file
-            file_path = KHALIL_DIR / target_file
+            file_path = PHAROCLAW_DIR / target_file
             file_path.write_text(patched_content)
 
             _run_git("add", str(file_path))
             _run_git("commit", "-m",
-                      f"Fix {diagnosis['summary'][:60]} (auto-healed by Khalil)\n\n"
+                      f"Fix {diagnosis['summary'][:60]} (auto-healed by PharoClaw)\n\n"
                       f"Fingerprint: {diagnosis['fingerprint']}\n"
                       f"Failures: {diagnosis['failure_count']}x in 48h\n\n"
-                      f"Co-Authored-By: Khalil Bot <khalil@local>")
+                      f"Co-Authored-By: PharoClaw Bot <pharoclaw@local>")
             _run_git("push", "-u", "origin", branch_name)
 
             body = _build_pr_body(diagnosis)
             title_prefix = "[NEEDS REVIEW] " if diagnosis.get("_guardian_blocked") else ""
             result = _run_gh(
                 "pr", "create",
-                "--title", f"{title_prefix}Khalil self-heal: {diagnosis['summary'][:60]}",
+                "--title", f"{title_prefix}PharoClaw self-heal: {diagnosis['summary'][:60]}",
                 "--body", body,
             )
             return result.stdout.strip()
@@ -798,7 +798,7 @@ def _build_pr_body(diagnosis: dict) -> str:
         f"- [ ] No regressions in normal flow\n"
         f"- [ ] No dangerous imports or calls\n\n"
         f"---\n"
-        f"*Auto-generated by Khalil's self-healing engine*"
+        f"*Auto-generated by PharoClaw's self-healing engine*"
     )
 
 
@@ -837,7 +837,7 @@ async def run_self_healing(triggers: list[dict], channel, chat_id: int):
 
         # 3. Validate
         primary = diagnosis["primary_target"]
-        target_path = KHALIL_DIR / primary["file"]
+        target_path = PHAROCLAW_DIR / primary["file"]
         original_source = next(
             s["source"] for s in diagnosis["source_context"]
             if s["function"] == primary["function"]

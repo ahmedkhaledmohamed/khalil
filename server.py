@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Khalil — Personal AI Assistant. FastAPI server + Telegram bot."""
+"""PharoClaw — Personal AI Assistant. FastAPI server + Telegram bot."""
 
 import asyncio
 import json
@@ -9,7 +9,7 @@ import re
 import sys
 from datetime import date
 
-# Add khalil directory to path for imports
+# Add pharoclaw directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import anthropic
@@ -83,7 +83,7 @@ class _JsonFormatter(logging.Formatter):
 _handler = logging.StreamHandler()
 _handler.setFormatter(_JsonFormatter())
 logging.basicConfig(level=logging.INFO, handlers=[_handler])
-log = logging.getLogger("khalil")
+log = logging.getLogger("pharoclaw")
 
 # --- Circuit Breaker (#20) ---
 
@@ -135,7 +135,7 @@ _cb_ollama = CircuitBreaker("ollama", threshold=3, cooldown_seconds=60)
 
 
 # --- Globals ---
-app = FastAPI(title="Khalil", docs_url=None, redoc_url=None)
+app = FastAPI(title="PharoClaw", docs_url=None, redoc_url=None)
 scheduler = AsyncIOScheduler()
 db_conn = None
 autonomy: AutonomyController = None
@@ -513,7 +513,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
 
     system = (
         f"{_temporal}"
-        "You are Khalil, Ahmed's personal AI assistant. "
+        "You are PharoClaw, Ahmed's personal AI assistant. "
         "You have deep knowledge of his life, career, family, finances, and projects. "
         "Answer based on the provided context from his personal archives. "
         "Be direct, specific, and personal — you know him. "
@@ -947,7 +947,7 @@ _TOPIC_KEYWORDS = {
 }
 
 
-def _ocr_screenshot(image_path: str = "/tmp/khalil_screenshot.png") -> str:
+def _ocr_screenshot(image_path: str = "/tmp/pharoclaw_screenshot.png") -> str:
     """#37: OCR stub — extract text from a screenshot image.
 
     Full OCR requires macOS Vision framework via pyobjc or Shortcuts.
@@ -1360,12 +1360,12 @@ def _try_direct_shell_intent(text: str) -> dict | None:
 
     # #37: Screenshot capture (READ — just capturing, not modifying)
     if re.search(r"\bscreenshot\s+(?:of\s+)?(?:the\s+)?window\b", text_lower):
-        return {"action": "shell", "command": "screencapture -w /tmp/khalil_screenshot.png", "description": "Capture window screenshot"}
+        return {"action": "shell", "command": "screencapture -w /tmp/pharoclaw_screenshot.png", "description": "Capture window screenshot"}
 
     if re.search(r"\b(?:take|capture)\s+(?:a\s+)?screenshot\b", text_lower) or \
        re.search(r"\bcapture\s+(?:the\s+)?screen\b", text_lower) or \
        text_lower.strip() == "screenshot":
-        return {"action": "shell", "command": "screencapture -x /tmp/khalil_screenshot.png", "description": "Take screenshot (silent)"}
+        return {"action": "shell", "command": "screencapture -x /tmp/pharoclaw_screenshot.png", "description": "Take screenshot (silent)"}
 
     # #54: Google Drive file creation
     m = re.search(r"\bcreate\s+(?:a\s+)?(?:google\s+)?(?:doc|document)\s+(?:called|named|titled?)?\s*['\"]?(.+?)['\"]?\s*$", text_lower)
@@ -2498,7 +2498,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     OWNER_CHAT_ID = ctx.chat_id
     _persist_owner_chat_id(OWNER_CHAT_ID)
     await ctx.reply(
-        "Khalil is online.\n\n"
+        "PharoClaw is online.\n\n"
         "Send me any question about your life, work, finances, or projects.\n\n"
         "Commands:\n"
         "/search <query> — Search your archives\n"
@@ -3034,7 +3034,7 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await ctx.reply("Usage: /email draft <to> <subject words...>")
             return
 
-        # Strip optional "to" keyword: "/email draft to ahmed@gmail.com ..." → skip "to"
+        # Strip optional "to" keyword: "/email draft to user@example.com ..." → skip "to"
         remaining = args[1:]
         if remaining and remaining[0].lower() == "to":
             remaining = remaining[1:]
@@ -3389,7 +3389,7 @@ async def cmd_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /project command: view project status."""
     ctx = _ctx_from_update(update)
-    from actions.projects import resolve_project, get_project_status, list_projects, get_open_tasks
+    from actions.projects import resolve_project, get_project_status, list_projects, get_open_tasks, KNOWN_PROJECTS
 
     args = context.args or []
     if not args:
@@ -3405,7 +3405,7 @@ async def cmd_project(update: Update, context: ContextTypes.DEFAULT_TYPE):
     key = resolve_project(name)
     if not key:
         await ctx.reply(
-            f"Unknown project: {name}\n\nKnown: zia, tiny-grounds, bezier, khalil"
+            f"Unknown project: {name}\n\nKnown: {', '.join(KNOWN_PROJECTS)}"
         )
         return
 
@@ -4022,7 +4022,7 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if subcommand == "preferences":
         prefs = list_preferences()
         if not prefs:
-            await ctx.reply("No learned preferences yet. Khalil will start learning from your interactions over time.")
+            await ctx.reply("No learned preferences yet. PharoClaw will start learning from your interactions over time.")
             return
         text = f"🧠 {len(prefs)} Learned Preferences:\n\n"
         for p in prefs:
@@ -4049,7 +4049,7 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif subcommand == "history":
         insights = get_insights(limit=15)
         if not insights:
-            await ctx.reply("No insights yet. Khalil generates insights from weekly reflection.")
+            await ctx.reply("No insights yet. PharoClaw generates insights from weekly reflection.")
             return
         text = f"🧠 Insight History ({len(insights)}):\n\n"
         for i in insights:
@@ -4062,8 +4062,8 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         insights = get_insights(limit=5)
         if not insights:
             await ctx.reply(
-                "🧠 Khalil Self-Improvement\n\n"
-                "No insights yet. Khalil analyzes your interactions weekly to learn your preferences.\n\n"
+                "🧠 PharoClaw Self-Improvement\n\n"
+                "No insights yet. PharoClaw analyzes your interactions weekly to learn your preferences.\n\n"
                 "Commands:\n"
                 "  /learn — Recent insights\n"
                 "  /learn preferences — Active learned preferences\n"
@@ -4848,7 +4848,7 @@ async def send_slack_message(channel: str, text: str) -> str:
     webhook_url = get_secret("slack-webhook-url")
     if not webhook_url:
         return ("Slack webhook not configured. Set it with:\n"
-                "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'slack-webhook-url', 'YOUR_URL')\"")
+                "  python3 -c \"import keyring; keyring.set_password('pharoclaw', 'slack-webhook-url', 'YOUR_URL')\"")
 
     payload = {"text": text}
     if channel:
@@ -4955,7 +4955,7 @@ async def start_telegram_bot():
     if not token:
         log.error(
             "Telegram bot token not found. Set it with:\n"
-            "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')\"\n"
+            "  python3 -c \"import keyring; keyring.set_password('pharoclaw', 'telegram-bot-token', 'YOUR_TOKEN')\"\n"
             "  or set TELEGRAM_BOT_TOKEN environment variable."
         )
         return
@@ -5464,7 +5464,7 @@ def _setup_scheduler():
 async def startup():
     global db_conn, autonomy, claude
 
-    log.info("Khalil starting up...")
+    log.info("PharoClaw starting up...")
 
     # Initialize database
     db_conn = init_db()
@@ -5489,7 +5489,7 @@ async def startup():
         if not api_key:
             log.error(
                 "Claude backend selected but no API key found. Set it with:\n"
-                "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')\"\n"
+                "  python3 -c \"import keyring; keyring.set_password('pharoclaw', 'anthropic-api-key', 'YOUR_KEY')\"\n"
                 "  or set ANTHROPIC_API_KEY environment variable.\n"
                 "  Or switch to Ollama: set LLM_BACKEND = 'ollama' in config.py"
             )
@@ -5614,7 +5614,7 @@ async def startup():
     except Exception as e:
         log.warning("Startup self-test failed: %s", e)
 
-    log.info("Khalil is ready.")
+    log.info("PharoClaw is ready.")
 
 
 @app.get("/health")

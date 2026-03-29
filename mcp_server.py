@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MCP server for Claude Code integration.
 
-Exposes Khalil's knowledge base to Claude Code sessions via MCP protocol.
+Exposes PharoClaw's knowledge base to Claude Code sessions via MCP protocol.
 Run as: python3 mcp_server.py (stdio transport, invoked by Claude Code)
 """
 
@@ -9,7 +9,7 @@ import asyncio
 import os
 import sys
 
-# Add khalil directory to path for imports
+# Add pharoclaw directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
@@ -17,7 +17,7 @@ from mcp.server.fastmcp import FastMCP
 from knowledge.search import hybrid_search, keyword_search, get_stats
 from knowledge.context import get_section, get_section_names, get_relevant_context
 
-mcp = FastMCP("khalil", instructions="Khalil — Ahmed's personal knowledge base. Search archives, get context sections, and retrieve life timeline events.")
+mcp = FastMCP("pharoclaw", instructions="PharoClaw — Ahmed's personal knowledge base. Search archives, get context sections, and retrieve life timeline events.")
 
 
 @mcp.tool()
@@ -79,7 +79,7 @@ async def get_timeline(year: str | None = None) -> str:
 
 @mcp.tool()
 async def knowledge_stats() -> str:
-    """Get statistics about Khalil's knowledge base."""
+    """Get statistics about PharoClaw's knowledge base."""
     stats = get_stats()
     lines = [f"Total documents: {stats['total_documents']}", "", "By category:"]
     for cat, count in stats["by_category"].items():
@@ -89,7 +89,7 @@ async def knowledge_stats() -> str:
 
 @mcp.tool()
 async def create_reminder(text: str, due_at: str) -> str:
-    """Create a Khalil reminder that will fire at the specified time.
+    """Create a PharoClaw reminder that will fire at the specified time.
 
     Args:
         text: Reminder text (e.g. "Review sprint planning")
@@ -222,8 +222,8 @@ async def get_morning_brief_data() -> str:
 
     # Weather
     try:
-        from scheduler.digests import _get_weather_toronto
-        weather = await _get_weather_toronto()
+        from scheduler.digests import _get_weather
+        weather = await _get_weather()
         if weather:
             sections.append(f"Weather: {weather}")
     except Exception:
@@ -383,7 +383,7 @@ async def audit_log(limit: int = 10) -> str:
 
 @mcp.tool()
 async def learned_preferences() -> str:
-    """Get current learned preferences — behavioral adaptations Khalil has made."""
+    """Get current learned preferences — behavioral adaptations PharoClaw has made."""
     from learning import list_preferences
 
     prefs = list_preferences()
@@ -508,7 +508,7 @@ async def cursor_diff_files(file1: str, file2: str) -> str:
 async def cursor_terminal_status() -> str:
     """List all terminals in Cursor's integrated terminal panel.
 
-    Requires the khalil-terminal-bridge extension to be installed in Cursor.
+    Requires the pharoclaw-terminal-bridge extension to be installed in Cursor.
     Returns terminal names, PIDs, active status, and workspace info.
     """
     from actions.terminal import get_cursor_terminal_status, format_cursor_terminal_status
@@ -520,7 +520,7 @@ async def cursor_terminal_status() -> str:
 async def cursor_terminal_send(command: str, target: str = "0") -> str:
     """Send a command to a terminal in Cursor's integrated terminal.
 
-    Requires the khalil-terminal-bridge extension.
+    Requires the pharoclaw-terminal-bridge extension.
 
     Args:
         command: The command to send (e.g., "npm test", "python server.py")
@@ -534,10 +534,10 @@ async def cursor_terminal_send(command: str, target: str = "0") -> str:
 
 
 @mcp.tool()
-async def cursor_terminal_create(name: str = "Khalil", command: str = None, cwd: str = None) -> str:
+async def cursor_terminal_create(name: str = "PharoClaw", command: str = None, cwd: str = None) -> str:
     """Create a new terminal in Cursor's integrated terminal panel.
 
-    Requires the khalil-terminal-bridge extension.
+    Requires the pharoclaw-terminal-bridge extension.
 
     Args:
         name: Display name for the terminal
@@ -558,7 +558,7 @@ async def cursor_terminal_create(name: str = "Khalil", command: str = None, cwd:
 async def cursor_terminal_output(target: str, lines: int = 50) -> str:
     """Read recent output from a Cursor terminal.
 
-    Requires the khalil-terminal-bridge extension with output capture enabled.
+    Requires the pharoclaw-terminal-bridge extension with output capture enabled.
 
     Args:
         target: Terminal name to read output from

@@ -106,10 +106,10 @@ class TestParseCursorStatus:
 
 class TestParseItermSessions:
     def test_parses_sessions(self):
-        raw = "ahmedm@P296|||zsh|||/dev/ttys003|||true\nahmedm@P296|||python|||/dev/ttys004|||false\n"
+        raw = "user@host|||zsh|||/dev/ttys003|||true\nuser@host|||python|||/dev/ttys004|||false\n"
         sessions = parse_iterm_sessions(raw)
         assert len(sessions) == 2
-        assert sessions[0]["window"] == "ahmedm@P296"
+        assert sessions[0]["window"] == "user@host"
         assert sessions[0]["tty"] == "/dev/ttys003"
         assert sessions[0]["is_current"] is True
         assert sessions[1]["is_current"] is False
@@ -444,14 +444,14 @@ class TestBridgeClient:
                 {"id": 0, "name": "zsh", "pid": 123, "isActive": True},
                 {"id": 1, "name": "node", "pid": 456, "isActive": False},
             ],
-            "workspace": {"folders": [{"name": "khalil", "path": "/Users/ahmedm/khalil"}], "activeFile": None},
+            "workspace": {"folders": [{"name": "pharoclaw", "path": "/tmp/pharoclaw"}], "activeFile": None},
             "count": 2,
         }
         result = format_cursor_terminal_status(status)
         assert "Cursor Terminals (2)" in result
         assert "zsh" in result
         assert "node" in result
-        assert "Workspace: khalil" in result
+        assert "Workspace: pharoclaw" in result
 
     def test_format_cursor_terminal_status_empty(self):
         from actions.terminal import format_cursor_terminal_status

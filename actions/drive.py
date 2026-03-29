@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 
 from config import TOKEN_FILE
 
-log = logging.getLogger("khalil.actions.drive")
+log = logging.getLogger("pharoclaw.actions.drive")
 
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 

@@ -27,7 +27,7 @@ from config import (
     TOKEN_FILE_YOUTUBE,
 )
 
-log = logging.getLogger("khalil.oauth")
+log = logging.getLogger("pharoclaw.oauth")
 
 # All managed token files with their purpose
 TOKEN_FILES = {

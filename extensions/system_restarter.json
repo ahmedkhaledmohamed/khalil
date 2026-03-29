@@ -1,9 +1,9 @@
 {
     "name": "system_restarter",
     "command": "restart",
-    "description": "Restart Khalil or the host machine",
+    "description": "Restart PharoClaw or the host machine",
     "action_module": "actions.system_restarter",
     "handler_function": "handle_restart",
     "generated_at": "2026-03-28T18:00:00",
-    "generated_for": "Can you restart Khalil"
+    "generated_for": "Can you restart PharoClaw"
 }

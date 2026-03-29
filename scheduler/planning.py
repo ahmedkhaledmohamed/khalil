@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, GOALS_DIR, TIMEZONE
 
-log = logging.getLogger("khalil.scheduler.planning")
+log = logging.getLogger("pharoclaw.scheduler.planning")
 
 # --- Quarter utilities ---
 

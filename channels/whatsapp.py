@@ -16,7 +16,7 @@ from channels import (
 )
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.channels.whatsapp")
+log = logging.getLogger("pharoclaw.channels.whatsapp")
 
 GRAPH_API_URL = "https://graph.facebook.com/v18.0"
 

@@ -14,7 +14,7 @@ from spotipy.oauth2 import SpotifyOAuth
 
 from config import KEYRING_SERVICE, TOKEN_FILE_SPOTIFY
 
-log = logging.getLogger("khalil.actions.spotify")
+log = logging.getLogger("pharoclaw.actions.spotify")
 
 SCOPES = "user-read-currently-playing user-read-recently-played user-top-read"
 

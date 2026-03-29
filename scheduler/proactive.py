@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, FINANCE_DIR, GOALS_DIR, TIMEZONE
 
-log = logging.getLogger("khalil.scheduler.proactive")
+log = logging.getLogger("pharoclaw.scheduler.proactive")
 
 # #89: Configurable alert thresholds — defaults can be overridden via settings table
 _DEFAULT_THRESHOLDS = {

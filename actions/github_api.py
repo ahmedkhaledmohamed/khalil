@@ -12,7 +12,7 @@ import keyring
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.github_api")
+log = logging.getLogger("pharoclaw.actions.github_api")
 
 SKILL = {
     "name": "github_api",
@@ -35,7 +35,7 @@ SKILL = {
         {"type": "github_prs", "handler": "handle_intent", "keywords": "github pull requests prs open review", "description": "List open pull requests"},
         {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue"},
     ],
-    "examples": ["GitHub notifications", "Check my PRs", "Create issue on khalil repo"],
+    "examples": ["GitHub notifications", "Check my PRs", "Create issue on pharoclaw repo"],
 }
 
 BASE_URL = "https://api.github.com"

@@ -1,7 +1,7 @@
-"""Shared fixtures for Khalil tests.
+"""Shared fixtures for PharoClaw tests.
 
 Provides:
-- tmp_db: Temporary SQLite with full Khalil schema
+- tmp_db: Temporary SQLite with full PharoClaw schema
 - mock_update / mock_context: Fake Telegram Update/Context objects
 - mock_ask_llm: Configurable mock LLM callable
 - autonomy_controller: AutonomyController with tmp_db
@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# Ensure khalil package is importable
+# Ensure pharoclaw package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 @pytest.fixture
 def tmp_db(tmp_path):
-    """Create a temporary SQLite database with full Khalil schema."""
+    """Create a temporary SQLite database with full PharoClaw schema."""
     db_path = tmp_path / "test.db"
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row

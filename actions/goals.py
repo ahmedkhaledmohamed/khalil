@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from config import GOALS_DIR, TIMEZONE
 
-log = logging.getLogger("khalil.actions.goals")
+log = logging.getLogger("pharoclaw.actions.goals")
 
 # Current year's goals file
 GOALS_FILE = GOALS_DIR / "2026.md"

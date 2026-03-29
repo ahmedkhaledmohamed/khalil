@@ -29,7 +29,7 @@ from channels import (
     SentMessage,
 )
 
-log = logging.getLogger("khalil.channels.telegram")
+log = logging.getLogger("pharoclaw.channels.telegram")
 
 _MD2_ESCAPE_CHARS = r"_*[]()~`>#+-=|{}.!"
 

@@ -1,6 +1,6 @@
 """Read-only access to the macOS iMessage database (~/Library/Messages/chat.db).
 
-Requires Full Disk Access for the terminal running Khalil.
+Requires Full Disk Access for the terminal running PharoClaw.
 All public functions are async — sync SQLite calls run in asyncio.to_thread().
 """
 
@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from config import TIMEZONE
 
-log = logging.getLogger("khalil.actions.imessage")
+log = logging.getLogger("pharoclaw.actions.imessage")
 
 CHAT_DB = Path.home() / "Library" / "Messages" / "chat.db"
 APPLE_EPOCH = datetime(2001, 1, 1)

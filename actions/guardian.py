@@ -8,7 +8,7 @@ import anthropic
 
 from config import ActionType, KEYRING_SERVICE
 
-log = logging.getLogger("khalil.guardian")
+log = logging.getLogger("pharoclaw.guardian")
 
 # Fast model for guardian reviews — configurable but defaults to haiku for speed/cost
 GUARDIAN_MODEL = "claude-haiku-4-5-20251001"

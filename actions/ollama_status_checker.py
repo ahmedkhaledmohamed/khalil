@@ -19,7 +19,7 @@ import keyring
 
 from config import DB_PATH, KEYRING_SERVICE, OLLAMA_URL, OLLAMA_LLM_MODEL, TIMEZONE
 
-log = logging.getLogger("khalil.actions.ollama_status_checker")
+log = logging.getLogger("pharoclaw.actions.ollama_status_checker")
 
 _tables_ensured = False
 

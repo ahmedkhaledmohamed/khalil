@@ -3,9 +3,9 @@
 import logging
 from pathlib import Path
 
-from config import PERSONAL_REPO_PATH, KHALIL_DIR, PROJECTS_DIR
+from config import PERSONAL_REPO_PATH, PHAROCLAW_DIR, PROJECTS_DIR
 
-log = logging.getLogger("khalil.actions.projects")
+log = logging.getLogger("pharoclaw.actions.projects")
 
 # Known projects and their file locations
 KNOWN_PROJECTS = {
@@ -21,9 +21,9 @@ KNOWN_PROJECTS = {
         "name": "Bézier — AI Design Generation",
         "file": PROJECTS_DIR / "bezier.md",
     },
-    "khalil": {
-        "name": "Khalil — Personal AI Assistant",
-        "file": KHALIL_DIR / "README.md",
+    "pharoclaw": {
+        "name": "PharoClaw — Personal AI Assistant",
+        "file": PHAROCLAW_DIR / "README.md",
     },
 }
 
@@ -34,7 +34,7 @@ ALIASES = {
     "play": "tiny-grounds",
     "bézier": "bezier",
     "design": "bezier",
-    "assistant": "khalil",
+    "assistant": "pharoclaw",
     "family": "zia",
     "meal": "zia",
 }

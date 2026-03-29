@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.linkedin")
+log = logging.getLogger("pharoclaw.actions.linkedin")
 
 KEYRING_KEY = "linkedin-session-cookie"
 VOYAGER_BASE = "https://www.linkedin.com/voyager/api"

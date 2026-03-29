@@ -12,7 +12,7 @@ import keyring
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.digitalocean")
+log = logging.getLogger("pharoclaw.actions.digitalocean")
 
 _BASE_URL = "https://api.digitalocean.com/v2"
 _TOKEN_KEY = "digitalocean-api-token"

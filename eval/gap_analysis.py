@@ -1,4 +1,4 @@
-"""Failure categorization engine for Khalil's eval pipeline.
+"""Failure categorization engine for PharoClaw's eval pipeline.
 
 Classifies eval failures into actionable gap categories and produces
 a structured report for prioritization and self-healing.

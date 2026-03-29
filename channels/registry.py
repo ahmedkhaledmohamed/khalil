@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from channels import Channel
 
-log = logging.getLogger("khalil.channels.registry")
+log = logging.getLogger("pharoclaw.channels.registry")
 
 _channels: dict[str, "Channel"] = {}
 

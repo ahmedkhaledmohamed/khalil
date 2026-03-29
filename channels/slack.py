@@ -18,7 +18,7 @@ from channels import (
 )
 from channels.message_context import MessageContext
 
-log = logging.getLogger("khalil.channels.slack")
+log = logging.getLogger("pharoclaw.channels.slack")
 
 
 def _buttons_to_blocks(text: str, buttons: list[list[ActionButton]] | None) -> list[dict]:

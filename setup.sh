@@ -1,5 +1,5 @@
 #!/bin/bash
-# Khalil — Setup Script
+# PharoClaw — Setup Script
 # Run once to set up the environment.
 
 set -e
@@ -7,7 +7,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "=== Khalil Setup ==="
+echo "=== PharoClaw Setup ==="
 
 # 1. Python venv
 echo ""
@@ -57,10 +57,10 @@ echo ""
 echo "   Set your secrets (run these in Terminal):"
 echo ""
 echo "   # Telegram bot token (get from @BotFather)"
-echo "   python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')\""
+echo "   python3 -c \"import keyring; keyring.set_password('pharoclaw', 'telegram-bot-token', 'YOUR_TOKEN')\""
 echo ""
 echo "   # Anthropic API key"
-echo "   python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')\""
+echo "   python3 -c \"import keyring; keyring.set_password('pharoclaw', 'anthropic-api-key', 'YOUR_KEY')\""
 echo ""
 echo "   Or set environment variables: TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY"
 
@@ -72,15 +72,20 @@ echo "   python3 -m knowledge.indexer"
 
 # 7. Run server
 echo ""
-echo "7. To start Khalil:"
+echo "7. To start PharoClaw:"
 echo "   source .venv/bin/activate"
 echo "   python3 server.py"
 
-# 8. launchd (always-on)
+# 8. launchd (always-on) — generate plist from template with real paths
+PHAROCLAW_DIR="$(cd "$(dirname "$0")" && pwd)"
+PERSONAL_REPO="$(dirname "$(dirname "$PHAROCLAW_DIR")")"
+sed -e "s|__PHAROCLAW_DIR__|${PHAROCLAW_DIR}|g" \
+    -e "s|__PERSONAL_REPO__|${PERSONAL_REPO}|g" \
+    com.pharoclaw.daemon.plist > /tmp/com.pharoclaw.daemon.plist
 echo ""
 echo "8. To install as always-on daemon:"
-echo "   cp com.khalil.daemon.plist ~/Library/LaunchAgents/"
-echo "   launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist"
+echo "   cp /tmp/com.pharoclaw.daemon.plist ~/Library/LaunchAgents/"
+echo "   launchctl load ~/Library/LaunchAgents/com.pharoclaw.daemon.plist"
 
 echo ""
 echo "=== Setup complete ==="

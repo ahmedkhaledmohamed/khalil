@@ -15,9 +15,9 @@ from pathlib import Path
 
 from eval.gap_analysis import Gap, GapReport, GapCategory
 
-log = logging.getLogger("khalil.eval.autofix")
+log = logging.getLogger("pharoclaw.eval.autofix")
 
-KHALIL_DIR = Path(__file__).resolve().parent.parent
+PHAROCLAW_DIR = Path(__file__).resolve().parent.parent
 
 
 @dataclass
@@ -56,10 +56,10 @@ async def generate_pattern_fix(skill: str, failing_queries: list[str]) -> FixAtt
     )
 
     # Find the skill's action module
-    skill_file = KHALIL_DIR / "actions" / f"{skill}.py"
+    skill_file = PHAROCLAW_DIR / "actions" / f"{skill}.py"
     if not skill_file.exists():
         # Try finding by searching actions/
-        candidates = list((KHALIL_DIR / "actions").glob("*.py"))
+        candidates = list((PHAROCLAW_DIR / "actions").glob("*.py"))
         for c in candidates:
             content = c.read_text()
             if f'"name": "{skill}"' in content or f"'name': '{skill}'" in content:
@@ -80,7 +80,7 @@ async def generate_pattern_fix(skill: str, failing_queries: list[str]) -> FixAtt
         query_list = "\n".join(f'  - "{q}"' for q in failing_queries[:20])
         diagnosis = {
             "failure_type": "intent_pattern_miss",
-            "file": str(skill_file.relative_to(KHALIL_DIR)),
+            "file": str(skill_file.relative_to(PHAROCLAW_DIR)),
             "function": "SKILL",
             "source": source,
             "signal_context": {

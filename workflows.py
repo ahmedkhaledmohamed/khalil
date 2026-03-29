@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from config import DB_PATH, WORKFLOW_ENGINE_ENABLED, WORKFLOW_MAX_RUNS_PER_HOUR
 
-log = logging.getLogger("khalil.workflows")
+log = logging.getLogger("pharoclaw.workflows")
 
 # Re-entrancy guard: workflow IDs currently executing
 _executing: set[str] = set()

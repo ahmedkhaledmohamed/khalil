@@ -1,4 +1,4 @@
-# Khalil — Self-Healing Personal AI Assistant
+# PharoClaw — Self-Healing Personal AI Assistant
 
 A personal AI assistant that runs as a Telegram bot on macOS. Indexes your emails, Drive files, and documents into a local knowledge base, then answers questions, takes actions, and learns from interactions. When it fails, it fixes itself. When it can't do something, it builds the capability.
 
@@ -12,8 +12,8 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Configure secrets
-python3 -c "import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')"
-python3 -c "import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')"
+python3 -c "import keyring; keyring.set_password('pharoclaw', 'telegram-bot-token', 'YOUR_TOKEN')"
+python3 -c "import keyring; keyring.set_password('pharoclaw', 'anthropic-api-key', 'YOUR_KEY')"
 
 # 3. Start Ollama (for embeddings + local LLM)
 ollama serve &
@@ -26,8 +26,8 @@ python3 server.py
 
 Or run as a macOS daemon:
 ```bash
-cp com.khalil.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist
+cp com.pharoclaw.daemon.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.pharoclaw.daemon.plist
 ```
 
 Or use the CLI (no Telegram required):
@@ -358,14 +358,14 @@ python3 eval/autofix.py          # auto-fix cycle
 
 ```bash
 # Required
-keyring.set_password('khalil-assistant', 'telegram-bot-token', '...')
+keyring.set_password('pharoclaw', 'telegram-bot-token', '...')
 
 # Optional
-keyring.set_password('khalil-assistant', 'anthropic-api-key', '...')
-keyring.set_password('khalil-assistant', 'readwise-api-key', '...')
-keyring.set_password('khalil-assistant', 'notion-api-key', '...')
-keyring.set_password('khalil-assistant', 'github-token', '...')
-keyring.set_password('khalil-assistant', 'digitalocean-api-key', '...')
+keyring.set_password('pharoclaw', 'anthropic-api-key', '...')
+keyring.set_password('pharoclaw', 'readwise-api-key', '...')
+keyring.set_password('pharoclaw', 'notion-api-key', '...')
+keyring.set_password('pharoclaw', 'github-token', '...')
+keyring.set_password('pharoclaw', 'digitalocean-api-key', '...')
 ```
 
 Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
@@ -374,7 +374,7 @@ Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KHALIL_PERSONAL_REPO` | `~/Developer/Personal` | Path to personal document repo |
+| `PHAROCLAW_PERSONAL_REPO` | `~/Developer/Personal` | Path to personal document repo |
 | `TELEGRAM_BOT_TOKEN` | — | Fallback for keyring |
 | `ANTHROPIC_API_KEY` | — | Fallback for keyring |
 
@@ -417,7 +417,7 @@ Token files managed centrally via `oauth_utils.py` with atomic writes and corrup
 ## Directory Structure
 
 ```
-khalil/
+pharoclaw/
 ├── server.py                 # FastAPI + Telegram bot (main entry point)
 ├── cli.py                    # Terminal REPL (no Telegram required)
 ├── config.py                 # Centralized configuration
@@ -508,7 +508,7 @@ khalil/
 │   └── *.json                # Extension manifests
 │
 └── data/                     # Runtime (gitignored)
-    ├── khalil.db             # SQLite database
+    ├── pharoclaw.db             # SQLite database
     └── *.log                 # Logs
 ```
 

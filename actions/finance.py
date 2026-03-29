@@ -9,7 +9,7 @@ from pathlib import Path
 
 from config import FINANCE_DIR
 
-log = logging.getLogger("khalil.actions.finance")
+log = logging.getLogger("pharoclaw.actions.finance")
 
 
 def _read_file(path: Path, max_chars: int = 5000) -> str:

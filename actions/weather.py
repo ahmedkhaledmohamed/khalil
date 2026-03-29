@@ -1,7 +1,7 @@
 """Weather integration — current conditions, forecast, and summary via Open-Meteo.
 
 Uses Open-Meteo free API (no API key required).
-Coordinates default to Toronto, configurable via config.WEATHER_LAT / WEATHER_LON.
+Configure coordinates via PHAROCLAW_WEATHER_LAT / PHAROCLAW_WEATHER_LON env vars.
 """
 
 import logging
@@ -10,7 +10,7 @@ import httpx
 
 from config import TIMEZONE, WEATHER_LAT, WEATHER_LON
 
-log = logging.getLogger("khalil.actions.weather")
+log = logging.getLogger("pharoclaw.actions.weather")
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 
@@ -24,10 +24,10 @@ SKILL = {
         (r"\bforecast\b", "weather_forecast"),
     ],
     "actions": [
-        {"type": "weather", "handler": "handle_intent", "keywords": "weather temperature outside today toronto", "description": "Current weather"},
+        {"type": "weather", "handler": "handle_intent", "keywords": "weather temperature outside today current", "description": "Current weather"},
         {"type": "weather_forecast", "handler": "handle_intent", "keywords": "weather forecast days week ahead", "description": "Multi-day forecast"},
     ],
-    "examples": ["What's the weather in Toronto?", "5-day forecast"],
+    "examples": ["What's the weather?", "5-day forecast"],
 }
 
 
@@ -117,12 +117,14 @@ async def get_forecast(days: int = 3) -> list[dict]:
 
 
 async def get_weather_summary() -> str:
-    """One-liner for morning brief — e.g. 'Toronto: 5°C (feels 2°C), partly cloudy. High 8°C today.'"""
+    """One-liner for morning brief — e.g. '5°C (feels 2°C), partly cloudy. High 8°C today.'"""
+    if WEATHER_LAT is None or WEATHER_LON is None:
+        return ""
     try:
         current, forecast = await _fetch_summary_data()
         today_high = forecast[0]["high"] if forecast else "?"
         return (
-            f"Toronto: {current['temp']}°C (feels {current['feels_like']}°C), "
+            f"Weather: {current['temp']}°C (feels {current['feels_like']}°C), "
             f"{current['condition'].lower()}. High {today_high}°C today."
         )
     except Exception as e:

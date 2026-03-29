@@ -2,7 +2,7 @@
 
 Uses Notion API v1 via httpx (no notion-client dependency).
 Auth: integration token stored in system keyring.
-Setup: keyring.set_password('khalil-assistant', 'notion-api-token', 'ntn_...')
+Setup: keyring.set_password('pharoclaw', 'notion-api-token', 'ntn_...')
 
 All public functions are async.
 """
@@ -14,7 +14,7 @@ import keyring
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.notion")
+log = logging.getLogger("pharoclaw.actions.notion")
 
 _BASE_URL = "https://api.notion.com/v1"
 _TOKEN_KEY = "notion-api-token"

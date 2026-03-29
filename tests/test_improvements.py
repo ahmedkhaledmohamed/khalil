@@ -1,4 +1,4 @@
-"""Tests for Khalil improvements."""
+"""Tests for PharoClaw improvements."""
 
 import asyncio
 import json
@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 class TestSQLiteWAL:
     def test_init_db_sets_wal_mode(self, tmp_path, monkeypatch):
         """init_db should enable WAL journal mode."""
-        db_path = tmp_path / "data" / "khalil.db"
+        db_path = tmp_path / "data" / "pharoclaw.db"
         monkeypatch.setattr("config.DB_PATH", db_path)
         monkeypatch.setattr("config.DATA_DIR", tmp_path / "data")
         from knowledge.indexer import init_db
@@ -27,7 +27,7 @@ class TestSQLiteWAL:
         conn.close()
 
     def test_init_db_sets_row_factory(self, tmp_path, monkeypatch):
-        db_path = tmp_path / "data" / "khalil.db"
+        db_path = tmp_path / "data" / "pharoclaw.db"
         monkeypatch.setattr("config.DB_PATH", db_path)
         monkeypatch.setattr("config.DATA_DIR", tmp_path / "data")
         from knowledge.indexer import init_db
@@ -141,7 +141,7 @@ class TestContextAwareAutonomy:
 
 class TestHarnessFixtures:
     def test_tmp_db_has_all_tables(self, tmp_db):
-        """tmp_db should have all Khalil tables."""
+        """tmp_db should have all PharoClaw tables."""
         tables = [row[0] for row in tmp_db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         ).fetchall()]
@@ -2071,7 +2071,7 @@ class TestWeekendNudge:
         import sqlite3
 
         # Set up a temporary DB with an old reminder
-        db_path = tmp_path / "khalil.db"
+        db_path = tmp_path / "pharoclaw.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY, text TEXT, due_at TEXT, status TEXT)")
         conn.execute(
@@ -2101,7 +2101,7 @@ class TestWeekendNudge:
         import sqlite3
 
         # Set up a DB with no stale items
-        db_path = tmp_path / "khalil.db"
+        db_path = tmp_path / "pharoclaw.db"
         conn = sqlite3.connect(str(db_path))
         conn.execute("CREATE TABLE IF NOT EXISTS reminders (id INTEGER PRIMARY KEY, text TEXT, due_at TEXT, status TEXT)")
         conn.commit()
@@ -2285,7 +2285,7 @@ class TestMCPServerExpansion:
 
 class TestCLI:
     def test_cli_exists(self):
-        """cli.py should exist at the khalil root."""
+        """cli.py should exist at the pharoclaw root."""
         cli_path = os.path.join(os.path.dirname(__file__), "..", "cli.py")
         assert os.path.exists(cli_path)
 
@@ -2508,10 +2508,10 @@ class TestHealingPipeline:
     def test_failure_code_map_references_valid_files(self):
         """All files in FAILURE_CODE_MAP should exist on disk."""
         from healing import FAILURE_CODE_MAP
-        from config import KHALIL_DIR
+        from config import PHAROCLAW_DIR
         for fingerprint, targets in FAILURE_CODE_MAP.items():
             for rel_path, func_name in targets:
-                file_path = KHALIL_DIR / rel_path
+                file_path = PHAROCLAW_DIR / rel_path
                 assert file_path.exists(), f"FAILURE_CODE_MAP[{fingerprint}] references missing file: {rel_path}"
 
     def test_critical_error_patterns_detection(self):
@@ -4250,44 +4250,44 @@ class TestLoginItemManagement:
 
 # --- #24: Dependency Injection for Extensions ---
 
-class TestKhalilContext:
-    def test_khalil_context_attributes(self):
-        """KhalilContext exposes db, ask_llm, and notify."""
-        from actions.extend import KhalilContext
+class TestPharoClawContext:
+    def test_pharoclaw_context_attributes(self):
+        """PharoClawContext exposes db, ask_llm, and notify."""
+        from actions.extend import PharoClawContext
         from unittest.mock import MagicMock, AsyncMock
         db = MagicMock()
         ask_llm = AsyncMock()
         notify = AsyncMock()
-        ctx = KhalilContext(db=db, ask_llm=ask_llm, notify=notify)
+        ctx = PharoClawContext(db=db, ask_llm=ask_llm, notify=notify)
         assert ctx.db is db
         assert ctx.ask_llm is ask_llm
         assert ctx.notify is notify
 
-    def test_khalil_context_search_method(self):
-        """KhalilContext.search delegates to keyword_search."""
-        from actions.extend import KhalilContext
+    def test_pharoclaw_context_search_method(self):
+        """PharoClawContext.search delegates to keyword_search."""
+        from actions.extend import PharoClawContext
         from unittest.mock import MagicMock, AsyncMock, patch
-        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        ctx = PharoClawContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
         with patch("knowledge.search.keyword_search", return_value=[{"title": "test"}]) as mock_search:
             results = ctx.search("test query", limit=3)
             mock_search.assert_called_once_with("test query", limit=3)
             assert results == [{"title": "test"}]
 
-    def test_khalil_context_record_signal(self):
-        """KhalilContext.record_signal delegates to learning.record_signal."""
-        from actions.extend import KhalilContext
+    def test_pharoclaw_context_record_signal(self):
+        """PharoClawContext.record_signal delegates to learning.record_signal."""
+        from actions.extend import PharoClawContext
         from unittest.mock import MagicMock, AsyncMock, patch
-        ctx = KhalilContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
+        ctx = PharoClawContext(db=MagicMock(), ask_llm=AsyncMock(), notify=AsyncMock())
         with patch("learning.record_signal") as mock_signal:
             ctx.record_signal("test_type", {"key": "value"})
             mock_signal.assert_called_once_with("test_type", {"key": "value"})
 
-    def test_khalil_context_mentioned_in_prompt(self):
-        """Code generation prompt references KhalilContext."""
+    def test_pharoclaw_context_mentioned_in_prompt(self):
+        """Code generation prompt references PharoClawContext."""
         from actions.extend import generate_action_module
         import inspect
         source = inspect.getsource(generate_action_module)
-        assert "KhalilContext" in source
+        assert "PharoClawContext" in source
 
 
 # --- #25: Extension Hot-Reload ---
@@ -4376,7 +4376,7 @@ class TestMultiFileExtension:
         from actions.extend import MULTI_FILE_TEMPLATE
         rendered = MULTI_FILE_TEMPLATE["scheduler_job"].format(name="price_monitor")
         assert "run_price_monitor_job" in rendered
-        assert "khalil.scheduler.price_monitor" in rendered
+        assert "pharoclaw.scheduler.price_monitor" in rendered
 
     def test_db_migration_template_renders(self):
         """DB migration template renders with name placeholder."""
@@ -4670,7 +4670,7 @@ class TestScreenshotOCR:
         assert intent is not None
         assert intent["action"] == "shell"
         assert "screencapture -x" in intent["command"]
-        assert "/tmp/khalil_screenshot.png" in intent["command"]
+        assert "/tmp/pharoclaw_screenshot.png" in intent["command"]
 
     def test_window_screenshot_direct_intent(self):
         from server import _try_direct_shell_intent
@@ -4680,7 +4680,7 @@ class TestScreenshotOCR:
 
     def test_ocr_stub_no_file(self):
         from server import _ocr_screenshot
-        result = _ocr_screenshot("/tmp/nonexistent_khalil_test.png")
+        result = _ocr_screenshot("/tmp/nonexistent_pharoclaw_test.png")
         assert "No screenshot found" in result
 
     def test_ocr_stub_with_file(self, tmp_path):

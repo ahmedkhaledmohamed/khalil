@@ -6,7 +6,7 @@ Uses the Gmail API with OAuth credentials:
 
 Setup for modify token:
     1. Ensure scripts/credentials.json exists (same OAuth client)
-    2. Run Khalil and use /label run — it will trigger the OAuth flow
+    2. Run PharoClaw and use /label run — it will trigger the OAuth flow
        for gmail.modify scope and save to scripts/token_label.json
     3. Grant the gmail.modify permission when prompted in browser
 """
@@ -29,7 +29,7 @@ from config import (
     TOKEN_FILE,
 )
 
-log = logging.getLogger("khalil.actions.email_categorizer")
+log = logging.getLogger("pharoclaw.actions.email_categorizer")
 
 _tables_ensured = False
 

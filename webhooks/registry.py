@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from webhooks import WebhookHandler
 
-log = logging.getLogger("khalil.webhooks")
+log = logging.getLogger("pharoclaw.webhooks")
 
 _handlers: dict[str, WebhookHandler] = {}
 

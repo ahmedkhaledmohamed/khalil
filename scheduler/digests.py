@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from config import TIMEZONE
 
-log = logging.getLogger("khalil.scheduler")
+log = logging.getLogger("pharoclaw.scheduler")
 
 # Day-of-week brief style
 DAY_STYLE = {
@@ -21,8 +21,8 @@ DAY_STYLE = {
 }
 
 
-async def _get_weather_toronto() -> str:
-    """Fetch current Toronto weather via actions.weather module."""
+async def _get_weather() -> str:
+    """Fetch current weather via actions.weather module."""
     from actions.weather import get_weather_summary
     return await get_weather_summary()
 
@@ -144,7 +144,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     (recent_raw, weather, calendar_text, job_text, github_text,
      appstore_text, server_text, spotify_text, readwise_text) = await asyncio.gather(
         _fetch_recent(),
-        _get_weather_toronto(),
+        _get_weather(),
         _fetch_calendar(),
         _fetch_jobs(),
         _fetch_github_notifications(),
@@ -339,7 +339,7 @@ async def generate_weekly_summary(ask_claude_fn) -> str:
         recent_insights = get_insights(limit=5)
         this_week = [i for i in recent_insights if i["created_at"] and i["created_at"] > cutoff]
         if this_week:
-            learned_text = "\n\nKhalil's insights this week:\n" + "\n".join(
+            learned_text = "\n\nPharoClaw's insights this week:\n" + "\n".join(
                 f"- [{i['category']}] {i['summary']} (status: {i['status']})" for i in this_week
             )
     except Exception:
@@ -352,7 +352,7 @@ async def generate_weekly_summary(ask_claude_fn) -> str:
         "- Key themes from the past week\n"
         "- Any stale reminders that need attention\n"
         "- Projects with open tasks that may need attention\n"
-        "- If there are Khalil insights, include a brief 'What I Learned' section\n"
+        "- If there are PharoClaw insights, include a brief 'What I Learned' section\n"
         "- Suggested focus areas for next week\n"
         "Keep it under 15 lines.",
         context,

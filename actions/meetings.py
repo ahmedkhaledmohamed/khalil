@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.meetings")
+log = logging.getLogger("pharoclaw.actions.meetings")
 
 # Title patterns that indicate recurring standups to skip
 _STANDUP_PATTERNS = re.compile(

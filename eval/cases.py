@@ -1,4 +1,4 @@
-"""Test case generator for Khalil's eval pipeline.
+"""Test case generator for PharoClaw's eval pipeline.
 
 Generates ~1000 test cases from SKILL metadata (patterns, keywords),
 hardcoded edge cases, conversational queries, and paraphrases.

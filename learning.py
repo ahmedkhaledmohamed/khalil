@@ -1,6 +1,6 @@
 """Self-improvement engine — reflection, insights, and learned preferences.
 
-Khalil analyzes its own interaction data to identify patterns and adapt behavior.
+PharoClaw analyzes its own interaction data to identify patterns and adapt behavior.
 All changes are transparent (visible via /learn) and safe (hard guardrails immutable).
 """
 
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from config import DB_PATH, GOALS_DIR, HARD_GUARDRAILS
 
-log = logging.getLogger("khalil.learning")
+log = logging.getLogger("pharoclaw.learning")
 
 # --- Preference Access ---
 
@@ -441,7 +441,7 @@ def _build_reflection_prompt(data: dict, current_prefs: list[dict]) -> str:
     if not pref_text:
         pref_text = "None set yet."
 
-    prompt = f"""Analyze Khalil's interaction data for the past week to identify patterns and suggest improvements.
+    prompt = f"""Analyze PharoClaw's interaction data for the past week to identify patterns and suggest improvements.
 
 ## Action Decisions
 - Approvals: {approve_count}
@@ -704,7 +704,7 @@ async def run_daily_micro_reflection(ask_llm_fn) -> list[dict]:
             correction_queries.append(ctx.get("query", "unknown"))
         insight_id = store_insight(
             "response_quality",
-            f"User corrected Khalil {len(corrections)} times today",
+            f"User corrected PharoClaw {len(corrections)} times today",
             f"Corrections: {', '.join(correction_queries[:5])}",
             "Review conversation history around these corrections to identify systematic issues",
         )
@@ -937,7 +937,7 @@ async def run_monthly_meta_reflection(ask_llm_fn) -> list[dict]:
         for i in insights
     ]
 
-    prompt = f"""Analyze the last 30 days of Khalil's self-improvement insights for meta-patterns.
+    prompt = f"""Analyze the last 30 days of PharoClaw's self-improvement insights for meta-patterns.
 
 ## Insights Generated ({len(insights)} total)
 {json.dumps(insight_data, indent=2)}

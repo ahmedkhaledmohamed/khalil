@@ -1,6 +1,6 @@
 """Self-extension engine — detect capability gaps, generate code, open PRs.
 
-When Khalil can't handle a request, this module:
+When PharoClaw can't handle a request, this module:
 1. Detects the capability gap (phrase match + LLM classification)
 2. Generates a new action module via Claude Opus
 3. Validates the generated code (AST + blocklist)
@@ -23,19 +23,19 @@ from datetime import datetime
 from pathlib import Path
 
 from config import (
-    KHALIL_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
+    PHAROCLAW_DIR, EXTENSIONS_DIR, CLAUDE_MODEL_COMPLEX,
     KEYRING_SERVICE, CLAUDE_CODE_BIN, DB_PATH, DATA_DIR,
 )
 
-log = logging.getLogger("khalil.extend")
+log = logging.getLogger("pharoclaw.extend")
 
 
 # --- #24: Dependency Injection for Extensions ---
 
-class KhalilContext:
+class PharoClawContext:
     """Clean interface for extensions instead of requiring internal imports.
 
-    Extensions receive this object and use it to interact with Khalil's
+    Extensions receive this object and use it to interact with PharoClaw's
     core systems (DB, LLM, notifications, search, signals).
     """
 
@@ -107,7 +107,7 @@ EXISTING_CAPABILITIES = [
     "finance — financial dashboard, deadlines, portfolio, RSU",
     "work — sprint dashboard, P0 epics, themes, owners",
     "goals — quarterly goal tracking",
-    "project — project status tracking (zia, tiny-grounds, bezier, khalil)",
+    "project — project status tracking (zia, tiny-grounds, bezier, pharoclaw)",
     "jobs — job scraper matches",
     "nudge — proactive checks for overdue items",
     "learn — self-improvement insights and preferences",
@@ -149,12 +149,12 @@ async def classify_gap(query: str, ask_llm_fn) -> dict | None:
 
     response = await ask_llm_fn(
         f"The user asked: \"{query}\"\n\n"
-        "Khalil's current capabilities:\n"
+        "PharoClaw's current capabilities:\n"
         f"{capabilities_text}\n\n"
         "Classify this request:\n"
-        "1. CAPABILITY_GAP — the user wants Khalil to DO something (track, monitor, log, schedule, etc.) "
+        "1. CAPABILITY_GAP — the user wants PharoClaw to DO something (track, monitor, log, schedule, etc.) "
         "that none of the existing capabilities cover.\n"
-        "2. KNOWLEDGE_GAP — the user wants INFORMATION that Khalil should have but doesn't.\n"
+        "2. KNOWLEDGE_GAP — the user wants INFORMATION that PharoClaw should have but doesn't.\n"
         "3. CONVERSATION — normal chat, opinion, advice, or something the existing capabilities already handle.\n\n"
         "If CAPABILITY_GAP, respond with ONLY a JSON object:\n"
         '{"type": "capability_gap", "name": "snake_case_name", "command": "short_command", "description": "one-line description"}\n\n'
@@ -316,7 +316,7 @@ import logging
 import sqlite3
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.{name}")
+log = logging.getLogger("pharoclaw.actions.{name}")
 
 _tables_created = False
 
@@ -380,7 +380,7 @@ import httpx
 import keyring
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.{name}")
+log = logging.getLogger("pharoclaw.actions.{name}")
 
 async def _fetch_data(endpoint: str, params: dict | None = None) -> dict:
     api_key = keyring.get_password(KEYRING_SERVICE, "{name}-api-key")
@@ -409,7 +409,7 @@ import sqlite3
 from datetime import datetime
 from config import DB_PATH
 
-log = logging.getLogger("khalil.actions.{name}")
+log = logging.getLogger("pharoclaw.actions.{name}")
 
 _tables_created = False
 
@@ -578,7 +578,7 @@ import sqlite3
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.MODULE_NAME")
+log = logging.getLogger("pharoclaw.actions.MODULE_NAME")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -632,7 +632,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         raise RuntimeError("Claude API key required for code generation. Ollama is not reliable enough.")
 
     # Read reminders.py as a pattern reference (it's a clean, self-contained action)
-    template_path = KHALIL_DIR / "actions" / "reminders.py"
+    template_path = PHAROCLAW_DIR / "actions" / "reminders.py"
     template_source = template_path.read_text() if template_path.exists() else ACTION_TEMPLATE
 
     # Inject past PR feedback so generation learns from rejections
@@ -645,7 +645,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         )
 
     prompt = (
-        f"Generate a complete Python module for a Khalil action called '{spec['name']}'.\n\n"
+        f"Generate a complete Python module for a PharoClaw action called '{spec['name']}'.\n\n"
         f"**Capability**: {spec['description']}\n"
         f"**Command**: /{spec['command']}\n\n"
         f"{feedback_section}"
@@ -655,12 +655,12 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         "3. Include an `ensure_tables(conn)` function that creates any needed tables\n"
         f"4. Include an async `cmd_{spec['command']}(update, context)` function as the Telegram handler\n"
         "5. Handle subcommands via `context.args` (e.g., /command add ..., /command list)\n"
-        "6. Use `logging.getLogger(f'khalil.actions.{name}')` for logging\n"
-        "7. Import only from stdlib, `config`, and existing khalil modules\n"
+        "6. Use `logging.getLogger(f'pharoclaw.actions.{name}')` for logging\n"
+        "7. Import only from stdlib, `config`, and existing pharoclaw modules\n"
         "8. Include helpful reply_text messages\n"
         "9. Handle errors gracefully\n"
         "10. Keep it under 200 lines\n"
-        "11. Extensions can optionally accept a KhalilContext object (from actions.extend) "
+        "11. Extensions can optionally accept a PharoClawContext object (from actions.extend) "
         "which provides: db (sqlite3 conn), ask_llm (async callable), notify (async callable), "
         "search(query, limit), and record_signal(type, context). Use it instead of raw internal imports when possible.\n\n"
         "**QUALITY RULES**:\n"
@@ -680,7 +680,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
     response = await client.messages.create(
         model=CLAUDE_MODEL_COMPLEX,
         max_tokens=4000,
-        system="You are a code generator for Khalil, a personal AI assistant. "
+        system="You are a code generator for PharoClaw, a personal AI assistant. "
                "Generate clean, production-quality Python modules that follow existing patterns exactly. "
                "Output ONLY Python code, no markdown, no explanation.",
         messages=[{"role": "user", "content": prompt}],
@@ -723,7 +723,7 @@ def _build_claude_code_prompt(spec: dict) -> str:
     name = spec["name"]
     command = spec.get("command", name)
     return (
-        "You are adding a new capability to Khalil, a personal AI assistant "
+        "You are adding a new capability to PharoClaw, a personal AI assistant "
         "(Telegram bot + FastAPI + SQLite).\n\n"
         f"TASK: Create the \"{name}\" capability.\n"
         f"Command: /{command}\n"
@@ -746,7 +746,7 @@ def _build_claude_code_prompt(spec: dict) -> str:
         "import logging\n"
         "import sqlite3\n"
         "from config import DB_PATH, KEYRING_SERVICE, TIMEZONE\n"
-        f'log = logging.getLogger("khalil.actions.{name}")\n'
+        f'log = logging.getLogger("pharoclaw.actions.{name}")\n'
         "\n"
         "def ensure_tables(conn: sqlite3.Connection):\n"
         '    """Create tables. Called once at startup."""\n'
@@ -802,7 +802,7 @@ async def generate_with_claude_code(spec: dict) -> tuple[str, str, str]:
     """
     from actions.claude_code import create_worktree, run_claude_code, cleanup_worktree
 
-    branch = f"khalil-extend/{spec['name']}"
+    branch = f"pharoclaw-extend/{spec['name']}"
     wt_path = create_worktree(branch)
 
     prompt = _build_claude_code_prompt(spec)
@@ -905,8 +905,8 @@ async def _commit_and_pr_from_worktree(
     def _workflow():
         _git_in_wt("add", "-A")
         result = _git_in_wt("commit", "-m",
-            f"Add {name} capability (auto-generated by Khalil via Claude Code)\n\n"
-            f"Co-Authored-By: Khalil Bot <khalil@local>"
+            f"Add {name} capability (auto-generated by PharoClaw via Claude Code)\n\n"
+            f"Co-Authored-By: PharoClaw Bot <pharoclaw@local>"
         )
         if result.returncode != 0:
             raise RuntimeError(f"Commit failed: {result.stderr}")
@@ -934,12 +934,12 @@ async def _commit_and_pr_from_worktree(
             body += "\n## Quality warnings\n"
             for w in warnings:
                 body += f"- ⚠️ {w}\n"
-        body += "\nGenerated by Khalil's self-extension engine using Claude Code CLI."
+        body += "\nGenerated by PharoClaw's self-extension engine using Claude Code CLI."
 
         # Open PR
         result = subprocess.run(
             ["gh", "pr", "create",
-             "--title", f"{pr_title_prefix}Khalil: Add {name} capability (Claude Code)",
+             "--title", f"{pr_title_prefix}PharoClaw: Add {name} capability (Claude Code)",
              "--body", body,
              ],
             cwd=str(wt_path),
@@ -1150,11 +1150,11 @@ async def generate_extension_tests(spec: dict, module_source: str) -> str | None
         return None
 
     # Read conftest for available fixtures
-    conftest_path = KHALIL_DIR / "tests" / "conftest.py"
+    conftest_path = PHAROCLAW_DIR / "tests" / "conftest.py"
     conftest_source = conftest_path.read_text() if conftest_path.exists() else ""
 
     prompt = (
-        f"Generate pytest tests for this Khalil action module:\n\n"
+        f"Generate pytest tests for this PharoClaw action module:\n\n"
         f"**Module**: actions/{spec['name']}.py\n"
         f"**Command**: /{spec['command']}\n"
         f"**Description**: {spec['description']}\n\n"
@@ -1245,7 +1245,7 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
     )
     try:
         if use_sandbox:
-            container_script = test_script.replace(str(KHALIL_DIR), "/khalil")
+            container_script = test_script.replace(str(PHAROCLAW_DIR), "/pharoclaw")
             exit_code, stdout, stderr = run_in_sandbox(container_script, timeout=10)
             result = SandboxResult(exit_code, stdout, stderr)
         else:
@@ -1262,10 +1262,10 @@ def smoke_test_module(module_path: Path, command_name: str) -> tuple[bool, str]:
         return False, f"Smoke test error: {e}"
 
     # Phase 2: Call handler with mock Update/Context (catch crashes, not logic errors)
-    khalil_dir = str(module_path.parent.parent)
+    pharoclaw_dir = str(module_path.parent.parent)
     mock_test_script = f"""
 import sys, asyncio
-sys.path.insert(0, {khalil_dir!r})
+sys.path.insert(0, {pharoclaw_dir!r})
 sys.path.insert(0, {str(module_path.parent)!r})
 from unittest.mock import AsyncMock, MagicMock
 mod = __import__({module_path.stem!r})
@@ -1288,7 +1288,7 @@ except Exception as e:
 """
     try:
         if use_sandbox:
-            container_mock_script = mock_test_script.replace(str(KHALIL_DIR), "/khalil")
+            container_mock_script = mock_test_script.replace(str(PHAROCLAW_DIR), "/pharoclaw")
             exit_code, stdout, stderr = run_in_sandbox(container_mock_script, timeout=15)
             result = SandboxResult(exit_code, stdout, stderr)
         else:
@@ -1334,7 +1334,7 @@ def _run_git(*args, cwd=None, timeout=30) -> subprocess.CompletedProcess:
     cmd = ["git"] + list(args)
     result = subprocess.run(
         cmd, capture_output=True, text=True,
-        cwd=cwd or str(KHALIL_DIR), timeout=timeout,
+        cwd=cwd or str(PHAROCLAW_DIR), timeout=timeout,
     )
     if result.returncode != 0:
         raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
@@ -1346,7 +1346,7 @@ def _run_gh(*args, cwd=None, timeout=30) -> subprocess.CompletedProcess:
     cmd = ["gh"] + list(args)
     result = subprocess.run(
         cmd, capture_output=True, text=True,
-        cwd=cwd or str(KHALIL_DIR), timeout=timeout,
+        cwd=cwd or str(PHAROCLAW_DIR), timeout=timeout,
     )
     if result.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed: {result.stderr.strip()}")
@@ -1364,11 +1364,11 @@ async def create_extension_pr(
 
     Returns the PR URL.
     """
-    branch_name = f"khalil-extend/{name}"
-    action_file = KHALIL_DIR / "actions" / f"{name}.py"
+    branch_name = f"pharoclaw-extend/{name}"
+    action_file = PHAROCLAW_DIR / "actions" / f"{name}.py"
     manifest_file = EXTENSIONS_DIR / f"{name}.json"
-    test_file = KHALIL_DIR / "tests" / f"test_{name}.py" if test_source else None
-    scheduler_file = KHALIL_DIR / "actions" / f"{name}_scheduler.py" if scheduler_source else None
+    test_file = PHAROCLAW_DIR / "tests" / f"test_{name}.py" if test_source else None
+    scheduler_file = PHAROCLAW_DIR / "actions" / f"{name}_scheduler.py" if scheduler_source else None
 
     def _git_workflow():
         # Check gh is authenticated
@@ -1379,7 +1379,7 @@ async def create_extension_pr(
         stashed = False
         status = _run_git("status", "--porcelain").stdout.strip()
         if status:
-            _run_git("stash", "push", "-m", f"khalil-extend-{name}")
+            _run_git("stash", "push", "-m", f"pharoclaw-extend-{name}")
             stashed = True
 
         try:
@@ -1410,8 +1410,8 @@ async def create_extension_pr(
             _run_git("add", *files_to_add)
             _run_git(
                 "commit", "-m",
-                f"Add {name} capability (auto-generated by Khalil)\n\n"
-                f"Co-Authored-By: Khalil Bot <khalil@local>",
+                f"Add {name} capability (auto-generated by PharoClaw)\n\n"
+                f"Co-Authored-By: PharoClaw Bot <pharoclaw@local>",
             )
             _run_git("push", "-u", "origin", branch_name)
 
@@ -1438,12 +1438,12 @@ async def create_extension_pr(
                 pr_body += "\n## Quality warnings\n"
                 for w in warnings:
                     pr_body += f"- ⚠️ {w}\n"
-            pr_body += "\nGenerated by Khalil's self-extension engine."
+            pr_body += "\nGenerated by PharoClaw's self-extension engine."
 
             # Open PR
             result = _run_gh(
                 "pr", "create",
-                "--title", f"{pr_title_prefix}Khalil: Add {name} capability",
+                "--title", f"{pr_title_prefix}PharoClaw: Add {name} capability",
                 "--body", pr_body,
             )
             pr_url = result.stdout.strip()
@@ -1498,7 +1498,7 @@ async def generate_and_pr(payload: dict) -> str:
         return f"Rate limited — try again in {remaining // 60} minutes."
 
     # Check if extension already exists
-    if (KHALIL_DIR / "actions" / f"{name}.py").exists():
+    if (PHAROCLAW_DIR / "actions" / f"{name}.py").exists():
         return f"Action module `actions/{name}.py` already exists."
 
     if (EXTENSIONS_DIR / f"{name}.json").exists():
@@ -1594,7 +1594,7 @@ async def generate_and_pr(payload: dict) -> str:
             f"**{spec['description']}** — /{spec['command']}\n\n"
             f"PR: {pr_url}\n\n"
             f"Files:\n{files_list}\n\n"
-            f"Review & merge the PR, then restart Khalil to activate."
+            f"Review & merge the PR, then restart PharoClaw to activate."
         )
 
     except Exception as e:
@@ -1705,7 +1705,7 @@ import logging
 from datetime import datetime
 from config import DB_PATH
 
-log = logging.getLogger("khalil.scheduler.{name}")
+log = logging.getLogger("pharoclaw.scheduler.{name}")
 
 
 async def run_{name}_job():

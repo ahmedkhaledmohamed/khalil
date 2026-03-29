@@ -1,7 +1,7 @@
 """Knowledge base enrichment — detect gaps and fill them via web search.
 
 Runs on a schedule or on-demand via /enrich. Finds recent queries where
-Khalil lacked knowledge, web-searches for answers, fetches top pages,
+PharoClaw lacked knowledge, web-searches for answers, fetches top pages,
 and indexes the content into the knowledge base.
 """
 
@@ -10,7 +10,7 @@ import logging
 import re
 from urllib.parse import urlparse
 
-log = logging.getLogger("khalil.scheduler.enrichment")
+log = logging.getLogger("pharoclaw.scheduler.enrichment")
 
 # Rate limit between web fetches (seconds)
 _FETCH_DELAY = 3

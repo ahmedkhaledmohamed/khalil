@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Khalil CLI — local macOS terminal client.
+"""PharoClaw CLI — local macOS terminal client.
 
-Runs the full Khalil pipeline (skill registry, intent detection, action dispatch,
+Runs the full PharoClaw pipeline (skill registry, intent detection, action dispatch,
 LLM with selective context injection) in an interactive REPL.
 
 Usage:
@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from channels import ActionButton, Channel, ChannelType, IncomingMessage, SentMessage
 from channels.message_context import MessageContext
 
-log = logging.getLogger("khalil.cli")
+log = logging.getLogger("pharoclaw.cli")
 
 # --- ANSI formatting ---
 _RESET = "\033[0m"
@@ -52,7 +52,7 @@ class CLIChannel(Channel):
             print(f"{_DIM}  ...{_RESET}", end="", flush=True)
             return SentMessage(chat_id=chat_id, message_id=msg_id, channel=self)
 
-        print(f"\n{_GREEN}{_BOLD}khalil{_RESET} {_DIM}›{_RESET} {text}")
+        print(f"\n{_GREEN}{_BOLD}pharoclaw{_RESET} {_DIM}›{_RESET} {text}")
 
         if buttons:
             for row in buttons:
@@ -70,7 +70,7 @@ class CLIChannel(Channel):
         parse_mode: str | None = None,
     ) -> None:
         print(f"\r{' ' * 20}\r", end="")
-        print(f"\n{_GREEN}{_BOLD}khalil{_RESET} {_DIM}›{_RESET} {text}")
+        print(f"\n{_GREEN}{_BOLD}pharoclaw{_RESET} {_DIM}›{_RESET} {text}")
 
     async def delete_message(self, chat_id: int | str, message_id: int | str) -> None:
         print(f"\r{' ' * 20}\r", end="")
@@ -80,7 +80,7 @@ class CLIChannel(Channel):
 
 
 async def _init_server():
-    """Run Khalil's core startup (DB, Claude, skills) without starting bots."""
+    """Run PharoClaw's core startup (DB, Claude, skills) without starting bots."""
     import server
 
     server.db_conn = server.init_db()
@@ -114,10 +114,10 @@ async def _process_query(server_mod, channel: CLIChannel, query: str):
     ctx = MessageContext(
         channel=channel,
         chat_id="cli",
-        user_id="ahmed",
+        user_id="cli_user",
         channel_type=ChannelType.TELEGRAM,
         incoming=IncomingMessage(
-            text=query, chat_id="cli", user_id="ahmed",
+            text=query, chat_id="cli", user_id="cli_user",
             channel_type=ChannelType.TELEGRAM,
         ),
     )
@@ -132,7 +132,7 @@ async def _process_query(server_mod, channel: CLIChannel, query: str):
 
 
 async def _repl():
-    print(f"\n{_CYAN}{_BOLD}Khalil CLI{_RESET} {_DIM}— full pipeline active{_RESET}")
+    print(f"\n{_CYAN}{_BOLD}PharoClaw CLI{_RESET} {_DIM}— full pipeline active{_RESET}")
     server_mod = await _init_server()
     channel = CLIChannel()
     print()
@@ -171,7 +171,7 @@ async def _repl():
 def main():
     logging.basicConfig(level=logging.CRITICAL, format="%(levelname)s %(name)s: %(message)s")
     # Only show fatal errors — CLI output should be clean
-    for name in ("khalil", "httpx", "httpcore", "googleapiclient", "urllib3"):
+    for name in ("pharoclaw", "httpx", "httpcore", "googleapiclient", "urllib3"):
         logging.getLogger(name).setLevel(logging.CRITICAL)
     try:
         asyncio.run(_repl())

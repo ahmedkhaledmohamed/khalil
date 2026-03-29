@@ -17,7 +17,7 @@ from channels import (
 )
 from channels.message_context import MessageContext
 
-log = logging.getLogger("khalil.channels.discord")
+log = logging.getLogger("pharoclaw.channels.discord")
 
 _DISCORD_MSG_LIMIT = 2000
 

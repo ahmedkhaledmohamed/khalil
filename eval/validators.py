@@ -1,4 +1,4 @@
-"""Skill-specific content validators for Khalil's eval pipeline.
+"""Skill-specific content validators for PharoClaw's eval pipeline.
 
 Each validator returns a list of Check objects that verify domain-specific
 response quality beyond generic heuristics.

@@ -9,7 +9,7 @@ import logging
 import httpx
 from config import OLLAMA_URL, EMBED_MODEL, EMBED_PROVIDER
 
-log = logging.getLogger("khalil.embedder")
+log = logging.getLogger("pharoclaw.embedder")
 
 EMBED_TIMEOUT = 10.0  # seconds per single embed call
 EMBED_BATCH_TIMEOUT = 120.0  # seconds for batch operations

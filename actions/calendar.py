@@ -22,7 +22,7 @@ from googleapiclient.discovery import build
 
 from config import TOKEN_FILE_CALENDAR, TIMEZONE
 
-log = logging.getLogger("khalil.actions.calendar")
+log = logging.getLogger("pharoclaw.actions.calendar")
 
 SKILL = {
     "name": "calendar",
