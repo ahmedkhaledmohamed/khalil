@@ -56,6 +56,9 @@ def generate_plan(report: GapReport, cases: list[TestCase]) -> ImprovementPlan:
         by_category[key].append(gap)
 
     # --- PATTERN_GAP: group by affected_skill, one task per skill -----------
+    # Build a case lookup to include failing queries in descriptions
+    case_map = {c.id: c for c in cases}
+
     pattern_gaps = by_category.get("pattern_gap", [])
     by_skill: dict[str, list[Gap]] = defaultdict(list)
     for g in pattern_gaps:
@@ -64,7 +67,14 @@ def generate_plan(report: GapReport, cases: list[TestCase]) -> ImprovementPlan:
 
     for skill, gaps in by_skill.items():
         task_counter += 1
-        queries = [getattr(g, "query", g.detail) for g in gaps]
+        # Prefer actual query text from test cases over gap detail
+        queries = []
+        for g in gaps:
+            case = case_map.get(g.case_id)
+            if case:
+                queries.append(case.query)
+            else:
+                queries.append(g.detail[:100])
         tasks.append(ImprovementTask(
             id=f"task-{task_counter:03d}",
             title=f"Add {len(gaps)} patterns to {skill} SKILL dict",
@@ -78,19 +88,24 @@ def generate_plan(report: GapReport, cases: list[TestCase]) -> ImprovementPlan:
             gap_category="PATTERN_GAP",
         ))
 
-    # --- HANDLER_ERROR ------------------------------------------------------
-    for g in by_category.get("handler_error", []):
+    # --- HANDLER_ERROR: group by skill ---------------------------------------
+    handler_error_gaps = by_category.get("handler_error", [])
+    handler_by_skill: dict[str, list[Gap]] = defaultdict(list)
+    for g in handler_error_gaps:
+        skill = getattr(g, "affected_skill", None) or "unknown"
+        handler_by_skill[skill].append(g)
+
+    for skill, gaps in handler_by_skill.items():
         task_counter += 1
-        skill = getattr(g, "affected_skill", "unknown")
-        error_summary = g.detail[:80] if g.detail else "unknown error"
         tasks.append(ImprovementTask(
             id=f"task-{task_counter:03d}",
-            title=f"Fix handler error in {skill}: {error_summary}",
+            title=f"Fix handler errors in {skill} ({len(gaps)} cases)",
             task_type="fix_handler",
             priority=2,
             target_file=f"actions/{skill}.py",
-            description=g.detail,
-            affected_cases=1,
+            description=f"{len(gaps)} cases failing with handler errors.\n"
+                        + "\n".join(f"  - {g.detail[:80]}" for g in gaps[:5]),
+            affected_cases=len(gaps),
             auto_fixable=False,
             gap_category="HANDLER_ERROR",
         ))

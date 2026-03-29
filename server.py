@@ -4477,6 +4477,12 @@ async def handle_message_generic(ctx: MessageContext):
     # Direct shell intent mapping (no LLM needed)
     direct_intent = _try_direct_shell_intent(query)
     if direct_intent:
+        # --- Eval trace ---
+        try:
+            from eval.trace import emit_trace
+            emit_trace("direct_shell", action=direct_intent.get("action_type"))
+        except ImportError:
+            pass
         direct_intent["llm_generated"] = False
         direct_intent["user_query"] = query
         handled = await handle_action_intent(direct_intent, ctx)
@@ -4486,8 +4492,20 @@ async def handle_message_generic(ctx: MessageContext):
     # LLM-based intent detection
     action_hint = _looks_like_action(query)
     if action_hint:
+        # --- Eval trace ---
+        try:
+            from eval.trace import emit_trace
+            emit_trace("skill_pattern", action=action_hint)
+        except ImportError:
+            pass
         intent = await detect_intent(query)
         if intent:
+            # --- Eval trace ---
+            try:
+                from eval.trace import emit_trace
+                emit_trace("llm_intent", action=intent.get("action_type"))
+            except ImportError:
+                pass
             intent["user_query"] = query
             handled = await handle_action_intent(intent, ctx)
             if handled:

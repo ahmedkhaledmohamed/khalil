@@ -100,6 +100,12 @@ class DeterministicEval:
                 detail="" if within else f"{result.latency_s:.2f}s exceeds {threshold}s",
             ))
 
+        # 6. Skill-specific validators (only if we got a response)
+        if result.response and result.error is None:
+            from eval.validators import validate
+            for name, passed, detail in validate(case.expected_action, case.query, result.response):
+                checks.append(Check(name=f"validator:{name}", passed=passed, detail=detail))
+
         passed = all(c.passed for c in checks)
         return EvalResult(
             case_id=case.id,
@@ -169,6 +175,13 @@ class HeuristicEval:
             passed=no_err,
             detail="" if no_err else str(result.error),
         ))
+
+        # 6. Skill-specific validators (only if we got a response)
+        if result.response and result.error is None:
+            from eval.validators import validate
+            action = getattr(case, "expected_action", None)
+            for name, passed, detail in validate(action, case.query, result.response):
+                checks.append(Check(name=f"validator:{name}", passed=passed, detail=detail))
 
         passed = all(c.passed for c in checks)
         return EvalResult(case_id=case.id, passed=passed, checks=checks)
