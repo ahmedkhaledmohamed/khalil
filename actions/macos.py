@@ -421,6 +421,12 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     elif action == "spotlight":
         query = intent.get("query", "")
         if not query:
+            # Extract search term from raw user query: "find my resume file" → "resume"
+            raw = intent.get("user_query", "")
+            query = re.sub(r"\b(?:find|search|locate|search\s+for|look\s+up)\b", "", raw, flags=re.IGNORECASE)
+            query = re.sub(r"\b(?:a|an|the|my|all|file|files)\b", "", query, flags=re.IGNORECASE)
+            query = query.strip()
+        if not query:
             return False
         results = await spotlight_search(query)
         if results:

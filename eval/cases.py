@@ -85,32 +85,50 @@ def _next_id(prefix: str) -> str:
     return f"{prefix}-{_counters[prefix]:03d}"
 
 
+def _expand_alternation(raw: str) -> list[str]:
+    """Recursively expand the first alternation group, picking each branch."""
+    # Match non-capturing (?:...) or capturing (...) groups with alternation
+    m = re.search(r"\((?:\?:)?([^()]+)\)", raw)
+    if not m:
+        # Handle top-level alternation (no group): "a|b" → ["a", "b"]
+        if "|" in raw:
+            return raw.split("|")[:3]
+        return [raw]
+    alts = m.group(1).split("|")
+    results = []
+    for alt in alts[:3]:  # limit to 3 branches
+        expanded = raw[:m.start()] + alt + raw[m.end():]
+        results.extend(_expand_alternation(expanded))
+    return results[:5]  # cap total expansions
+
+
 def _positive_query_from_regex(pattern: re.Pattern) -> list[str]:
     """Generate 2-3 plausible query strings from a compiled regex pattern.
 
-    Strategy: strip regex metacharacters, expand alternations, pick
-    representative phrases. This is heuristic — not a full regex inverter.
+    Strategy: expand all alternation groups, then strip regex metacharacters
+    to produce clean natural-language queries.
     """
     raw = pattern.pattern
     # Strip anchors and flags
     raw = re.sub(r"[\^$]", "", raw)
-    # Expand alternations: pick each branch
-    branches = []
-    alt_match = re.search(r"\(([^()]+)\)", raw)
-    if alt_match:
-        alts = alt_match.group(1).split("|")
-        for alt in alts[:3]:
-            branch = raw[:alt_match.start()] + alt + raw[alt_match.end():]
-            branches.append(branch)
-    if not branches:
-        branches = [raw]
+
+    # Expand all alternation groups recursively
+    branches = _expand_alternation(raw)
 
     queries = []
     for branch in branches[:3]:
-        # Clean regex syntax to plain text
         text = branch
-        text = re.sub(r"\\b|\\s\+|\\s\*|\\s", " ", text)
-        text = re.sub(r"[.+*?{}\[\]\\|()]", "", text)
+        # Replace regex whitespace matchers with actual spaces
+        text = re.sub(r"\\s[+*?]?", " ", text)
+        # Replace wildcard matchers (.*, .+) with space
+        text = re.sub(r"\.\*|\.\+", " ", text)
+        # Remove word boundaries
+        text = text.replace("\\b", "")
+        # Remove optional markers and quantifiers
+        text = re.sub(r"[?+*]", "", text)
+        # Remove remaining regex syntax
+        text = re.sub(r"[{}\[\]\\|()^$.]", "", text)
+        # Collapse whitespace
         text = re.sub(r"\s+", " ", text).strip()
         if text and len(text) > 2:
             queries.append(text)
@@ -154,14 +172,23 @@ def _paraphrase(query: str) -> str:
 # Generator sections
 # ---------------------------------------------------------------------------
 
+# Actions whose handlers require LLM-extracted params (URL, query, file paths)
+# even though they have a handler. These can't work with direct dispatch alone.
+_NEEDS_LLM_PARAMS = {
+    "browser_navigate", "browser_extract", "browser_screenshot",
+    "cursor_diff",
+}
+
+
 def _generate_from_patterns(registry) -> list[TestCase]:
     """~400 cases from skill pattern regexes."""
     cases = []
     for skill in registry.list_skills():
         for pattern, action_type in skill.patterns:
-            # Skills with handler=None need LLM for parameter extraction
+            # Skills with handler=None or that need LLM-extracted params
             has_handler = registry.get_handler(action_type) is not None
-            path = "direct_action" if has_handler else "llm_intent"
+            needs_llm = action_type in _NEEDS_LLM_PARAMS
+            path = "direct_action" if (has_handler and not needs_llm) else "llm_intent"
             positives = _positive_query_from_regex(pattern)
             for q in positives:
                 cases.append(TestCase(
@@ -204,7 +231,8 @@ def _generate_from_keywords(registry) -> list[TestCase]:
             if len(words) < 2:
                 continue
             has_handler = registry.get_handler(action_type) is not None
-            path = "direct_action" if has_handler else "llm_intent"
+            needs_llm = action_type in _NEEDS_LLM_PARAMS
+            path = "direct_action" if (has_handler and not needs_llm) else "llm_intent"
             # Generate combinations of 2-3 keywords as queries
             for i in range(0, len(words) - 1, 2):
                 combo = words[i : i + 3]

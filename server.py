@@ -1508,7 +1508,7 @@ async def detect_intent(query: str) -> dict | None:
         return None
 
 
-async def _execute_with_retry(cmd: str, description: str, update, max_retries: int = 1):
+async def _execute_with_retry(cmd: str, description: str, max_retries: int = 1):
     """Execute a shell command with LLM-based retry on correctable errors.
 
     Returns (result_dict, final_cmd) — the command may have been corrected.
@@ -1552,7 +1552,7 @@ async def _execute_with_retry(cmd: str, description: str, update, max_retries: i
             "original_cmd": cmd, "corrected_cmd": corrected,
             "error": result["stderr"][:200], "error_class": error_class,
         })
-        return await _execute_with_retry(corrected, description, update, max_retries=0)
+        return await _execute_with_retry(corrected, description, max_retries=0)
 
     # permanent — return as-is
     return result, cmd
@@ -1885,7 +1885,7 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
         if not llm_generated:
             action_name = f"shell_{classification.value}"  # shell_read or shell_write
             if not autonomy.needs_approval(action_name):
-                result, final_cmd = await _execute_with_retry(cmd, description, update)
+                result, final_cmd = await _execute_with_retry(cmd, description)
                 autonomy.log_audit(action_name, f"Executed: {final_cmd}", {"command": final_cmd}, f"exit={result['returncode']}")
                 if result["returncode"] != 0:
                     from learning import record_signal
@@ -2605,7 +2605,7 @@ async def cmd_approve(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cmd = payload["command"]
             user_query = payload.get("user_query", "")
             from actions.shell import format_output
-            shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
+            shell_result, final_cmd = await _execute_with_retry(cmd, result["description"])
             autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
             if shell_result["returncode"] != 0:
                 from learning import record_signal
@@ -2708,7 +2708,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 cmd = payload["command"]
                 user_query = payload.get("user_query", "")
                 from actions.shell import format_output
-                shell_result, final_cmd = await _execute_with_retry(cmd, result["description"], update)
+                shell_result, final_cmd = await _execute_with_retry(cmd, result["description"])
                 autonomy.log_audit(result["action_type"], f"Executed: {final_cmd}", payload, f"exit={shell_result['returncode']}")
                 if shell_result["returncode"] != 0:
                     from learning import record_signal
@@ -4514,22 +4514,7 @@ async def handle_message_generic(ctx: MessageContext):
 
     save_message(chat_id, "user", query)
 
-    # Direct shell intent mapping (no LLM needed)
-    direct_intent = _try_direct_shell_intent(query)
-    if direct_intent:
-        # --- Eval trace ---
-        try:
-            from eval.trace import emit_trace
-            emit_trace("direct_shell", action=direct_intent.get("action_type"))
-        except ImportError:
-            pass
-        direct_intent["llm_generated"] = False
-        direct_intent["user_query"] = query
-        handled = await handle_action_intent(direct_intent, ctx)
-        if handled:
-            return
-
-    # Skill-pattern matching → try direct dispatch before LLM
+    # 1. Skill-pattern matching → try direct dispatch before LLM or shell
     action_hint = _looks_like_action(query)
     if action_hint:
         # --- Eval trace ---
@@ -4557,7 +4542,22 @@ async def handle_message_generic(ctx: MessageContext):
             if handled:
                 return
 
-    # Fall through to conversational LLM flow
+    # 2. Direct shell intent mapping (no LLM needed) — after skill patterns
+    direct_intent = _try_direct_shell_intent(query)
+    if direct_intent:
+        # --- Eval trace ---
+        try:
+            from eval.trace import emit_trace
+            emit_trace("direct_shell", action=direct_intent.get("action_type"))
+        except ImportError:
+            pass
+        direct_intent["llm_generated"] = False
+        direct_intent["user_query"] = query
+        handled = await handle_action_intent(direct_intent, ctx)
+        if handled:
+            return
+
+    # 3. Fall through to conversational LLM flow
     progress_msg = await ctx.reply("Thinking...")
 
     results = await hybrid_search(query, limit=6)
