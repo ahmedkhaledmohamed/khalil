@@ -4489,7 +4489,7 @@ async def handle_message_generic(ctx: MessageContext):
         if handled:
             return
 
-    # LLM-based intent detection
+    # Skill-pattern matching → try direct dispatch before LLM
     action_hint = _looks_like_action(query)
     if action_hint:
         # --- Eval trace ---
@@ -4498,6 +4498,12 @@ async def handle_message_generic(ctx: MessageContext):
             emit_trace("skill_pattern", action=action_hint)
         except ImportError:
             pass
+        # Try direct handler dispatch — skip LLM for pattern-matched skills
+        direct_intent = {"action": action_hint, "action_type": action_hint, "user_query": query, "llm_generated": False}
+        handled = await handle_action_intent(direct_intent, ctx)
+        if handled:
+            return
+        # Handler didn't handle it — fall through to LLM for parameter extraction
         intent = await detect_intent(query)
         if intent:
             # --- Eval trace ---
