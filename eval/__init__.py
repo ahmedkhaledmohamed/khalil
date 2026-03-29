@@ -261,7 +261,14 @@ def main() -> None:
     # Build pipeline kwargs
     kwargs: dict = {}
 
-    if "--run-only" in args:
+    if "--cases" in args:
+        idx = args.index("--cases")
+        if idx + 1 < len(args):
+            kwargs["cases_path"] = args[idx + 1]
+        else:
+            print("--cases requires a file path argument.")
+            sys.exit(1)
+    elif "--run-only" in args:
         default_cases = FIXTURES_DIR / "cases.json"
         if not default_cases.exists():
             print(f"No cases file found at {default_cases}. Run with --generate first.")
