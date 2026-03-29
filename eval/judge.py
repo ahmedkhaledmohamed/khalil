@@ -92,7 +92,9 @@ class DeterministicEval:
 
         # 5. Latency
         if result.latency_s is not None:
-            threshold = 3.0 if case.expected_path == "direct_action" else 60.0
+            # 18s allows real handler work (AppleScript/HTTP can take 10-17s);
+            # still catches LLM fallback (20s+ with runner timeout at 20s)
+            threshold = 18.0 if case.expected_path == "direct_action" else 60.0
             within = result.latency_s < threshold
             checks.append(Check(
                 name="latency",
