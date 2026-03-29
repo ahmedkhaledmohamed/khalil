@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from config import TOKEN_FILE, TIMEZONE
 
-log = logging.getLogger("khalil.state.email")
+log = logging.getLogger("pharoclaw.state.email")
 
 
 def _get_gmail_service():

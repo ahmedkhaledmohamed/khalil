@@ -1,4 +1,4 @@
-"""Channel abstraction layer for Khalil.
+"""Channel abstraction layer for PharoClaw.
 
 Decouples message I/O from any specific platform (Telegram, Discord, etc.)
 so the core logic in server.py never imports platform-specific libraries.

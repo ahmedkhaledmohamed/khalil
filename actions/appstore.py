@@ -16,7 +16,7 @@ import keyring
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.appstore")
+log = logging.getLogger("pharoclaw.actions.appstore")
 
 BASE_URL = "https://api.appstoreconnect.apple.com/v1"
 

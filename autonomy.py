@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from config import AutonomyLevel, ActionType, HARD_GUARDRAILS, DATA_DIR
 
-log = logging.getLogger("khalil.autonomy")
+log = logging.getLogger("pharoclaw.autonomy")
 
 
 # Action classification rules

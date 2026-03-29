@@ -3,41 +3,51 @@
 import logging
 from pathlib import Path
 
-from config import PERSONAL_REPO_PATH, KHALIL_DIR, PROJECTS_DIR
+from config import PERSONAL_REPO_PATH, PHAROCLAW_DIR, PROJECTS_DIR
 
-log = logging.getLogger("khalil.actions.projects")
+log = logging.getLogger("pharoclaw.actions.projects")
 
 # Known projects and their file locations
+# Configure your own projects here or load from projects.yaml
 KNOWN_PROJECTS = {
-    "zia": {
-        "name": "Zia — AI Family Planning Platform",
-        "file": PROJECTS_DIR / "zia.md",
+    "example-app": {
+        "name": "Example App — Mobile application",
+        "file": PROJECTS_DIR / "example-app.md",
     },
-    "tiny-grounds": {
-        "name": "Tiny Grounds — Kids Play Café",
-        "file": PROJECTS_DIR / "tiny-grounds" / "README.md",
-    },
-    "bezier": {
-        "name": "Bézier — AI Design Generation",
-        "file": PROJECTS_DIR / "bezier.md",
-    },
-    "khalil": {
-        "name": "Khalil — Personal AI Assistant",
-        "file": KHALIL_DIR / "README.md",
+    "pharoclaw": {
+        "name": "PharoClaw — Personal AI Assistant",
+        "file": PHAROCLAW_DIR / "README.md",
     },
 }
 
 # Aliases for fuzzy matching
 ALIASES = {
-    "café": "tiny-grounds",
-    "cafe": "tiny-grounds",
-    "play": "tiny-grounds",
-    "bézier": "bezier",
-    "design": "bezier",
-    "assistant": "khalil",
-    "family": "zia",
-    "meal": "zia",
+    "assistant": "pharoclaw",
 }
+
+
+def _load_projects_yaml():
+    """Load additional projects from projects.yaml if it exists."""
+    import yaml
+    yaml_path = PHAROCLAW_DIR / "projects.yaml"
+    if not yaml_path.exists():
+        return
+    try:
+        data = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return
+        for key, info in data.items():
+            KNOWN_PROJECTS[key] = {
+                "name": info.get("name", key),
+                "file": Path(info["file"]) if "file" in info else PROJECTS_DIR / f"{key}.md",
+            }
+            for alias in info.get("aliases", []):
+                ALIASES[alias] = key
+    except Exception:
+        pass
+
+
+_load_projects_yaml()
 
 
 def resolve_project(name: str) -> str | None:

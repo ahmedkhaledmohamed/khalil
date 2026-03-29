@@ -1,7 +1,7 @@
 {
-  "name": "khalil-terminal-bridge",
-  "displayName": "Khalil Terminal Bridge",
-  "description": "Exposes Cursor's integrated terminal to Khalil via local HTTP",
+  "name": "pharoclaw-terminal-bridge",
+  "displayName": "PharoClaw Terminal Bridge",
+  "description": "Exposes Cursor's integrated terminal to PharoClaw via local HTTP",
   "version": "0.1.0",
   "publisher": "ahmedkhaledmohamed",
   "engines": {
@@ -13,26 +13,26 @@
   "contributes": {
     "commands": [
       {
-        "command": "khalil.terminalBridge.start",
-        "title": "Khalil: Start Terminal Bridge"
+        "command": "pharoclaw.terminalBridge.start",
+        "title": "PharoClaw: Start Terminal Bridge"
       },
       {
-        "command": "khalil.terminalBridge.stop",
-        "title": "Khalil: Stop Terminal Bridge"
+        "command": "pharoclaw.terminalBridge.stop",
+        "title": "PharoClaw: Stop Terminal Bridge"
       }
     ],
     "configuration": {
-      "title": "Khalil Terminal Bridge",
+      "title": "PharoClaw Terminal Bridge",
       "properties": {
-        "khalil.terminalBridge.port": {
+        "pharoclaw.terminalBridge.port": {
           "type": "number",
           "default": 8034,
           "description": "Port for the terminal bridge HTTP server"
         },
-        "khalil.terminalBridge.authToken": {
+        "pharoclaw.terminalBridge.authToken": {
           "type": "string",
           "default": "",
-          "description": "Shared secret for authenticating requests from Khalil"
+          "description": "Shared secret for authenticating requests from PharoClaw"
         }
       }
     }

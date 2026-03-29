@@ -1,4 +1,4 @@
-"""Job scraper integration — bridges the standalone job-scraper into Khalil.
+"""Job scraper integration — bridges the standalone job-scraper into PharoClaw.
 
 Imports core functions from scripts/job-scraper/scraper.py.
 """
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from config import PERSONAL_REPO_PATH
 
-log = logging.getLogger("khalil.actions.jobs")
+log = logging.getLogger("pharoclaw.actions.jobs")
 
 # Add job-scraper to path so we can import it
 JOB_SCRAPER_DIR = PERSONAL_REPO_PATH / "scripts" / "job-scraper"

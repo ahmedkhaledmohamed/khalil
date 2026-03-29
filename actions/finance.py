@@ -9,7 +9,7 @@ from pathlib import Path
 
 from config import FINANCE_DIR
 
-log = logging.getLogger("khalil.actions.finance")
+log = logging.getLogger("pharoclaw.actions.finance")
 
 
 def _read_file(path: Path, max_chars: int = 5000) -> str:
@@ -126,9 +126,9 @@ def format_dashboard_text() -> str:
     # Overview highlights
     overview = get_financial_overview()
     if overview:
-        # Extract RRSP overcontribution status
+        # Add personal financial alerts here (e.g., overcontribution warnings)
         if "overcontribution" in overview.lower():
-            parts.append("⚠️ RRSP Overcontribution: $18,975.99 — pending CRA resolution")
+            parts.append("⚠️ RRSP Overcontribution detected — check overview for details")
 
     # Portfolio summary line
     portfolio = get_portfolio_summary()

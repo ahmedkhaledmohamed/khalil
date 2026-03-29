@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from config import FINANCE_DIR, GOALS_DIR, TIMEZONE
 from synthesis.aggregator import DomainSnapshot
 
-log = logging.getLogger("khalil.synthesis.capacity")
+log = logging.getLogger("pharoclaw.synthesis.capacity")
 
 
 @dataclass

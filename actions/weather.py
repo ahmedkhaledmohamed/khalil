@@ -10,7 +10,7 @@ import httpx
 
 from config import TIMEZONE, WEATHER_LAT, WEATHER_LON
 
-log = logging.getLogger("khalil.actions.weather")
+log = logging.getLogger("pharoclaw.actions.weather")
 
 _BASE_URL = "https://api.open-meteo.com/v1/forecast"
 

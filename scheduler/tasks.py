@@ -1,4 +1,4 @@
-"""Scheduled task definitions for Khalil.
+"""Scheduled task definitions for PharoClaw.
 
 All send_* functions accept a `channel` (channels.Channel protocol) and `chat_id`
 instead of a platform-specific bot object, keeping scheduling decoupled from Telegram.
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from channels import Channel
 
-log = logging.getLogger("khalil.scheduler")
+log = logging.getLogger("pharoclaw.scheduler")
 
 
 def _record_digest_sent(digest_type: str):
@@ -52,7 +52,7 @@ async def send_morning_brief(channel: "Channel", chat_id: int, ask_claude_fn):
     """Generate and send morning brief."""
     from scheduler.digests import generate_morning_brief
 
-    # M9: Smart timing — delay if Ahmed isn't typically active at this hour
+    # M9: Smart timing — delay if the user isn't typically active at this hour
     try:
         from scheduler.proactive import is_good_time_for_alert
         if not is_good_time_for_alert("morning_brief"):

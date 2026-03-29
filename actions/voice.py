@@ -12,7 +12,7 @@ import httpx
 
 from config import OLLAMA_URL, VOICE_REPLY_ENABLED, TTS_VOICE
 
-log = logging.getLogger("khalil.actions.voice")
+log = logging.getLogger("pharoclaw.actions.voice")
 
 
 async def _run(cmd: list[str], timeout: float = 30) -> tuple[str, str, int]:

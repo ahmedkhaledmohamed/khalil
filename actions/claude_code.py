@@ -11,9 +11,9 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from config import CLAUDE_CODE_BIN, KHALIL_DIR, WORKTREES_DIR
+from config import CLAUDE_CODE_BIN, PHAROCLAW_DIR, WORKTREES_DIR
 
-log = logging.getLogger("khalil.actions.claude_code")
+log = logging.getLogger("pharoclaw.actions.claude_code")
 
 
 async def run_claude_code(
@@ -67,7 +67,7 @@ def create_worktree(branch_name: str) -> Path:
 
     subprocess.run(
         ["git", "worktree", "add", str(wt_path), "-b", branch_name],
-        cwd=str(KHALIL_DIR),
+        cwd=str(PHAROCLAW_DIR),
         check=True,
         capture_output=True,
     )
@@ -80,7 +80,7 @@ def cleanup_worktree(branch_name: str):
     try:
         subprocess.run(
             ["git", "worktree", "remove", str(wt_path), "--force"],
-            cwd=str(KHALIL_DIR),
+            cwd=str(PHAROCLAW_DIR),
             capture_output=True,
         )
     except Exception as e:
@@ -90,7 +90,7 @@ def cleanup_worktree(branch_name: str):
     try:
         subprocess.run(
             ["git", "branch", "-D", branch_name],
-            cwd=str(KHALIL_DIR),
+            cwd=str(PHAROCLAW_DIR),
             capture_output=True,
         )
     except Exception:

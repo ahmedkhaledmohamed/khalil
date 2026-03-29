@@ -14,7 +14,7 @@ interface TerminalInfo {
 }
 
 function getConfig() {
-  const cfg = vscode.workspace.getConfiguration("khalil.terminalBridge");
+  const cfg = vscode.workspace.getConfiguration("pharoclaw.terminalBridge");
   return {
     port: cfg.get<number>("port", 8034),
     authToken: cfg.get<string>("authToken", ""),
@@ -123,7 +123,7 @@ async function handleRequest(
     // POST /terminals — create a new terminal
     if (path === "/terminals" && req.method === "POST") {
       const body = JSON.parse(await readBody(req));
-      const name = body.name || "Khalil";
+      const name = body.name || "PharoClaw";
       const cwd = body.cwd || undefined;
       const terminal = vscode.window.createTerminal({
         name,
@@ -239,7 +239,7 @@ async function handleRequest(
 
 function startServer(ctx: vscode.ExtensionContext) {
   if (server) {
-    vscode.window.showInformationMessage("Khalil Terminal Bridge already running");
+    vscode.window.showInformationMessage("PharoClaw Terminal Bridge already running");
     return;
   }
 
@@ -248,18 +248,18 @@ function startServer(ctx: vscode.ExtensionContext) {
   server = http.createServer(handleRequest);
   server.listen(port, "127.0.0.1", () => {
     vscode.window.showInformationMessage(
-      `Khalil Terminal Bridge listening on http://127.0.0.1:${port}`
+      `PharoClaw Terminal Bridge listening on http://127.0.0.1:${port}`
     );
   });
 
   server.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EADDRINUSE") {
       vscode.window.showErrorMessage(
-        `Khalil Terminal Bridge: port ${port} already in use`
+        `PharoClaw Terminal Bridge: port ${port} already in use`
       );
     } else {
       vscode.window.showErrorMessage(
-        `Khalil Terminal Bridge error: ${err.message}`
+        `PharoClaw Terminal Bridge error: ${err.message}`
       );
     }
     server = null;
@@ -295,16 +295,16 @@ function stopServer() {
   if (server) {
     server.close();
     server = null;
-    vscode.window.showInformationMessage("Khalil Terminal Bridge stopped");
+    vscode.window.showInformationMessage("PharoClaw Terminal Bridge stopped");
   }
 }
 
 export function activate(ctx: vscode.ExtensionContext) {
   ctx.subscriptions.push(
-    vscode.commands.registerCommand("khalil.terminalBridge.start", () =>
+    vscode.commands.registerCommand("pharoclaw.terminalBridge.start", () =>
       startServer(ctx)
     ),
-    vscode.commands.registerCommand("khalil.terminalBridge.stop", () =>
+    vscode.commands.registerCommand("pharoclaw.terminalBridge.stop", () =>
       stopServer()
     )
   );

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.cursor_checker")
+log = logging.getLogger("pharoclaw.actions.cursor_checker")
 
 _tables_created = False
 

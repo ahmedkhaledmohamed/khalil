@@ -1,8 +1,8 @@
-"""MCP client — consume external MCP servers as Khalil capabilities.
+"""MCP client — consume external MCP servers as PharoClaw capabilities.
 
-Khalil already EXPOSES an MCP server (mcp_server.py) for Claude Code.
-This module lets Khalil CONSUME external MCP servers, making every MCP
-tool in the ecosystem available as a Khalil capability.
+PharoClaw already EXPOSES an MCP server (mcp_server.py) for Claude Code.
+This module lets PharoClaw CONSUME external MCP servers, making every MCP
+tool in the ecosystem available as a PharoClaw capability.
 """
 
 import asyncio
@@ -16,7 +16,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-log = logging.getLogger("khalil.mcp_client")
+log = logging.getLogger("pharoclaw.mcp_client")
 
 MCP_SERVERS_PATH = Path(__file__).parent / "mcp_servers.json"
 

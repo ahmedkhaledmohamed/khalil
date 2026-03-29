@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-log = logging.getLogger("khalil.skills")
+log = logging.getLogger("pharoclaw.skills")
 
 _ACTIONS_DIR = Path(__file__).parent / "actions"
 _EXTENSIONS_DIR = Path(__file__).parent / "extensions"

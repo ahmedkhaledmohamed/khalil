@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from config import FINANCE_DIR, GOALS_DIR, PROJECTS_DIR, TIMEZONE, WORK_DIR
 
-log = logging.getLogger("khalil.synthesis.aggregator")
+log = logging.getLogger("pharoclaw.synthesis.aggregator")
 
 
 # --- Domain status dataclasses ---

@@ -1,4 +1,4 @@
-"""Three-tier evaluation engine for Khalil's eval pipeline.
+"""Three-tier evaluation engine for PharoClaw's eval pipeline.
 
 Tier 1: Deterministic — exact checks (routing, containment, latency).
 Tier 2: Heuristic — structural quality checks without LLM.

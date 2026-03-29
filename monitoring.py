@@ -1,4 +1,4 @@
-"""Health checks and monitoring for Khalil subsystems."""
+"""Health checks and monitoring for PharoClaw subsystems."""
 
 import logging
 import subprocess
@@ -9,7 +9,7 @@ import httpx
 
 from config import DB_PATH, OLLAMA_URL, TIMEZONE
 
-log = logging.getLogger("khalil.monitoring")
+log = logging.getLogger("pharoclaw.monitoring")
 
 
 # --- #39: Native macOS notifications ---
@@ -204,7 +204,7 @@ async def run_startup_self_test() -> dict:
 
 def format_startup_report(results: dict) -> str:
     """Format startup self-test results for logging or Telegram."""
-    lines = ["🔍 Khalil Startup Self-Test\n"]
+    lines = ["🔍 PharoClaw Startup Self-Test\n"]
     status_icons = {"ok": "✅", "degraded": "⚠️", "error": "❌", "down": "❌"}
 
     for subsystem in ["database", "ollama", "oauth", "github"]:
@@ -234,7 +234,7 @@ async def generate_self_check_message() -> str | None:
     if report["status"] == "ok":
         return None
 
-    lines = ["⚠️ Khalil Self-Check — Issues Detected\n"]
+    lines = ["⚠️ PharoClaw Self-Check — Issues Detected\n"]
     for issue in report["issues"]:
         lines.append(f"  • {issue}")
 

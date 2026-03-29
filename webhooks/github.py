@@ -9,7 +9,7 @@ import keyring
 from config import KEYRING_SERVICE
 from webhooks import WebhookHandler
 
-log = logging.getLogger("khalil.webhooks.github")
+log = logging.getLogger("pharoclaw.webhooks.github")
 
 
 class GitHubWebhookHandler(WebhookHandler):

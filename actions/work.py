@@ -6,7 +6,7 @@ from pathlib import Path
 
 from config import WORK_DIR
 
-log = logging.getLogger("khalil.actions.work")
+log = logging.getLogger("pharoclaw.actions.work")
 
 PLANNING_CSV = WORK_DIR / "spotify" / "spring-2026-planning.csv"
 

@@ -1,4 +1,4 @@
-"""Backup and restore — export/import Khalil state as JSON."""
+"""Backup and restore — export/import PharoClaw state as JSON."""
 
 import json
 import logging
@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, DATA_DIR, TIMEZONE
 
-log = logging.getLogger("khalil.actions.backup")
+log = logging.getLogger("pharoclaw.actions.backup")
 
 BACKUP_DIR = DATA_DIR / "backups"
 
@@ -44,7 +44,7 @@ def export_backup() -> Path:
     conn.close()
 
     timestamp = datetime.now(ZoneInfo(TIMEZONE)).strftime("%Y%m%d_%H%M%S")
-    backup_path = BACKUP_DIR / f"khalil_backup_{timestamp}.json"
+    backup_path = BACKUP_DIR / f"pharoclaw_backup_{timestamp}.json"
 
     with open(backup_path, "w", encoding="utf-8") as f:
         json.dump(backup_data, f, indent=2, default=str)
@@ -100,7 +100,7 @@ def list_backups() -> list[dict]:
         return []
 
     backups = []
-    for f in sorted(BACKUP_DIR.glob("khalil_backup_*.json"), reverse=True):
+    for f in sorted(BACKUP_DIR.glob("pharoclaw_backup_*.json"), reverse=True):
         stat = f.stat()
         backups.append({
             "filename": f.name,

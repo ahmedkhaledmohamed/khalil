@@ -9,7 +9,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlparse
 
-log = logging.getLogger("khalil.actions.browser")
+log = logging.getLogger("pharoclaw.actions.browser")
 
 SKILL = {
     "name": "browser",
@@ -65,7 +65,7 @@ async def navigate_and_screenshot(url: str) -> tuple[str | None, str]:
         await page.goto(url, timeout=30000)
         await page.wait_for_load_state("networkidle", timeout=10000)
         title = await page.title()
-        path = "/tmp/khalil_browser_screenshot.png"
+        path = "/tmp/pharoclaw_browser_screenshot.png"
         await page.screenshot(path=path, full_page=False)
         return path, title
     finally:

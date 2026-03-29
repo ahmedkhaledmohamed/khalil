@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, FINANCE_DIR, GOALS_DIR, TIMEZONE
 
-log = logging.getLogger("khalil.scheduler.proactive")
+log = logging.getLogger("pharoclaw.scheduler.proactive")
 
 # #89: Configurable alert thresholds — defaults can be overridden via settings table
 _DEFAULT_THRESHOLDS = {
@@ -231,7 +231,7 @@ def run_proactive_checks() -> list[str]:
 # --- M9: Smart Proactive Timing (Task 9.3) ---
 
 def record_activity_timing(signal_type: str = "user_active"):
-    """Record when Ahmed actually reads/responds to alerts.
+    """Record when the user actually reads/responds to alerts.
 
     Called when a user message is received, indicating active engagement.
     """
@@ -250,7 +250,7 @@ def record_activity_timing(signal_type: str = "user_active"):
 
 
 def get_active_hours(day_of_week: int | None = None, min_signals: int = 3) -> list[int]:
-    """Get hours when Ahmed is typically active, based on observed signals.
+    """Get hours when the user is typically active, based on observed signals.
 
     Args:
         day_of_week: 0=Monday, 6=Sunday. None means current day.
@@ -334,7 +334,7 @@ async def run_synthesis_nudge_check() -> str | None:
     """M10: Check if capacity score crosses threshold and return nudge text.
 
     Triggers when capacity score > 70. Returns formatted nudge or None.
-    Called by the scheduler to proactively alert Ahmed.
+    Called by the scheduler to proactively alert the owner.
     """
     try:
         from synthesis.aggregator import aggregate_all_domains

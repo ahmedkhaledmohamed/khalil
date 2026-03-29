@@ -14,7 +14,7 @@ import subprocess
 
 from config import ActionType
 
-log = logging.getLogger("khalil.actions.shell")
+log = logging.getLogger("pharoclaw.actions.shell")
 
 SHELL_TIMEOUT = 30
 MAX_OUTPUT_LENGTH = 3000
@@ -309,7 +309,7 @@ _ERROR_HINTS = {
     "not allowed assistive access": (
         "macOS requires accessibility permission for this command.\n"
         "Go to System Settings → Privacy & Security → Accessibility "
-        "and enable access for the app running Khalil (Terminal, Cursor, etc.)."
+        "and enable access for the app running PharoClaw (Terminal, Cursor, etc.)."
     ),
     "permission denied": "The command needs elevated permissions. You may need to grant access in System Settings.",
     "command not found": "This command is not installed on your system.",

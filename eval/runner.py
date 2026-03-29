@@ -1,4 +1,4 @@
-"""Instrumented test runner for Khalil's eval pipeline.
+"""Instrumented test runner for PharoClaw's eval pipeline.
 
 Runs TestCases through the full message pipeline using an InstrumentedChannel
 that captures all output without printing to stdout.
@@ -25,10 +25,10 @@ from channels import ActionButton, Channel, ChannelType, IncomingMessage, SentMe
 from channels.message_context import MessageContext
 from eval.cases import TestCase, load_cases
 
-log = logging.getLogger("khalil.eval.runner")
+log = logging.getLogger("pharoclaw.eval.runner")
 
 # Suppress noisy loggers during eval runs
-for _noisy in ("httpx", "httpcore", "googleapiclient", "urllib3", "khalil.state", "asyncio"):
+for _noisy in ("httpx", "httpcore", "googleapiclient", "urllib3", "pharoclaw.state", "asyncio"):
     logging.getLogger(_noisy).setLevel(logging.CRITICAL)
 
 
@@ -98,7 +98,7 @@ class TestResult:
 # ---------------------------------------------------------------------------
 
 async def init_server():
-    """Initialize Khalil server without starting any bots."""
+    """Initialize PharoClaw server without starting any bots."""
     import server
 
     server.db_conn = server.init_db()
@@ -299,7 +299,7 @@ def _save_results(results: list[TestResult], path: str) -> None:
 async def _main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Khalil eval runner")
+    parser = argparse.ArgumentParser(description="PharoClaw eval runner")
     parser.add_argument("--cases", default=str(Path(__file__).parent / "fixtures" / "cases.json"))
     parser.add_argument("--limit", type=int, default=0, help="Run only first N cases")
     parser.add_argument("--out", default=str(Path(__file__).parent / "reports" / "results.json"))

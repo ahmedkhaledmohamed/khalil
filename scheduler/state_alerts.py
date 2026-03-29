@@ -7,7 +7,7 @@ import zoneinfo
 
 from config import TIMEZONE
 
-log = logging.getLogger("khalil.scheduler.state_alerts")
+log = logging.getLogger("pharoclaw.scheduler.state_alerts")
 
 # Patterns that suggest important senders
 _IMPORTANT_SENDER_PATTERNS = re.compile(

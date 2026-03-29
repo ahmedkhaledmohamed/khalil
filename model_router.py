@@ -7,7 +7,7 @@ from enum import Enum
 
 from config import CLAUDE_MODEL, CLAUDE_MODEL_COMPLEX, DB_PATH
 
-log = logging.getLogger("khalil.model_router")
+log = logging.getLogger("pharoclaw.model_router")
 
 
 class ModelTier(Enum):

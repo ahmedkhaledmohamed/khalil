@@ -106,7 +106,7 @@ class TestDynamicCodeMap:
             "context": {
                 "error": (
                     'Traceback (most recent call last):\n'
-                    '  File "/Users/ahmed/scripts/khalil/actions/slack_reader.py", line 45, in cmd_slack\n'
+                    '  File "/Users/user/scripts/pharoclaw/actions/slack_reader.py", line 45, in cmd_slack\n'
                     '    channel = get_channel_id(name)\n'
                     'KeyError: "channel"'
                 ),
@@ -121,9 +121,9 @@ class TestDynamicCodeMap:
             "context": {
                 "error": (
                     'Traceback (most recent call last):\n'
-                    '  File "/Users/ahmed/scripts/khalil/server.py", line 100, in wrapper\n'
+                    '  File "/Users/user/scripts/pharoclaw/server.py", line 100, in wrapper\n'
                     '    return await handler(update, context)\n'
-                    '  File "/Users/ahmed/scripts/khalil/actions/timer.py", line 20, in cmd_timer\n'
+                    '  File "/Users/user/scripts/pharoclaw/actions/timer.py", line 20, in cmd_timer\n'
                     '    raise ValueError("bad")\n'
                     'ValueError: bad'
                 ),

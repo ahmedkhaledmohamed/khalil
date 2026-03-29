@@ -1,8 +1,8 @@
-# Khalil — Personal AI Assistant
+# PharoClaw — Self-Healing Personal AI Assistant
 
-A self-healing, self-extending personal AI assistant that runs as a Telegram bot on macOS. Built with FastAPI, SQLite (with vector embeddings), and Ollama/Claude for reasoning.
+A personal AI assistant that runs as a Telegram bot on macOS. Indexes your emails, Drive files, and documents into a local knowledge base, then answers questions, takes actions, and learns from interactions. When it fails, it fixes itself. When it can't do something, it builds the capability.
 
-Khalil indexes your emails, Drive files, and personal documents into a local knowledge base, then answers questions, takes actions, and learns from interactions — all through Telegram.
+Built with FastAPI, SQLite (with vector embeddings via sqlite-vec), and Ollama/Claude for reasoning.
 
 ## Quick Start
 
@@ -12,13 +12,13 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
 # 2. Configure secrets
-python3 -c "import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')"
-python3 -c "import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')"
+python3 -c "import keyring; keyring.set_password('pharoclaw', 'telegram-bot-token', 'YOUR_TOKEN')"
+python3 -c "import keyring; keyring.set_password('pharoclaw', 'anthropic-api-key', 'YOUR_KEY')"
 
 # 3. Start Ollama (for embeddings + local LLM)
 ollama serve &
 ollama pull nomic-embed-text
-ollama pull qwen2.5:14b
+ollama pull qwen3:14b
 
 # 4. Run
 python3 server.py
@@ -26,31 +26,63 @@ python3 server.py
 
 Or run as a macOS daemon:
 ```bash
-cp com.khalil.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist
+cp com.pharoclaw.daemon.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.pharoclaw.daemon.plist
+```
+
+Or use the CLI (no Telegram required):
+```bash
+python3 cli.py "What meetings do I have today?"
+python3 cli.py   # interactive REPL mode
 ```
 
 ## Architecture
 
 ```
-Telegram ←→ server.py (FastAPI + python-telegram-bot)
-                │
-                ├── autonomy.py        → Action classification & approval flow
-                ├── knowledge/         → Vector search over emails, Drive, docs
-                ├── actions/           → 13 action modules (Gmail, Shell, Calendar, ...)
-                ├── scheduler/         → 11 scheduled jobs (digests, sync, reflection)
-                ├── learning.py        → Self-improvement (signals, insights, preferences)
-                ├── healing.py         → Self-healing (detect failures → generate fixes → PR)
-                └── mcp_server.py      → MCP protocol server for Claude Code
+Channels (Telegram, Slack, Discord, WhatsApp)
+       │
+       ▼
+  server.py (FastAPI + python-telegram-bot)
+       │
+       ├── skills.py             → Self-describing skill registry (auto-discovery)
+       ├── autonomy.py           → Action classification & approval flow
+       ├── orchestrator.py       → Multi-step task decomposition & execution
+       ├── model_router.py       → Smart model selection (simple/medium/complex)
+       │
+       ├── knowledge/            → Vector search over emails, Drive, docs
+       ├── actions/              → 37 action modules (Gmail, Shell, Calendar, Web, ...)
+       ├── channels/             → 4 bidirectional messaging channels
+       ├── scheduler/            → 15+ scheduled jobs (digests, sync, enrichment)
+       ├── synthesis/            → Cross-domain awareness (capacity, risk detection)
+       ├── state/                → Real-time state providers (calendar, email)
+       │
+       ├── learning.py           → Self-improvement (signals, insights, preferences)
+       ├── healing.py            → Self-healing (detect failures → generate patches → PR)
+       ├── workflows.py          → Reactive workflow engine (trigger → condition → action)
+       ├── agents/coordinator.py → Agent swarm for parallel sub-tasks
+       └── mcp_server.py         → MCP protocol server for Claude Code
 ```
 
 ### Key Design Decisions
 
-- **Local-first**: Embeddings and LLM run on Ollama (free). Claude API is optional.
-- **Autonomy model**: Three levels control what Khalil can do without asking. Hard guardrails are immutable.
+- **Local-first**: Embeddings and LLM run on Ollama (free, private). Claude API is optional for complex tasks.
+- **Autonomy model**: Three levels control what the assistant can do without asking. Hard guardrails are immutable.
 - **Self-correcting**: Shell errors are classified (transient/correctable/permanent) and retried with LLM-generated corrections in real time.
-- **Self-healing**: When existing functionality fails repeatedly, Khalil reads its own source, generates a patch via Claude Opus, validates it, opens a PR, and verifies the fix worked.
-- **Self-extending**: When Khalil can't do something you ask, it detects the gap via semantic regex matching, generates a new action module, smoke-tests it, and opens a PR.
+- **Self-healing**: When existing functionality fails repeatedly, reads its own source, generates a patch via Claude Opus, validates it, opens a PR, and verifies the fix worked.
+- **Self-extending**: When it can't do something you ask, detects the gap, generates a new action module, smoke-tests it in a container, and opens a PR.
+- **Multi-channel**: Telegram, Slack, Discord, WhatsApp — same capabilities across all. Common `Channel` protocol.
+- **Skill-based dispatch**: Each action module declares its own patterns, keywords, and examples. Registry auto-discovers at startup.
+
+## Channels
+
+| Channel | Transport | Setup |
+|---------|-----------|-------|
+| Telegram | Long polling | Bot token via BotFather |
+| Slack | Socket Mode | Slack app with Socket Mode enabled |
+| Discord | Gateway | Discord bot token |
+| WhatsApp | Meta Cloud API | Business account + webhook |
+
+All channels implement the same `Channel` protocol — send messages, receive messages, inline keyboards.
 
 ## Telegram Commands
 
@@ -58,9 +90,10 @@ Telegram ←→ server.py (FastAPI + python-telegram-bot)
 | Command | Description |
 |---------|-------------|
 | `/start` | Initialize and authorize |
-| `/search <query>` | Search knowledge base (emails, Drive, timeline) |
+| `/search <query>` | Search knowledge base |
 | `/brief` | Generate morning brief |
 | `/clear` | Clear conversation history |
+| `/mode` | View/change autonomy level |
 
 ### Integrations
 | Command | Description |
@@ -70,45 +103,106 @@ Telegram ←→ server.py (FastAPI + python-telegram-bot)
 | `/calendar` | Today's events |
 | `/remind <text> <time>` | Set a reminder |
 | `/run <command>` | Execute a shell command (safety-classified) |
-| `/sync` | Manually sync new emails |
+| `/sync` | Sync new emails to knowledge base |
+| `/enrich [topic]` | Manually trigger knowledge enrichment |
 | `/jobs` | Check job scraper for new matches |
 
 ### Dashboards
 | Command | Description |
 |---------|-------------|
-| `/finance` | Portfolio summary, RRSP/TFSA alerts, deadlines |
-| `/work` | Sprint dashboard & P0 epics |
+| `/finance` | Portfolio summary and deadline alerts |
+| `/work` | Sprint dashboard and active epics |
 | `/goals` | Quarterly goals with progress tracking |
-| `/project <name>` | Project status (Zia, Tiny Grounds, Bézier, Khalil) |
+| `/project <name>` | Project status overview |
 
 ### System
 | Command | Description |
 |---------|-------------|
-| `/mode` | View/change autonomy level |
 | `/approve` / `/deny` | Approve or deny pending actions |
 | `/audit` | View action audit log |
-| `/learn` | Self-improvement insights & preferences |
+| `/learn` | Self-improvement insights and preferences |
 | `/health` | System health check |
 | `/stats` | Knowledge base statistics |
 | `/backup` | Export/import state |
 | `/nudge` | Proactive check — what needs attention? |
+| `/extensions` | List auto-generated capabilities |
+| `/workflows` | View active reactive workflows |
+| `/tasks` | Active task tracking |
 
 ### Natural Language
 
-Khalil understands natural language for common actions:
+Understands natural language for common actions:
 - "Open Slack" → executes `open -a 'Slack'`
 - "Remind me to review the PR tomorrow at 9am" → creates reminder
-- "Send an email to Ahmed about the meeting" → drafts email with approval
+- "Send an email to John about the meeting" → drafts email with approval
 - "Check disk space" → executes `df -h`
-- "How many Cursor windows are open?" → runs osascript, responds "You have 5 Cursor windows open"
-- "What's my battery?" → checks battery level and answers in plain English
-- "What apps are running?" → lists running processes
+- "How many windows are open?" → runs osascript, responds naturally
+- "What's my battery?" → checks battery level
+- "Search YouTube for Python tutorials" → YouTube Data API search
+- "What's the weather?" → Open-Meteo API lookup
 
-Machine-state queries (window counts, battery, IP, uptime, running processes) are pattern-matched to pre-built shell commands — no LLM needed for command generation. Shell output is then interpreted by the LLM into a natural language answer rather than dumping raw stdout.
+Machine-state queries (window counts, battery, IP, uptime, running processes) are pattern-matched to pre-built shell commands — no LLM needed for command generation. Shell output is then interpreted by the LLM into a natural language answer.
+
+## Action Modules (37)
+
+### Google Workspace
+| Module | Capabilities |
+|--------|-------------|
+| `gmail.py` | Search, read, draft, send emails |
+| `gmail_sync.py` | Incremental email sync to knowledge base |
+| `email_categorizer.py` | Auto-categorize incoming emails |
+| `drive.py` | Search and read Google Drive files |
+| `calendar.py` | Events, meeting intelligence, follow-ups |
+| `contacts.py` | Google Contacts lookup |
+| `tasks_google.py` | Google Tasks integration |
+
+### Productivity
+| Module | Capabilities |
+|--------|-------------|
+| `reminders.py` | Local reminders with recurrence rules |
+| `projects.py` | Project status tracking |
+| `goals.py` | Goal tracking with quarterly reviews |
+| `work.py` | Sprint dashboard and epic tracking |
+| `finance.py` | Financial dashboard and deadline alerts |
+| `meetings.py` | Meeting intelligence and commitment tracking |
+
+### External Services
+| Module | Capabilities |
+|--------|-------------|
+| `spotify.py` | Currently playing, recent tracks, top items |
+| `youtube.py` | Video search, liked videos, subscriptions |
+| `github_api.py` | Notifications, PRs, issues |
+| `readwise.py` | Highlights and book annotations |
+| `notion.py` | Search pages, create pages, query databases |
+| `appstore.py` | App Store Connect ratings, reviews, downloads |
+| `digitalocean.py` | Droplet status, health metrics, billing |
+| `linkedin.py` | Messages, job search, profile views |
+| `weather.py` | Current conditions and forecast (Open-Meteo, no API key) |
+| `web.py` | Web search (DuckDuckGo) and page fetching |
+
+### macOS & System
+| Module | Capabilities |
+|--------|-------------|
+| `shell.py` | Shell execution with safety classification and retry |
+| `terminal.py` | iTerm2 and Cursor IDE control via osascript |
+| `browser.py` | Playwright-based web automation (screenshot, extract) |
+| `imessage.py` | Read/search iMessage conversations |
+| `apple_reminders.py` | Sync with Apple Reminders |
+| `voice.py` | Speech-to-text and text-to-speech |
+| `slack_reader.py` | Read Slack messages and threads |
+
+### Meta
+| Module | Capabilities |
+|--------|-------------|
+| `extend.py` | Self-extension (gap detection → code gen → PR) |
+| `guardian.py` | Secondary LLM review of risky actions |
+| `backup.py` | State export/import |
+| `jobs.py` | Job scraper bridge |
+| `claude_code.py` | Claude Code CLI integration |
 
 ## Autonomy Model
 
-Three levels control what Khalil can auto-execute vs. what needs your approval:
+Three levels control what the assistant can auto-execute vs. what needs approval:
 
 | | Supervised | Guided | Autonomous |
 |---|---|---|---|
@@ -124,71 +218,115 @@ Change level: `/mode` → select level via inline keyboard.
 
 ## Scheduled Jobs
 
-| Job | Schedule | What it does |
+| Job | Schedule | Description |
 |-----|----------|-------------|
-| Morning Brief | 7:00 AM daily | Calendar, emails, goals summary |
-| Financial Alert | 9:00 AM on 1st & 15th | RRSP/TFSA alerts, tax deadlines |
+| Morning Brief | 7:00 AM daily | Calendar, emails, weather, goals summary |
+| Financial Alert | 9:00 AM on 1st & 15th | Investment alerts and deadlines |
 | Career Alert | 10:00 AM daily | Job scraper new matches |
 | Proactive Alerts | 12:00 PM Wednesday | Overdue items, attention needed |
+| Knowledge Enrichment | 2:00 PM Wed & Sat | Auto-detect knowledge gaps, web search, index |
 | Weekly Summary | 6:00 PM Sunday | Week recap with achievements |
 | Friday Reflection | 5:00 PM Friday | End-of-week reflection |
 | Email Sync | Every 6 hours | Pull and index new emails |
-| Daily Self-Check | 8:00 PM daily | System health monitoring |
-| Weekly Reflection | 5:00 PM Sunday | Self-improvement insights |
-| Micro-Reflection | 11:00 PM daily | Daily signals + self-healing check |
+| OAuth Refresh | Every 6 hours | Proactive token refresh |
+| Daily Self-Check | 8:00 PM daily | System health + self-healing triggers |
+| Micro-Reflection | 11:00 PM daily | Daily signals analysis |
+| Weekly Reflection | Sunday | Self-improvement insights |
 | Reminder Check | Every 60 seconds | Fire due reminders |
+| Meeting Brief | Every 5 minutes | Pre-meeting context prep |
+| Meeting Follow-up | Every 5 minutes | Post-meeting action item prompts |
+| State Alerts | Every 30 minutes | Calendar/email awareness checks |
+| Dev State Poll | Every 60 seconds | IDE and terminal awareness |
+| Preference Decay | Sunday 8:30 PM | Decay old learned preferences |
+| Quarterly Planning | Quarterly | Goal setting and alignment |
 
 ## Self-Correction (Real-Time)
 
-When a shell command fails, Khalil classifies the error and responds accordingly:
+When a shell command fails, classifies the error and responds:
 
-| Error type | Examples | Behavior |
+| Error Type | Examples | Behavior |
 |------------|----------|----------|
 | **Transient** | timeout, resource busy, connection refused | Retry same command after 2s |
-| **Correctable** | syntax error, wrong flags, bad AppleScript | Feed error to LLM for a corrected command, then re-execute |
+| **Correctable** | syntax error, wrong flags, bad AppleScript | Feed error to LLM for corrected command, re-execute |
 | **Permanent** | permission denied, command not found | Show error with user-friendly hint |
 
-Safety constraint: corrected commands are re-classified and **cannot escalate** (e.g. a READ command can't be corrected into a WRITE command).
-
-Known permanent errors include user-friendly hints — e.g. macOS accessibility permission errors explain exactly which System Settings pane to open.
+Safety constraint: corrected commands are re-classified and **cannot escalate** (a READ command can't be corrected into a WRITE command).
 
 ## Self-Healing (Async)
 
-When Khalil's existing functionality fails repeatedly:
+When existing functionality fails repeatedly:
 
-1. **Record** — failure signals logged at every failure point: shell execution, action execution, calendar/email API errors, LLM timeouts, extension runtime failures, intent detection failures, and user corrections
-2. **Detect** — 3+ failures with the same fingerprint in 48 hours triggers healing. Critical errors (`ImportError`, `SyntaxError`, `AttributeError`, `ModuleNotFoundError`) trigger after just 1 occurrence
-3. **Diagnose** — extracts the failing function's source code via AST. Falls back to traceback parsing for dynamic code mapping when the static map doesn't cover the failure
-4. **Patch** — Claude Opus generates a fixed version of the function
+1. **Record** — failure signals logged at every failure point: shell, actions, API errors, LLM timeouts, intent failures, user corrections
+2. **Detect** — 3+ failures with the same fingerprint in 48h triggers healing. Critical errors (`ImportError`, `SyntaxError`) trigger after 1 occurrence
+3. **Diagnose** — extracts the failing function's source code via AST
+4. **Patch** — Claude Opus generates a fixed version
 5. **Validate** — AST parse + blocklist check + full-file compilation
-6. **Verify** — after a heal is merged, monitors for recurrence. If the same failure reappears, marks the heal as `failed_heal` and re-triggers with enriched context (previous patch + new error signals)
+6. **Verify** — monitors for recurrence after merge. Re-triggers with enriched context if fix failed
 7. **PR** — creates branch, commits patch, opens PR, notifies via Telegram
 
-Never auto-applies — always goes through PR review. Dedup and verification prevent runaway loops.
+Never auto-applies — always goes through PR review.
 
 ## Self-Extension
 
-When Khalil can't handle a request:
+When the assistant can't handle a request:
 
-1. **Detect** — semantic regex gate matches refusal patterns (e.g. "I can't", "not able to", "beyond my capabilities", "check manually"). Broader than exact phrase matching — catches novel LLM refusal phrasings. Structured `[CAPABILITY_GAP: ...]` tags are also detected as a fast path
+1. **Detect** — semantic regex gate matches refusal patterns. Structured `[CAPABILITY_GAP: ...]` tags as fast path
 2. **Classify** — LLM confirms it's a real capability gap (not just a knowledge gap)
 3. **Generate** — Claude Opus writes a new action module following existing patterns
 4. **Validate** — AST syntax check + blocklist (no subprocess, no eval, no socket)
-5. **Smoke test** — imports the generated module in a subprocess and verifies the handler function exists. Catches wrong imports, missing dependencies, and misnamed handlers before the PR is opened
-6. **PR** — creates `khalil-extend/<name>` branch, commits module + manifest, opens PR
+5. **Smoke test** — imports the module in an isolated container, verifies handler exists
+6. **PR** — creates branch, commits module + manifest, opens PR
 7. **Notify** — Telegram message with Generate/Skip buttons, then PR link
 
 Extensions auto-load on restart from `extensions/*.json` manifests.
 
+## Knowledge Base
+
+SQLite with `sqlite-vec` for vector similarity search:
+
+- **Documents**: Gmail archives, Google Drive exports, Cursor transcripts, personal docs
+- **Embeddings**: 768-dim vectors via Ollama `nomic-embed-text` (local, free)
+- **Search**: Hybrid — vector similarity (40%) + keyword matching (35%) + freshness decay (25%)
+- **Enrichment**: Autonomous gap detection — when queries produce poor results, web-searches for answers and indexes them
+
+```bash
+# Full re-index
+python3 knowledge/indexer.py
+
+# Incremental (only modified files)
+python3 knowledge/indexer.py --incremental
+```
+
+## Reactive Workflows
+
+Trigger → Condition → Action chains that run automatically:
+
+```
+Trigger types: cron, signal, webhook, threshold
+Conditions: field comparisons, all/any combinators
+Actions: send_message, run_action, call_webhook
+```
+
+Workflows persist in SQLite with run tracking. Rate-limited per workflow. The Workflow Evolver detects patterns in interaction signals and proposes new workflows.
+
+## Multi-Step Orchestration
+
+Compound requests are decomposed into parallel/sequential sub-tasks:
+
+- Heuristic detection of multi-step patterns ("and", "then", "also")
+- LLM decomposition into dependency graph
+- Parallel execution of independent steps
+- Agent swarm coordinator for complex queries (configurable concurrency)
+
 ## Eval Suite
 
-292 tests across 10 test files covering safety-critical paths:
+12 test files covering safety-critical paths:
 
 ```bash
 pytest tests/ -v
 ```
 
-| Test file | Coverage |
+| Test File | Coverage |
 |-----------|----------|
 | `test_shell.py` | Shell command classification (safe/risky/blocked) |
 | `test_autonomy.py` | Autonomy levels, approval flow, hard guardrails |
@@ -200,16 +338,19 @@ pytest tests/ -v
 | `test_signal_coverage.py` | Extension failure triggers, critical error threshold |
 | `test_healing.py` | Heal verification loop (recurrence detection) |
 | `test_extension_quality.py` | Semantic gate patterns, smoke test validation |
+| `test_improvements.py` | Integration tests across features |
+| `test_terminal.py` | Terminal and IDE control |
 
-## Knowledge Base
+### Eval Pipeline
 
-SQLite with `sqlite-vec` for vector similarity search:
+Separate evaluation framework for intent detection and action quality at scale:
 
-- **Documents**: Gmail archives, Google Drive exports, timeline, CONTEXT.md, goal/project/finance files
-- **Embeddings**: 768-dim vectors via Ollama `nomic-embed-text` (local, free)
-- **Search**: Hybrid — vector similarity + keyword matching, results ranked and truncated for context window
-
-Indexed content lives in the Personal repo (`archives/`, `work/`, `career/`, etc.). Khalil reads from it via the `KHALIL_PERSONAL_REPO` env var.
+```bash
+python3 eval/run.py              # full pipeline
+python3 eval/case_gen.py         # generate test cases (~10K)
+python3 eval/gap_analysis.py     # analyze failures
+python3 eval/autofix.py          # auto-fix cycle
+```
 
 ## Configuration
 
@@ -217,10 +358,14 @@ Indexed content lives in the Personal repo (`archives/`, `work/`, `career/`, etc
 
 ```bash
 # Required
-keyring.set_password('khalil-assistant', 'telegram-bot-token', '...')
+keyring.set_password('pharoclaw', 'telegram-bot-token', '...')
 
-# Optional (only if LLM_BACKEND = "claude")
-keyring.set_password('khalil-assistant', 'anthropic-api-key', '...')
+# Optional
+keyring.set_password('pharoclaw', 'anthropic-api-key', '...')
+keyring.set_password('pharoclaw', 'readwise-api-key', '...')
+keyring.set_password('pharoclaw', 'notion-api-key', '...')
+keyring.set_password('pharoclaw', 'github-token', '...')
+keyring.set_password('pharoclaw', 'digitalocean-api-key', '...')
 ```
 
 Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
@@ -229,7 +374,7 @@ Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KHALIL_PERSONAL_REPO` | `~/Developer/Personal` | Path to Personal repo (archives, docs) |
+| `PHAROCLAW_REPO` | `~/Developer/Personal` | Path to personal document repo |
 | `TELEGRAM_BOT_TOKEN` | — | Fallback for keyring |
 | `ANTHROPIC_API_KEY` | — | Fallback for keyring |
 
@@ -237,88 +382,142 @@ Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
 
 In `config.py`:
 ```python
-LLM_BACKEND = "ollama"          # free, local — or "claude" for cloud
-OLLAMA_LLM_MODEL = "qwen2.5:14b"
+LLM_BACKEND = "ollama"           # free, local — or "claude" for cloud
+OLLAMA_LLM_MODEL = "qwen3:14b"
 CLAUDE_MODEL = "claude-sonnet-4-20250514"
 CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"  # used for code generation
 ```
 
 ### Google OAuth
 
-Reuses existing tokens from `Personal/scripts/`:
-- `credentials.json` — OAuth app config
-- `token.json` — gmail.readonly + drive.readonly
-- `token_khalil.json` — gmail.compose (for sending)
+Token files managed centrally via `oauth_utils.py` with atomic writes and corruption resilience:
+- `credentials.json` — OAuth app config (download from Google Cloud Console)
+- `token.json` — gmail.readonly
+- `token_compose.json` — gmail.compose
 - `token_calendar.json` — calendar.readonly
+- `token_modify.json` — gmail.modify
+- `token_contacts.json` — contacts.readonly
+- `token_tasks.json` — tasks.readonly
+- `token_drive_write.json` — drive.file
+- `token_youtube.json` — youtube.readonly
+- `token_work.json` — work account gmail
 
 ## External Dependencies
 
 | Service | Purpose | Required? |
 |---------|---------|-----------|
 | Ollama | Local embeddings + LLM | Yes (unless using Claude for everything) |
-| Telegram Bot API | Chat interface | Yes |
-| Google OAuth | Gmail, Drive, Calendar | Yes |
+| Telegram Bot API | Primary chat interface | Yes |
+| Google OAuth | Gmail, Drive, Calendar, Contacts, Tasks, YouTube | Yes |
 | Anthropic API | Claude LLM (cloud) | No (Ollama works offline) |
 | GitHub CLI (`gh`) | Self-healing/extension PRs | For self-heal/extend only |
+| Playwright | Browser automation | Optional |
+| ffmpeg | Voice transcription | Optional |
 
 ## Directory Structure
 
 ```
-khalil/
-├── server.py                 # FastAPI + Telegram bot
+pharoclaw/
+├── server.py                 # FastAPI + Telegram bot (main entry point)
+├── cli.py                    # Terminal REPL (no Telegram required)
 ├── config.py                 # Centralized configuration
+├── skills.py                 # Self-describing skill registry
 ├── autonomy.py               # Action classification & approval
 ├── healing.py                # Self-healing engine
 ├── learning.py               # Self-improvement & preferences
 ├── monitoring.py             # System health checks
+├── model_router.py           # Smart model selection
+├── orchestrator.py           # Multi-step task decomposition
+├── workflows.py              # Reactive workflow engine
+├── oauth_utils.py            # Centralized OAuth token management
 ├── mcp_server.py             # MCP server for Claude Code
-├── requirements.txt
-├── com.khalil.daemon.plist   # macOS LaunchAgent
-├── setup.sh
+├── mcp_client.py             # MCP client for external tools
 │
-├── actions/                  # Action modules
+├── actions/                  # 37 action modules
 │   ├── gmail.py              # Email search/draft/send
 │   ├── gmail_sync.py         # Email sync worker
 │   ├── drive.py              # Google Drive search
 │   ├── calendar.py           # Calendar integration
-│   ├── reminders.py          # Local reminders
-│   ├── finance.py            # Financial dashboard
-│   ├── goals.py              # Goal tracking
-│   ├── projects.py           # Project status
-│   ├── work.py               # Sprint dashboard
-│   ├── jobs.py               # Job scraper bridge
-│   ├── shell.py              # Shell execution (classification, retry, error hints)
-│   ├── extend.py             # Self-extension (gap detection, smoke test, PR)
-│   └── backup.py             # Backup/restore
+│   ├── shell.py              # Shell execution (classification, retry, hints)
+│   ├── extend.py             # Self-extension engine
+│   ├── guardian.py            # Secondary LLM review for risky actions
+│   ├── browser.py            # Playwright web automation
+│   ├── voice.py              # Speech-to-text / text-to-speech
+│   ├── web.py                # Web search (DuckDuckGo) + page fetch
+│   ├── spotify.py            # Spotify Web API
+│   ├── youtube.py            # YouTube Data API v3
+│   ├── github_api.py         # GitHub API
+│   ├── readwise.py           # Readwise highlights
+│   ├── notion.py             # Notion API
+│   ├── weather.py            # Open-Meteo weather
+│   ├── imessage.py           # macOS iMessage
+│   ├── terminal.py           # iTerm2 + Cursor IDE control
+│   └── ...                   # reminders, finance, goals, projects, work, etc.
+│
+├── channels/                 # Messaging channels
+│   ├── telegram.py           # Telegram (primary)
+│   ├── slack.py              # Slack (Socket Mode)
+│   ├── discord.py            # Discord
+│   ├── whatsapp.py           # WhatsApp (Meta Cloud API)
+│   ├── registry.py           # Unified channel dispatch
+│   └── message_context.py    # Platform-agnostic message context
 │
 ├── knowledge/                # Knowledge base
 │   ├── indexer.py            # SQLite + sqlite-vec init & ingestion
 │   ├── search.py             # Hybrid vector + keyword search
 │   ├── embedder.py           # Ollama embedding client
-│   └── context.py            # CONTEXT.md extraction
+│   └── context.py            # Personal context extraction
 │
 ├── scheduler/                # Scheduled tasks
 │   ├── tasks.py              # Job definitions
 │   ├── digests.py            # Brief/alert/summary generation
-│   └── proactive.py          # Proactive attention checks
+│   ├── enrichment.py         # Autonomous knowledge enrichment
+│   ├── planning.py           # Quarterly planning automation
+│   ├── proactive.py          # Proactive attention checks
+│   └── state_alerts.py       # Calendar/email state alerts
 │
-├── tests/                    # Eval suite (292 tests)
-│   └── test_*.py             # 10 test files
+├── synthesis/                # Cross-domain awareness
+│   ├── aggregator.py         # Multi-domain status snapshot
+│   └── capacity.py           # Overcommitment detection
+│
+├── state/                    # Real-time state providers
+│   ├── calendar_provider.py  # Calendar event awareness
+│   ├── email_provider.py     # Unread count, needs-reply detection
+│   └── collector.py          # Signal aggregation
+│
+├── agents/                   # Agent swarm
+│   └── coordinator.py        # Parallel sub-agent execution
+│
+├── webhooks/                 # Inbound event triggers
+│   ├── github.py             # GitHub webhook handlers
+│   └── registry.py           # Webhook routing
+│
+├── eval/                     # Evaluation pipeline
+│   ├── case_gen.py           # Test case generation (~10K cases)
+│   ├── runner.py             # Instrumented test runner
+│   ├── judge.py              # Response evaluation
+│   ├── gap_analysis.py       # Failure categorization + regression tracking
+│   ├── plan_gen.py           # Repair plan generation
+│   ├── autofix.py            # Auto-fix cycle
+│   └── trace.py              # Structured execution traces
+│
+├── tests/                    # Unit + integration tests
+│   └── test_*.py             # 12 test files
 │
 ├── extensions/               # Auto-generated capabilities
 │   └── *.json                # Extension manifests
 │
 └── data/                     # Runtime (gitignored)
-    ├── khalil.db             # SQLite database
+    ├── pharoclaw.db             # SQLite database
     └── *.log                 # Logs
 ```
 
 ## MCP Server
 
-Khalil exposes its knowledge base to Claude Code via the MCP protocol. Available tools:
+Exposes the knowledge base to Claude Code via the MCP protocol:
 
 - `search_knowledge` — hybrid search across all indexed content
-- `get_context` — retrieve relevant CONTEXT.md sections
+- `get_context` — retrieve relevant personal context sections
 - `get_timeline` — query life timeline events
 - `get_stats` — knowledge base statistics
 - Read-only tools for work, finance, goals, and projects
@@ -330,7 +529,7 @@ SQLite tables (initialized in `knowledge/indexer.py`):
 | Table | Purpose |
 |-------|---------|
 | `documents` | Indexed content (emails, Drive, docs) with metadata |
-| `documents_vec` | Vector embeddings (768-dim, sqlite-vec) |
+| `document_embeddings` | Vector embeddings (768-dim, sqlite-vec) |
 | `pending_actions` | Action queue for approval flow |
 | `settings` | App settings (autonomy level, owner chat ID) |
 | `reminders` | Local reminders with recurrence rules |
@@ -339,3 +538,7 @@ SQLite tables (initialized in `knowledge/indexer.py`):
 | `interaction_signals` | Failure/correction signals for self-healing |
 | `insights` | Self-improvement insights (pending/applied/dismissed) |
 | `learned_preferences` | Behavioral preferences with confidence scores |
+| `workflows` | Reactive workflow definitions |
+| `workflow_runs` | Workflow execution history |
+| `meeting_briefs` | Pre-meeting context prep |
+| `meeting_commitments` | Tracked action items from meetings |

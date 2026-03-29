@@ -20,7 +20,7 @@ from config import (
     TOKEN_FILE_CONTACTS, TOKEN_FILE_TASKS, TOKEN_FILE_DRIVE_WRITE, TOKEN_FILE_WORK,
 )
 
-log = logging.getLogger("khalil.actions.gmail")
+log = logging.getLogger("pharoclaw.actions.gmail")
 
 SKILL = {
     "name": "gmail",

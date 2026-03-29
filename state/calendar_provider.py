@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 from config import TOKEN_FILE_CALENDAR, TIMEZONE
 
-log = logging.getLogger("khalil.state.calendar")
+log = logging.getLogger("pharoclaw.state.calendar")
 
 
 def _get_calendar_service():

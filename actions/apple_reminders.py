@@ -1,14 +1,14 @@
 """Apple Reminders sync via osascript (AppleScript).
 
 Creates, reads, and syncs reminders to/from Apple Reminders.app
-using a dedicated list (default: "Khalil"). No API key or external
+using a dedicated list (default: "PharoClaw"). No API key or external
 library required — uses asyncio.create_subprocess_exec for non-blocking calls.
 """
 
 import asyncio
 import logging
 
-log = logging.getLogger("khalil.actions.apple_reminders")
+log = logging.getLogger("pharoclaw.actions.apple_reminders")
 
 SKILL = {
     "name": "apple_reminders",
@@ -54,7 +54,7 @@ async def _ensure_list(list_name: str) -> None:
     await _run_osascript(script)
 
 
-async def sync_to_apple(text: str, due_date: str | None = None, list_name: str = "Khalil") -> bool:
+async def sync_to_apple(text: str, due_date: str | None = None, list_name: str = "PharoClaw") -> bool:
     """Create a reminder in Apple Reminders.app.
 
     Args:
@@ -97,7 +97,7 @@ async def sync_to_apple(text: str, due_date: str | None = None, list_name: str =
     return True
 
 
-async def get_apple_reminders(list_name: str = "Khalil") -> list[dict]:
+async def get_apple_reminders(list_name: str = "PharoClaw") -> list[dict]:
     """Get incomplete reminders from a Reminders.app list.
 
     Returns list of dicts with keys: name, due_date.
@@ -136,7 +136,7 @@ async def get_apple_reminders(list_name: str = "Khalil") -> list[dict]:
     return reminders
 
 
-async def sync_from_apple(list_name: str = "Khalil") -> list[dict]:
+async def sync_from_apple(list_name: str = "PharoClaw") -> list[dict]:
     """Get recently completed reminders from a Reminders.app list.
 
     Returns list of dicts with keys: name, due_date, completion_date.

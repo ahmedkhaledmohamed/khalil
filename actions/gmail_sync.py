@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from config import DB_PATH, DATA_DIR
 
-log = logging.getLogger("khalil.actions.gmail_sync")
+log = logging.getLogger("pharoclaw.actions.gmail_sync")
 
 
 def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50) -> list[dict]:

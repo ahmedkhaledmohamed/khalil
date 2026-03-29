@@ -15,7 +15,7 @@ from googleapiclient.discovery import build
 
 from config import TOKEN_FILE_YOUTUBE
 
-log = logging.getLogger("khalil.actions.youtube")
+log = logging.getLogger("pharoclaw.actions.youtube")
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.readonly"]
 

@@ -6,9 +6,9 @@ from pathlib import Path
 
 import docker
 
-from config import KHALIL_DIR, SANDBOX_IMAGE, SANDBOX_MEM_LIMIT, SANDBOX_TIMEOUT
+from config import PHAROCLAW_DIR, SANDBOX_IMAGE, SANDBOX_MEM_LIMIT, SANDBOX_TIMEOUT
 
-log = logging.getLogger("khalil.sandbox")
+log = logging.getLogger("pharoclaw.sandbox")
 
 
 def is_docker_available() -> bool:
@@ -23,12 +23,12 @@ def is_docker_available() -> bool:
 
 def _requirements_hash() -> str:
     """SHA256 of requirements.txt for image staleness detection."""
-    req_file = KHALIL_DIR / "requirements.txt"
+    req_file = PHAROCLAW_DIR / "requirements.txt"
     return hashlib.sha256(req_file.read_bytes()).hexdigest()[:12]
 
 
 def ensure_image() -> bool:
-    """Build or verify the khalil-sandbox Docker image. Returns True if ready."""
+    """Build or verify the pharoclaw-sandbox Docker image. Returns True if ready."""
     if not is_docker_available():
         return False
 
@@ -38,25 +38,25 @@ def ensure_image() -> bool:
     # Check if image exists with matching hash
     try:
         image = client.images.get(f"{SANDBOX_IMAGE}:latest")
-        if image.labels.get("khalil.req_hash") == req_hash:
+        if image.labels.get("pharoclaw.req_hash") == req_hash:
             return True
         log.info("Sandbox image stale (req_hash mismatch), rebuilding...")
     except docker.errors.ImageNotFound:
         log.info("Sandbox image not found, building...")
 
     # Build from Dockerfile.sandbox
-    dockerfile_path = KHALIL_DIR / "Dockerfile.sandbox"
+    dockerfile_path = PHAROCLAW_DIR / "Dockerfile.sandbox"
     if not dockerfile_path.exists():
         log.error("Dockerfile.sandbox not found at %s", dockerfile_path)
         return False
 
     try:
         client.images.build(
-            path=str(KHALIL_DIR),
+            path=str(PHAROCLAW_DIR),
             dockerfile="Dockerfile.sandbox",
             tag=f"{SANDBOX_IMAGE}:latest",
             buildargs={},
-            labels={"khalil.req_hash": req_hash},
+            labels={"pharoclaw.req_hash": req_hash},
             rm=True,
         )
         log.info("Sandbox image built successfully (hash=%s)", req_hash)
@@ -70,7 +70,7 @@ def run_in_sandbox(
     script: str,
     timeout: int = SANDBOX_TIMEOUT,
     network: bool = False,
-    mount_khalil: bool = True,
+    mount_pharoclaw: bool = True,
 ) -> tuple[int, str, str]:
     """Run a Python script in an ephemeral Docker container.
 
@@ -78,7 +78,7 @@ def run_in_sandbox(
         script: Python code (passed via python -c)
         timeout: Container timeout in seconds
         network: Allow network access (default False)
-        mount_khalil: Mount khalil repo read-only at /khalil
+        mount_pharoclaw: Mount pharoclaw repo read-only at /pharoclaw
 
     Returns:
         (exit_code, stdout, stderr)
@@ -92,8 +92,8 @@ def run_in_sandbox(
     client = docker.from_env()
 
     volumes = {}
-    if mount_khalil:
-        volumes[str(KHALIL_DIR)] = {"bind": "/khalil", "mode": "ro"}
+    if mount_pharoclaw:
+        volumes[str(PHAROCLAW_DIR)] = {"bind": "/pharoclaw", "mode": "ro"}
 
     container = None
     try:

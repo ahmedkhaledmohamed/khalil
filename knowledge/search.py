@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from config import DB_PATH, DATA_DIR, EMBED_DIM
 from knowledge.embedder import embed_text
 
-log = logging.getLogger("khalil.search")
+log = logging.getLogger("pharoclaw.search")
 
 
 # --- #63: Knowledge Freshness Scoring ---

@@ -1,4 +1,4 @@
-# Golden test cases — hand-curated ground truth for Khalil eval
+# Golden test cases — hand-curated ground truth for PharoClaw eval
 # These are the regression anchor. They must always pass.
 #
 # Structure: ~15 cases per skill (21 skills) + ~20 conversational/edge = ~304 cases

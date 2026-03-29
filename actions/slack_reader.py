@@ -2,7 +2,7 @@
 
 Uses a Slack Bot token stored in the system keyring.
 All public functions are async — sync HTTP calls run in asyncio.to_thread().
-Setup: keyring.set_password('khalil-assistant', 'slack-bot-token', 'xoxb-...')
+Setup: keyring.set_password('pharoclaw', 'slack-bot-token', 'xoxb-...')
 
 Note: search.messages requires a user token (xoxp-), not a bot token.
 Search is not supported in this version — only channel reading and listing.
@@ -19,7 +19,7 @@ import keyring
 
 from config import DB_PATH, KEYRING_SERVICE, TIMEZONE
 
-log = logging.getLogger("khalil.actions.slack_reader")
+log = logging.getLogger("pharoclaw.actions.slack_reader")
 
 SLACK_API = "https://slack.com/api"
 _TOKEN_KEY = "slack-bot-token"

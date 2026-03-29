@@ -5,9 +5,9 @@ import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from config import TIMEZONE
+from config import OWNER_NAME, TIMEZONE
 
-log = logging.getLogger("khalil.scheduler")
+log = logging.getLogger("pharoclaw.scheduler")
 
 # Day-of-week brief style
 DAY_STYLE = {
@@ -21,8 +21,8 @@ DAY_STYLE = {
 }
 
 
-async def _get_weather_toronto() -> str:
-    """Fetch current Toronto weather via actions.weather module."""
+async def _get_weather_local() -> str:
+    """Fetch current local weather via actions.weather module."""
     from actions.weather import get_weather_summary
     return await get_weather_summary()
 
@@ -144,7 +144,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     (recent_raw, weather, calendar_text, job_text, github_text,
      appstore_text, server_text, spotify_text, readwise_text) = await asyncio.gather(
         _fetch_recent(),
-        _get_weather_toronto(),
+        _get_weather_local(),
         _fetch_calendar(),
         _fetch_jobs(),
         _fetch_github_notifications(),
@@ -173,7 +173,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         if parts:
             reminder_text = "\n\nReminders:\n" + "\n".join(parts)
 
-    weather_text = f"\n\nToronto weather: {weather}" if weather else ""
+    weather_text = f"\n\nLocal weather: {weather}" if weather else ""
 
     # Work priorities (sync, non-blocking)
     work_text = ""
@@ -215,7 +215,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     )
 
     brief = await ask_claude_fn(
-        f"Generate a concise morning brief for Ahmed. Today is {day_name}.\n"
+        f"Generate a concise morning brief for {OWNER_NAME}. Today is {day_name}.\n"
         f"Day style: {day_style}\n\n"
         "Include:\n"
         "- Weather at the top (one line)\n"
@@ -280,7 +280,7 @@ async def generate_financial_alert(ask_claude_fn) -> str | None:
     )
 
     alert = await ask_claude_fn(
-        f"Based on Ahmed's financial records below, identify any time-sensitive items for {month} {today.year}:\n"
+        f"Based on {OWNER_NAME}'s financial records below, identify any time-sensitive items for {month} {today.year}:\n"
         "- RRSP/TFSA contribution deadlines or room\n"
         "- RSU vesting dates coming up\n"
         "- Tax filing deadlines\n"
@@ -339,7 +339,7 @@ async def generate_weekly_summary(ask_claude_fn) -> str:
         recent_insights = get_insights(limit=5)
         this_week = [i for i in recent_insights if i["created_at"] and i["created_at"] > cutoff]
         if this_week:
-            learned_text = "\n\nKhalil's insights this week:\n" + "\n".join(
+            learned_text = "\n\nPharoClaw's insights this week:\n" + "\n".join(
                 f"- [{i['category']}] {i['summary']} (status: {i['status']})" for i in this_week
             )
     except Exception:
@@ -348,11 +348,11 @@ async def generate_weekly_summary(ask_claude_fn) -> str:
     context = f"Profile:\n{personal}\n\nRecent:\n{recent_text}{stale_text}{project_text}{learned_text}"
 
     summary = await ask_claude_fn(
-        "Generate a concise weekly summary for Ahmed. Include:\n"
+        f"Generate a concise weekly summary for {OWNER_NAME}. Include:\n"
         "- Key themes from the past week\n"
         "- Any stale reminders that need attention\n"
         "- Projects with open tasks that may need attention\n"
-        "- If there are Khalil insights, include a brief 'What I Learned' section\n"
+        "- If there are PharoClaw insights, include a brief 'What I Learned' section\n"
         "- Suggested focus areas for next week\n"
         "Keep it under 15 lines.",
         context,
@@ -409,12 +409,12 @@ async def generate_friday_reflection(ask_claude_fn) -> str:
     context = f"{reminder_text}{findings_text}{work_text}{goal_text}"
 
     reflection = await ask_claude_fn(
-        "Generate a Friday end-of-week reflection for Ahmed. "
+        f"Generate a Friday end-of-week reflection for {OWNER_NAME}. "
         "Based on the data below, ask exactly 3 sharp questions:\n"
         "1. What moved forward this week? (acknowledge progress)\n"
         "2. What's stuck or being avoided? (call it out directly)\n"
         "3. What's the single most important thing for next week?\n\n"
-        "Be specific to his actual data — reference real projects, epics, or deadlines. "
+        "Be specific to their actual data — reference real projects, epics, or deadlines. "
         "Be provocative, not comforting. 5-7 lines max. No fluff.",
         context,
         system_extra=f"Today's date: {today.isoformat()}, Friday",
@@ -551,7 +551,7 @@ async def generate_weekly_synthesis(ask_claude_fn) -> str:
     )
 
     synthesis = await ask_claude_fn(
-        "Generate a weekly synthesis digest for Ahmed. Structure it exactly as:\n\n"
+        f"Generate a weekly synthesis digest for {OWNER_NAME}. Structure it exactly as:\n\n"
         "1. **Capacity Score** — state the score, label, and one-line interpretation\n"
         "2. **Cross-Domain Risks** — top 3 risks from the data, be specific\n"
         "3. **Recommendations** — top 3 actionable items, each starting with a verb\n"

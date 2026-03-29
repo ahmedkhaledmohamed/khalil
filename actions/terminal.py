@@ -18,7 +18,7 @@ import httpx
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.terminal")
+log = logging.getLogger("pharoclaw.actions.terminal")
 
 SKILL = {
     "name": "terminal",
@@ -637,7 +637,7 @@ BRIDGE_URL = "http://127.0.0.1:8034"
 
 
 async def _bridge_request(method: str, path: str, body: dict = None, timeout: int = 10) -> dict:
-    """Make a request to the Khalil Terminal Bridge extension."""
+    """Make a request to the PharoClaw Terminal Bridge extension."""
     url = f"{BRIDGE_URL}{path}"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -647,7 +647,7 @@ async def _bridge_request(method: str, path: str, body: dict = None, timeout: in
                 return {"error": data.get("error", f"HTTP {resp.status_code}"), "status": resp.status_code}
             return data
     except httpx.ConnectError:
-        return {"error": "Cursor Terminal Bridge not running. Install the khalil-terminal-bridge extension."}
+        return {"error": "Cursor Terminal Bridge not running. Install the pharoclaw-terminal-bridge extension."}
     except httpx.TimeoutException:
         return {"error": "Bridge request timed out"}
     except Exception as e:
@@ -665,7 +665,7 @@ async def bridge_list_terminals() -> list[dict]:
     return result.get("terminals", [])
 
 
-async def bridge_create_terminal(name: str = "Khalil", cwd: str = None, command: str = None) -> dict:
+async def bridge_create_terminal(name: str = "PharoClaw", cwd: str = None, command: str = None) -> dict:
     """Create a new terminal in Cursor."""
     body = {"name": name}
     if cwd:

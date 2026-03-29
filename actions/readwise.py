@@ -4,7 +4,7 @@ Uses Readwise API v2 (REST). Auth via API token stored in keyring.
 All public functions are async.
 
 Setup:
-    python3 -c "import keyring; keyring.set_password('khalil-assistant', 'readwise-api-token', 'YOUR_TOKEN')"
+    python3 -c "import keyring; keyring.set_password('pharoclaw', 'readwise-api-token', 'YOUR_TOKEN')"
 """
 
 import logging
@@ -14,7 +14,7 @@ import keyring
 
 from config import KEYRING_SERVICE
 
-log = logging.getLogger("khalil.actions.readwise")
+log = logging.getLogger("pharoclaw.actions.readwise")
 
 BASE_URL = "https://readwise.io/api/v2"
 
@@ -42,7 +42,7 @@ def _get_token() -> str:
     if not token:
         raise ValueError(
             "Readwise API token not found in keyring. Set it with:\n"
-            "  python3 -c \"import keyring; keyring.set_password('khalil-assistant', 'readwise-api-token', 'YOUR_TOKEN')\""
+            "  python3 -c \"import keyring; keyring.set_password('pharoclaw', 'readwise-api-token', 'YOUR_TOKEN')\""
         )
     return token
 

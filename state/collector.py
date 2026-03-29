@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from config import TIMEZONE
 
-log = logging.getLogger("khalil.state.collector")
+log = logging.getLogger("pharoclaw.state.collector")
 
 # ---------------------------------------------------------------------------
 # TTL cache

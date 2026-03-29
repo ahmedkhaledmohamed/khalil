@@ -1,4 +1,4 @@
-"""Plugin manifest — enable/disable layer for Khalil extensions.
+"""Plugin manifest — enable/disable layer for PharoClaw extensions.
 
 Manages extensions.json which tracks all extensions with metadata
 and enabled/disabled state. New extensions register as disabled by default.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from config import EXTENSIONS_DIR
 
-log = logging.getLogger("khalil.manifest")
+log = logging.getLogger("pharoclaw.manifest")
 
 MANIFEST_PATH = EXTENSIONS_DIR / "extensions.json"
 

@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.meetings")
+log = logging.getLogger("pharoclaw.actions.meetings")
 
 # Title patterns that indicate recurring standups to skip
 _STANDUP_PATTERNS = re.compile(
@@ -271,7 +271,7 @@ def parse_action_items(text: str) -> list[dict]:
     """Parse action items from user response text.
 
     Handles formats like:
-    - "Ahmed: finish the design doc by Friday"
+    - "User: finish the design doc by Friday"
     - "- Review PR by 2026-03-25"
     - "John to send the report"
     """

@@ -1,9 +1,9 @@
 """Inspect Cursor IDE integrated terminal tabs — titles, directories, active files.
 
-Queries the Khalil Terminal Bridge VS Code extension running at http://127.0.0.1:8034.
+Queries the PharoClaw Terminal Bridge VS Code extension running at http://127.0.0.1:8034.
 No token needed — the bridge runs locally and requires no authentication.
 
-Setup: Install the khalil-terminal-bridge extension in Cursor, which starts an HTTP
+Setup: Install the pharoclaw-terminal-bridge extension in Cursor, which starts an HTTP
 server on port 8034 exposing terminal and workspace metadata.
 """
 
@@ -18,7 +18,7 @@ import httpx
 
 from config import DB_PATH, TIMEZONE
 
-log = logging.getLogger("khalil.actions.cursor_inspector")
+log = logging.getLogger("pharoclaw.actions.cursor_inspector")
 
 BRIDGE_URL = "http://127.0.0.1:8034"
 
@@ -125,7 +125,7 @@ async def _bridge_get(path: str, timeout: int = 10) -> dict:
                 return {"error": data.get("error", f"HTTP {resp.status_code}")}
             return data
     except httpx.ConnectError:
-        return {"error": "Bridge not running. Install khalil-terminal-bridge in Cursor."}
+        return {"error": "Bridge not running. Install pharoclaw-terminal-bridge in Cursor."}
     except httpx.TimeoutException:
         return {"error": "Bridge request timed out."}
     except Exception as e:

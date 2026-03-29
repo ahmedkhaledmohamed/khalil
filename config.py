@@ -1,19 +1,22 @@
-"""Khalil configuration and settings."""
+"""PharoClaw configuration and settings."""
 
 import os
 from pathlib import Path
 from enum import Enum
 
-# Khalil repo root
-KHALIL_DIR = Path(__file__).parent
-DATA_DIR = KHALIL_DIR / "data"
-DB_PATH = DATA_DIR / "khalil.db"
-EXTENSIONS_DIR = KHALIL_DIR / "extensions"
+# Owner identity (for personalized prompts)
+OWNER_NAME = os.getenv("PHAROCLAW_OWNER_NAME", "User")
+
+# PharoClaw repo root
+PHAROCLAW_DIR = Path(__file__).parent
+DATA_DIR = PHAROCLAW_DIR / "data"
+DB_PATH = DATA_DIR / "pharoclaw.db"
+EXTENSIONS_DIR = PHAROCLAW_DIR / "extensions"
 
 # External: Personal repo (configurable via env var)
 PERSONAL_REPO_PATH = Path(os.environ.get(
-    "KHALIL_PERSONAL_REPO",
-    str(Path.home() / "Developer" / "Personal"),
+    "PHAROCLAW_PERSONAL_REPO",
+    os.environ.get("PHAROCLAW_REPO", str(Path.home() / "Developer" / "Personal")),
 ))
 SCRIPTS_DIR = PERSONAL_REPO_PATH / "scripts"
 
@@ -38,7 +41,7 @@ GOALS_DIR = PERSONAL_REPO_PATH / "goals"
 # Google OAuth (in Personal/scripts/, shared with other tools)
 CREDENTIALS_FILE = SCRIPTS_DIR / "credentials.json"
 TOKEN_FILE = SCRIPTS_DIR / "token.json"  # gmail.readonly + drive.readonly
-TOKEN_FILE_COMPOSE = SCRIPTS_DIR / "token_khalil.json"  # gmail.compose for send
+TOKEN_FILE_COMPOSE = SCRIPTS_DIR / "token_pharoclaw.json"  # gmail.compose for send
 TOKEN_FILE_CALENDAR = SCRIPTS_DIR / "token_calendar.json"  # calendar.readonly
 TOKEN_FILE_MODIFY = SCRIPTS_DIR / "token_modify.json"  # gmail.modify for label management (#46)
 TOKEN_FILE_CONTACTS = SCRIPTS_DIR / "token_contacts.json"  # contacts.readonly for People API (#49)
@@ -67,11 +70,11 @@ CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
 MAX_CONTEXT_TOKENS = 8000
 
 # Timezone
-TIMEZONE = "America/Toronto"
+TIMEZONE = os.getenv("PHAROCLAW_TIMEZONE", "UTC")
 
 # Weather (Open-Meteo, free, no API key)
-WEATHER_LAT = 43.6532
-WEATHER_LON = -79.3832
+WEATHER_LAT = float(os.getenv("PHAROCLAW_WEATHER_LAT", "0"))
+WEATHER_LON = float(os.getenv("PHAROCLAW_WEATHER_LON", "0"))
 
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed
@@ -80,7 +83,7 @@ SEARCH_PROVIDER = "duckduckgo"  # no API key needed
 TELEGRAM_POLL_TIMEOUT = 30
 
 # Keyring service name
-KEYRING_SERVICE = "khalil-assistant"
+KEYRING_SERVICE = "pharoclaw"
 # App Store Connect API keys (stored in keyring, not here):
 #   appstore-key-id       — API Key ID from App Store Connect
 #   appstore-issuer-id    — Issuer ID from App Store Connect
@@ -95,10 +98,10 @@ WORKFLOW_MAX_RUNS_PER_HOUR = 10
 
 # Claude Code CLI (for complex code generation)
 CLAUDE_CODE_BIN = "/opt/homebrew/bin/claude"
-WORKTREES_DIR = KHALIL_DIR / ".worktrees"
+WORKTREES_DIR = PHAROCLAW_DIR / ".worktrees"
 
 # Container sandbox
-SANDBOX_IMAGE = "khalil-sandbox"
+SANDBOX_IMAGE = "pharoclaw-sandbox"
 SANDBOX_MEM_LIMIT = "256m"
 SANDBOX_TIMEOUT = 15
 
@@ -110,7 +113,7 @@ MAX_CONCURRENT_AGENTS = 3
 VOICE_REPLY_ENABLED = False  # opt-in: reply with voice audio by default
 TTS_VOICE = "Samantha"  # macOS say voice
 
-# Apple Reminders sync — push Khalil reminders to Reminders.app
+# Apple Reminders sync — push PharoClaw reminders to Reminders.app
 APPLE_REMINDERS_SYNC = True
 
 

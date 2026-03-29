@@ -11,7 +11,7 @@ from urllib.parse import quote_plus
 
 import httpx
 
-log = logging.getLogger("khalil.actions.web")
+log = logging.getLogger("pharoclaw.actions.web")
 
 SKILL = {
     "name": "web",

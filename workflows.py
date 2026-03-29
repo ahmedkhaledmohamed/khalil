@@ -13,7 +13,7 @@ from typing import Any, Callable
 
 from config import DB_PATH, WORKFLOW_ENGINE_ENABLED, WORKFLOW_MAX_RUNS_PER_HOUR
 
-log = logging.getLogger("khalil.workflows")
+log = logging.getLogger("pharoclaw.workflows")
 
 # Re-entrancy guard: workflow IDs currently executing
 _executing: set[str] = set()
@@ -211,7 +211,7 @@ class WorkflowEngine:
         """Register built-in seed workflows."""
         seeds = [
             Workflow(
-                id="wf_zia_health", name="Zia health monitor",
+                id="wf_app_health", name="App health monitor (example)",
                 trigger_type="cron", trigger_config={"hour": "*/6"},
                 condition={"field": "downloads_delta_pct", "op": "<", "value": -30},
                 actions=[

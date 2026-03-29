@@ -1,4 +1,4 @@
-# Khalil — Personal AI Assistant
+# PharoClaw — Personal AI Assistant
 # Core
 fastapi==0.115.6
 uvicorn[standard]==0.34.0

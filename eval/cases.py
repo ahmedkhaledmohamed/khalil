@@ -1,4 +1,4 @@
-"""Test case generator for Khalil's eval pipeline.
+"""Test case generator for PharoClaw's eval pipeline.
 
 Generates ~1000 test cases from SKILL metadata (patterns, keywords),
 hardcoded edge cases, conversational queries, and paraphrases.
@@ -159,6 +159,8 @@ def _generate_from_patterns(registry) -> list[TestCase]:
     cases = []
     for skill in registry.list_skills():
         for pattern, action_type in skill.patterns:
+            has_handler = registry.get_handler(action_type) is not None
+            path = "direct_action" if has_handler else "llm_intent"
             positives = _positive_query_from_regex(pattern)
             for q in positives:
                 cases.append(TestCase(
@@ -166,7 +168,7 @@ def _generate_from_patterns(registry) -> list[TestCase]:
                     query=q,
                     category=skill.category,
                     complexity="trivial",
-                    expected_path="direct_action",
+                    expected_path=path,
                     expected_action=action_type,
                     expected_contains=[],
                     expected_not_contains=[],
@@ -197,6 +199,8 @@ def _generate_from_keywords(registry) -> list[TestCase]:
     cases = []
     for skill in registry.list_skills():
         for action_type, keyword_string in skill.keywords.items():
+            has_handler = registry.get_handler(action_type) is not None
+            path = "direct_action" if has_handler else "llm_intent"
             words = keyword_string.split()
             if len(words) < 2:
                 continue
@@ -209,7 +213,7 @@ def _generate_from_keywords(registry) -> list[TestCase]:
                     query=query,
                     category=skill.category,
                     complexity="trivial",
-                    expected_path="direct_action",
+                    expected_path=path,
                     expected_action=action_type,
                     expected_contains=[],
                     expected_not_contains=[],

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 
 from config import CLAUDE_MODEL, SWARM_ENABLED, MAX_CONCURRENT_AGENTS
 
-log = logging.getLogger("khalil.agents.coordinator")
+log = logging.getLogger("pharoclaw.agents.coordinator")
 
 
 @dataclass

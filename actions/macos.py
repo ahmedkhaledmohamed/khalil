@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-log = logging.getLogger("khalil.actions.macos")
+log = logging.getLogger("pharoclaw.actions.macos")
 
 SKILL = {
     "name": "macos",
@@ -234,7 +234,7 @@ async def capture_screenshot(region: str | None = None) -> Path | None:
         region: Optional region string for -R flag, e.g. "x,y,w,h".
                 If None, captures the full screen.
     """
-    output_path = Path("/tmp/khalil_screenshot.png")
+    output_path = Path("/tmp/pharoclaw_screenshot.png")
     cmd = ["screencapture", "-x"]
     if region:
         cmd.extend(["-R", region])

@@ -9,10 +9,10 @@ import anthropic
 
 from config import CLAUDE_MODEL, KEYRING_SERVICE, MAX_CONCURRENT_AGENTS
 
-log = logging.getLogger("khalil.agents")
+log = logging.getLogger("pharoclaw.agents")
 
 _SUB_AGENT_SYSTEM = (
-    "You are a sub-agent for Khalil, a personal AI assistant. "
+    "You are a sub-agent for PharoClaw, a personal AI assistant. "
     "Complete the following task concisely. Return only the result, no preamble."
 )
 
