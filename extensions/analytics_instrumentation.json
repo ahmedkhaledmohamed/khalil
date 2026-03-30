@@ -1,0 +1,9 @@
+{
+    "name": "analytics_instrumentation",
+    "command": "ubi_logging",
+    "description": "Track OS permission outcomes for all flows",
+    "action_module": "actions.analytics_instrumentation",
+    "handler_function": "handle_ubi_logging",
+    "generated_at": "2026-03-30T12:00:00",
+    "generated_for": "Is this a feature gap?"
+}
