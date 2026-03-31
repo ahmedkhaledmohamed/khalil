@@ -83,11 +83,16 @@ async def _read_pdf(path: str, max_pages: int = 20) -> str | None:
 
         def _extract():
             text_parts = []
+            total_chars = 0
+            max_chars = 50_000  # Cap total extraction to prevent memory issues
             with pdfplumber.open(path) as pdf:
                 for page in pdf.pages[:max_pages]:
                     t = page.extract_text()
                     if t:
                         text_parts.append(t)
+                        total_chars += len(t)
+                        if total_chars >= max_chars:
+                            break
             return "\n\n".join(text_parts)
 
         return await asyncio.to_thread(_extract)
@@ -145,48 +150,54 @@ async def summarize_pdf(path: str, ask_claude_fn) -> str:
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle summarization intents."""
     query = intent.get("query", "") or intent.get("user_query", "")
-    server = intent.get("_server", {})
 
-    # We need ask_claude from server — import it
-    from server import ask_claude
+    try:
+        from server import ask_claude
+    except Exception:
+        await ctx.reply("⚠️ Summarizer not available — server not initialized.")
+        return True
 
-    if action == "summarize_url":
-        url = _extract_url(query)
-        if not url:
-            await ctx.reply("Please include a URL to summarize.")
+    try:
+        if action == "summarize_url":
+            url = _extract_url(query)
+            if not url:
+                await ctx.reply("Please include a URL to summarize.")
+                return True
+            if _extract_youtube_id(url):
+                await ctx.reply("📹 Fetching YouTube transcript...")
+                summary = await summarize_youtube(url, ask_claude)
+            else:
+                await ctx.reply("📄 Fetching and summarizing...")
+                summary = await summarize_url(url, ask_claude)
+            await ctx.reply(summary)
             return True
-        # Check if it's actually a YouTube URL
-        if _extract_youtube_id(url):
+
+        if action == "summarize_youtube":
+            url = _extract_url(query)
+            if not url:
+                await ctx.reply("Please include a YouTube URL to summarize.")
+                return True
             await ctx.reply("📹 Fetching YouTube transcript...")
             summary = await summarize_youtube(url, ask_claude)
-        else:
-            await ctx.reply("📄 Fetching and summarizing...")
-            summary = await summarize_url(url, ask_claude)
-        await ctx.reply(summary)
-        return True
-
-    if action == "summarize_youtube":
-        url = _extract_url(query)
-        if not url:
-            await ctx.reply("Please include a YouTube URL to summarize.")
+            await ctx.reply(summary)
             return True
-        await ctx.reply("📹 Fetching YouTube transcript...")
-        summary = await summarize_youtube(url, ask_claude)
-        await ctx.reply(summary)
-        return True
 
-    if action == "summarize_pdf":
-        # Extract path from query
-        path = re.sub(
-            r"\b(?:summarize|summary|tldr|key\s+points|this|the|pdf|document)\b",
-            "", query, flags=re.IGNORECASE,
-        ).strip()
-        if not path:
-            await ctx.reply("Please provide a path to the PDF file.")
+        if action == "summarize_pdf":
+            path = re.sub(
+                r"\b(?:summarize|summary|tldr|key\s+points|this|the|pdf|document)\b",
+                "", query, flags=re.IGNORECASE,
+            ).strip()
+            if not path:
+                await ctx.reply("Please provide a path to the PDF file.")
+                return True
+            await ctx.reply("📄 Reading PDF...")
+            summary = await summarize_pdf(path, ask_claude)
+            await ctx.reply(summary)
             return True
-        await ctx.reply("📄 Reading PDF...")
-        summary = await summarize_pdf(path, ask_claude)
-        await ctx.reply(summary)
+
+    except Exception as e:
+        from resilience import format_user_error
+        await ctx.reply(format_user_error(e, skill_name="Summarizer"))
         return True
 
     return False

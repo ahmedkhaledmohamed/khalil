@@ -117,11 +117,14 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
 
     if action == "pomodoro_start":
         if _active_timer:
-            elapsed = (datetime.now(ZoneInfo(TIMEZONE)) - datetime.strptime(
-                _active_timer["started_at"], "%Y-%m-%d %H:%M:%S"
-            ).replace(tzinfo=ZoneInfo(TIMEZONE))).total_seconds() / 60
-            remaining = _active_timer["duration_min"] - elapsed
-            await ctx.reply(f"Already in a focus session! {remaining:.0f} min remaining.")
+            try:
+                elapsed = (datetime.now(ZoneInfo(TIMEZONE)) - datetime.strptime(
+                    _active_timer["started_at"], "%Y-%m-%d %H:%M:%S"
+                ).replace(tzinfo=ZoneInfo(TIMEZONE))).total_seconds() / 60
+                remaining = _active_timer["duration_min"] - elapsed
+                await ctx.reply(f"Already in a focus session! {remaining:.0f} min remaining.")
+            except (ValueError, KeyError):
+                await ctx.reply("A focus session is already running.")
             return True
 
         # Extract duration

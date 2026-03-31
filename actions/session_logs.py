@@ -162,6 +162,16 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle session log intents."""
     query = intent.get("query", "") or intent.get("user_query", "")
 
+    try:
+        return await _dispatch_intent(action, query, ctx)
+    except Exception as e:
+        from resilience import format_user_error
+        await ctx.reply(format_user_error(e, skill_name="Session Logs"))
+        return True
+
+
+async def _dispatch_intent(action: str, query: str, ctx) -> bool:
+    """Inner dispatch — separated for clean error handling."""
     if action == "session_search":
         # Extract search keyword — strip command words
         keyword = re.sub(

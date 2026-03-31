@@ -296,10 +296,13 @@ def get_icloud_reminders() -> list[dict]:
     try:
         result = subprocess.run(
             ["osascript", "-e", script],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=20,
         )
         if result.returncode != 0:
-            log.warning("osascript failed: %s", result.stderr.strip())
+            err = result.stderr.strip()
+            log.warning("osascript failed: %s", err)
+            if "assistive" in err.lower() or "not allowed" in err.lower():
+                log.error("Reminders: accessibility permission denied")
             return []
 
         reminders = []
@@ -312,8 +315,11 @@ def get_icloud_reminders() -> list[dict]:
             due_date = parts[1].strip() if len(parts) > 1 else ""
             reminders.append({"name": name, "due_date": due_date, "completed": False})
         return reminders
-    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-        log.warning("iCloud reminders fetch failed: %s", e)
+    except subprocess.TimeoutExpired:
+        log.warning("iCloud reminders fetch timed out (20s)")
+        return []
+    except FileNotFoundError:
+        log.warning("osascript not found — not on macOS?")
         return []
 
 
