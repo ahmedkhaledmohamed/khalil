@@ -513,12 +513,12 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
 
     system = (
         f"{_temporal}"
-        "You are Khalil, Ahmed's personal AI assistant. "
-        "You have deep knowledge of his life, career, family, finances, and projects. "
-        "Answer based on the provided context from his personal archives. "
-        "Be direct, specific, and personal — you know him. "
+        "You are Khalil, a personal AI assistant. "
+        "You have deep knowledge of the user's life, career, and projects. "
+        "Answer based on the provided context from their personal archives. "
+        "Be direct, specific, and personal. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
-        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
+        "CAPABILITIES: You run on the user's Mac and can execute macOS shell commands "
         "and access many services through your action system.\n"
         f"{_skill_context}\n\n"
         "If the user asks about their machine state, DO NOT suggest they run a command "
@@ -534,7 +534,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         f"{system_extra}"
     )
 
-    user_message = f"Context from Ahmed's archives:\n\n{context}\n\n---\n\nQuestion: {query}"
+    user_message = f"Context from personal archives:\n\n{context}\n\n---\n\nQuestion: {query}"
 
     # M6: Smart model routing — select model based on query complexity
     from model_router import route_query
@@ -1687,7 +1687,7 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
 
         personal_context = get_relevant_context(context_query, max_chars=1500)
         body = await ask_claude(
-            f"Write a concise, professional email body for Ahmed to send.\n"
+            f"Write a concise, professional email body for the user to send.\n"
             f"To: {to_addr}\nSubject: {subject}\n\n"
             "Write only the email body, no greeting or signature. Keep it under 200 words.",
             personal_context,
@@ -3086,9 +3086,9 @@ async def cmd_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # Use LLM to generate the email body from a descriptive subject
             personal_context = get_relevant_context(subject, max_chars=1500)
             body = await ask_claude(
-                f"Write a concise, professional email body for Ahmed to send.\n"
+                f"Write a concise, professional email body for the user to send.\n"
                 f"To: {to_addr}\nSubject: {subject}\n\n"
-                "Write only the email body, no greeting or signature — Ahmed will add those. "
+                "Write only the email body, no greeting or signature — the user will add those. "
                 "Keep it under 200 words. Only include facts that are clearly implied by the subject. "
                 "Do NOT invent details, projects, or specifics that aren't in the subject.",
                 personal_context,
@@ -3489,7 +3489,7 @@ async def cmd_finance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         archive_context = truncate_context(results) if results else ""
         full_context = f"{personal_context}\n\n{archive_context}"
         answer = await ask_claude(
-            f"Answer Ahmed's finance question based on his financial records:\n\n{query}",
+            f"Answer this finance question based on the user's financial records:\n\n{query}",
             full_context,
             system_extra=f"Today's date: {date.today().isoformat()}",
         )
@@ -3544,7 +3544,7 @@ async def cmd_work(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if results:
             work_context += "\n\n" + truncate_context(results)
         answer = await ask_claude(
-            f"Answer Ahmed's work question based on sprint planning data:\n\n{query}",
+            f"Answer this work question based on sprint planning data:\n\n{query}",
             work_context,
             system_extra=f"Today's date: {date.today().isoformat()}",
         )
@@ -3600,7 +3600,7 @@ async def cmd_goals(update: Update, context: ContextTypes.DEFAULT_TYPE):
         work_text = get_sprint_summary()
         review_context = f"Goals:\n{goal_text}\n\nWork:\n{work_text}"
         answer = await ask_claude(
-            "Review Ahmed's current goals. Are they on track? What's missing? "
+            "Review the user's current goals. Are they on track? What's missing? "
             "What should he focus on this week? Be direct and specific.",
             review_context,
             system_extra=f"Today's date: {date.today().isoformat()}",

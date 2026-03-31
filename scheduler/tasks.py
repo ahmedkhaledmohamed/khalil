@@ -52,7 +52,7 @@ async def send_morning_brief(channel: "Channel", chat_id: int, ask_claude_fn):
     """Generate and send morning brief."""
     from scheduler.digests import generate_morning_brief
 
-    # M9: Smart timing — delay if Ahmed isn't typically active at this hour
+    # M9: Smart timing — delay if the user isn't typically active at this hour
     try:
         from scheduler.proactive import is_good_time_for_alert
         if not is_good_time_for_alert("morning_brief"):
@@ -213,14 +213,12 @@ async def send_synthesis_nudge(channel: "Channel", chat_id: int):
 
 
 async def poll_dev_state(channel: "Channel", chat_id: int):
-    """Poll dev environment state and notify on changes."""
+    """Poll dev environment state (silent — tracks state for context, no notifications)."""
     try:
-        from actions.terminal import poll_and_diff, format_state_changes
+        from actions.terminal import poll_and_diff
         changes = await poll_and_diff()
         if changes:
-            message = format_state_changes(changes)
-            await channel.send_message(chat_id, message)
-            log.info("Dev state changes detected: %d", len(changes))
+            log.debug("Dev state changes detected: %d", len(changes))
     except Exception as e:
         log.debug("Dev state poll failed: %s", e)
         _record_scheduler_failure("dev_state_poll", e)

@@ -266,14 +266,14 @@ async def generate_planning_prompt(ask_claude_fn) -> str:
     )
 
     prompt = await ask_claude_fn(
-        f"{_quarter_label(ending_q)} ends in 2 weeks. Generate a quarterly planning prompt for Ahmed.\n\n"
+        f"{_quarter_label(ending_q)} ends in 2 weeks. Generate a quarterly planning prompt for the user.\n\n"
         "Structure:\n"
         f"1. **{ending_q} Recap** — What was accomplished, what fell short (be specific)\n"
         f"2. **Unfinished Business** — What's still open and whether to carry forward or drop\n"
         f"3. **{next_q} Planning** — Based on current capacity and domain snapshot, suggest:\n"
         "   - 2-3 goals per domain (work, projects, personal, finance)\n"
         "   - Flag any capacity conflicts\n"
-        "4. **Question** — Ask Ahmed one sharp question about his priorities\n\n"
+        "4. **Question** — Ask the user one sharp question about his priorities\n\n"
         "Be direct and specific to the data. No filler. Under 25 lines.",
         context,
         system_extra=f"Today's date: {today.isoformat()}",

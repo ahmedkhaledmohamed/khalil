@@ -215,7 +215,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     )
 
     brief = await ask_claude_fn(
-        f"Generate a concise morning brief for Ahmed. Today is {day_name}.\n"
+        f"Generate a concise morning brief for the user. Today is {day_name}.\n"
         f"Day style: {day_style}\n\n"
         "Include:\n"
         "- Weather at the top (one line)\n"
@@ -280,7 +280,7 @@ async def generate_financial_alert(ask_claude_fn) -> str | None:
     )
 
     alert = await ask_claude_fn(
-        f"Based on Ahmed's financial records below, identify any time-sensitive items for {month} {today.year}:\n"
+        f"Based on the user's financial records below, identify any time-sensitive items for {month} {today.year}:\n"
         "- RRSP/TFSA contribution deadlines or room\n"
         "- RSU vesting dates coming up\n"
         "- Tax filing deadlines\n"
@@ -348,7 +348,7 @@ async def generate_weekly_summary(ask_claude_fn) -> str:
     context = f"Profile:\n{personal}\n\nRecent:\n{recent_text}{stale_text}{project_text}{learned_text}"
 
     summary = await ask_claude_fn(
-        "Generate a concise weekly summary for Ahmed. Include:\n"
+        "Generate a concise weekly summary for the user. Include:\n"
         "- Key themes from the past week\n"
         "- Any stale reminders that need attention\n"
         "- Projects with open tasks that may need attention\n"
@@ -409,7 +409,7 @@ async def generate_friday_reflection(ask_claude_fn) -> str:
     context = f"{reminder_text}{findings_text}{work_text}{goal_text}"
 
     reflection = await ask_claude_fn(
-        "Generate a Friday end-of-week reflection for Ahmed. "
+        "Generate a Friday end-of-week reflection for the user. "
         "Based on the data below, ask exactly 3 sharp questions:\n"
         "1. What moved forward this week? (acknowledge progress)\n"
         "2. What's stuck or being avoided? (call it out directly)\n"
@@ -551,7 +551,7 @@ async def generate_weekly_synthesis(ask_claude_fn) -> str:
     )
 
     synthesis = await ask_claude_fn(
-        "Generate a weekly synthesis digest for Ahmed. Structure it exactly as:\n\n"
+        "Generate a weekly synthesis digest for the user. Structure it exactly as:\n\n"
         "1. **Capacity Score** — state the score, label, and one-line interpretation\n"
         "2. **Cross-Domain Risks** — top 3 risks from the data, be specific\n"
         "3. **Recommendations** — top 3 actionable items, each starting with a verb\n"

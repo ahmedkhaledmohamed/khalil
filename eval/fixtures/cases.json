@@ -7837,7 +7837,7 @@
   },
   {
     "id": "edge-032",
-    "query": "check weather and send email to mom",
+    "query": "check weather and send email to Sarah",
     "category": "edge",
     "complexity": "complex",
     "expected_path": "llm_intent",
@@ -9313,7 +9313,7 @@
   },
   {
     "id": "conv-004",
-    "query": "How old are my kids?",
+    "query": "What is on my calendar today?",
     "category": "conversational",
     "complexity": "moderate",
     "expected_path": "conversational",
@@ -10113,7 +10113,7 @@
   },
   {
     "id": "conv-054",
-    "query": "Tell me more about how old are my kids",
+    "query": "Tell me more about what is on my calendar today",
     "category": "conversational",
     "complexity": "complex",
     "expected_path": "conversational",

@@ -3,7 +3,7 @@
   "displayName": "Khalil Terminal Bridge",
   "description": "Exposes Cursor's integrated terminal to Khalil via local HTTP",
   "version": "0.1.0",
-  "publisher": "ahmedkhaledmohamed",
+  "publisher": "khalil-assistant",
   "engines": {
     "vscode": "^1.85.0"
   },

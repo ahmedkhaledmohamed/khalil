@@ -165,7 +165,7 @@ class FakeMessage:
         self.chat.id = chat_id
         self.from_user = MagicMock()
         self.from_user.id = chat_id
-        self.from_user.first_name = "Ahmed"
+        self.from_user.first_name = "TestUser"
         self.reply_text = AsyncMock()
         self.reply_html = AsyncMock()
 

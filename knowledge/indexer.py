@@ -334,7 +334,7 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
     name = filepath.stem.lower()
 
     if dirname == "work":
-        return "work", "work:spotify"
+        return "work", "work:employer"
     elif dirname == "career":
         if "resume" in name:
             return "career", "career:resume"
