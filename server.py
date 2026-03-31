@@ -1820,7 +1820,17 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
-    await cmd_start(update, context)
+    from skills import get_registry
+    registry = get_registry()
+    help_text = registry.format_help_by_category()
+    help_text += (
+        "\n\nCore commands:\n"
+        "/brief — Morning brief  /health — System health\n"
+        "/remind — Reminders  /calendar — Today's events\n"
+        "/email — Email  /search — Search archives\n"
+        "/mode — Autonomy level  /help — This message"
+    )
+    await ctx.reply(help_text)
 
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3922,6 +3932,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await handle_self_extend(query, ctx._raw_update, ask_claude)
     except Exception as e:
         log.debug("Capability gap detection failed: %s", e)
+
+    # Append contextual skill suggestions (skip if voice mode)
+    if not voice_mode:
+        try:
+            from skills import get_registry
+            suggestions = get_registry().suggest_skills(query, max_suggestions=2)
+            if suggestions:
+                display_response += "\n\n💡 " + " | ".join(suggestions)
+        except Exception:
+            pass
 
     # Replace progress message with response (tag already stripped)
     try:
