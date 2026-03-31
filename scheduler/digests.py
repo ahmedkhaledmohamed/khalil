@@ -564,6 +564,88 @@ async def generate_weekly_synthesis(ask_claude_fn) -> str:
     return f"Weekly Synthesis — {today.isoformat()}\n\n{synthesis}"
 
 
+async def generate_evening_digest(ask_claude_fn) -> str:
+    """Generate evening digest — nutrition, health, focus recap for the day.
+
+    Sent around 9 PM. Covers: calorie/protein, steps, fasting, pomodoro stats.
+    """
+    today = date.today()
+    today_iso = today.isoformat()
+    parts = []
+
+    # Nutrition
+    try:
+        from actions.calorie_tracker import get_daily_summary
+        cal = get_daily_summary()
+        if cal.get("calories"):
+            goal_str = f"/{cal['calorie_goal']}" if cal.get("calorie_goal") else ""
+            parts.append(
+                f"Nutrition: {cal['calories']}{goal_str} cal, "
+                f"{cal.get('protein_g', 0)}g protein, {cal.get('meals', 0)} meals"
+            )
+    except Exception:
+        pass
+
+    # Steps
+    try:
+        from actions.apple_health import _get_health_data
+        steps_data = await _get_health_data("steps")
+        if steps_data:
+            steps = steps_data.get("steps_today", 0)
+            goal = steps_data.get("goal", 10000)
+            pct = int(steps / goal * 100) if goal else 0
+            parts.append(f"Steps: {steps:,}/{goal:,} ({pct}%)")
+    except Exception:
+        pass
+
+    # Fasting
+    try:
+        from actions.fasting_tracker import get_status
+        fast = get_status()
+        if fast:
+            parts.append(
+                f"Fasting: {fast['elapsed_hours']:.1f}/{fast['target_hours']}h "
+                f"({fast.get('protocol', '')})"
+            )
+    except Exception:
+        pass
+
+    # Focus / Pomodoro
+    try:
+        from actions.pomodoro import get_today_stats
+        pomo = get_today_stats()
+        if pomo.get("sessions"):
+            parts.append(
+                f"Focus: {pomo['sessions']} sessions, {pomo['total_min']}min, "
+                f"{pomo['completed']} completed"
+            )
+    except Exception:
+        pass
+
+    if not parts:
+        return f"🌙 Evening Digest — {today_iso}\n\nNo health/focus data logged today."
+
+    data_text = "\n".join(f"- {p}" for p in parts)
+
+    brief = await ask_claude_fn(
+        "Generate a concise evening health/focus recap for the user. "
+        "Include the data below and add a brief observation or encouragement. "
+        "Keep it under 8 lines, be direct.",
+        f"Today's data:\n{data_text}",
+        system_extra=f"Today's date: {today_iso}, evening",
+    )
+
+    return f"\U0001f319 Evening Digest — {today_iso}\n\n{brief}"
+
+
+async def generate_capability_health_digest() -> str:
+    """Generate weekly capability health report from learning system."""
+    from learning import get_capability_health, format_capability_health
+
+    report = get_capability_health(days=7)
+    return format_capability_health(report)
+
+
 async def generate_career_alert() -> str | None:
     """Run job scraper and return formatted results, or None if no new matches."""
     from actions.jobs import fetch_new_jobs, format_jobs_text
