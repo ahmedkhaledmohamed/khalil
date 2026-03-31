@@ -61,6 +61,7 @@ SKILL = {
         "What's the home status?",
         "Lock the front door",
     ],
+    "sensor": {"function": "sense_home", "interval_min": 30, "identify_opportunities": "identify_home_opportunities"},
 }
 
 
@@ -260,3 +261,48 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_home() -> dict:
+    """Sensor: check home temperature via HomeKit Shortcut."""
+    try:
+        shortcut = await _find_shortcut("Home Temperature")
+        if shortcut:
+            output, ok = await _run_shortcut(shortcut)
+            if ok and output:
+                # Try to extract a numeric temperature
+                m = re.search(r"(\d+\.?\d*)", output)
+                if m:
+                    return {"temperature": float(m.group(1)), "raw": output}
+        return {}
+    except Exception as e:
+        log.debug("Home sensor failed: %s", e)
+        return {}
+
+
+def identify_home_opportunities(state: dict, last_state: dict, cooldowns: dict):
+    """Identify temperature alerts from home sensor data."""
+    import time as _time
+    from agent_loop import Opportunity, Urgency, _on_cooldown
+
+    opps = []
+    now = _time.monotonic()
+
+    temp = state.get("homekit", {}).get("temperature")
+    if temp is not None:
+        if temp > 28 or temp < 16:
+            opp_id = f"home_temp_alert_{int(temp)}"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=4):
+                emoji = "\U0001f525" if temp > 28 else "\U00002744\ufe0f"
+                opps.append(Opportunity(
+                    id=opp_id, source="homekit",
+                    summary=f"{emoji} Home temperature: {temp}\u00b0C",
+                    urgency=Urgency.LOW, action_type=None,
+                    payload={"temperature": temp},
+                ))
+
+    return opps

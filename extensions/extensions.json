@@ -35,6 +35,24 @@
             "created_at": "2026-03-15T20:32:00",
             "source_pr": null,
             "description": "Read and search Slack messages"
+        },
+        "ollama_status_checker": {
+            "enabled": true,
+            "version": "1.0",
+            "action_type": "ollama_status",
+            "intent_patterns": [],
+            "created_at": "2026-03-28T12:00:00",
+            "source_pr": null,
+            "description": "Check real-time status of Ollama/Claude services"
+        },
+        "system_restarter": {
+            "enabled": true,
+            "version": "1.0",
+            "action_type": "restart",
+            "intent_patterns": [],
+            "created_at": "2026-03-28T18:00:00",
+            "source_pr": null,
+            "description": "Restart Khalil or the host machine"
         }
     }
 }

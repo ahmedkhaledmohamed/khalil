@@ -43,6 +43,7 @@ SKILL = {
         "Search clipboard for URL",
         "What's on my clipboard?",
     ],
+    "sensor": {"function": "sense_clipboard", "interval_min": 1},
 }
 
 
@@ -221,3 +222,17 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_clipboard() -> dict:
+    """Sensor: poll clipboard and record new entries."""
+    try:
+        new = await poll_clipboard()
+        return {"new_entry": new}
+    except Exception as e:
+        log.debug("Clipboard sensor failed: %s", e)
+        return {"new_entry": False}

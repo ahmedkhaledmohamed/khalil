@@ -58,6 +58,7 @@ SKILL = {
         "Show my workouts this week",
         "Health summary",
     ],
+    "sensor": {"function": "sense_health", "interval_min": 60},
 }
 
 
@@ -273,3 +274,19 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
 
     return False
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_health() -> dict:
+    """Sensor: check daily step count from cache/Shortcuts."""
+    try:
+        data = await _get_health_data("steps")
+        if data:
+            return {"steps_today": data.get("steps_today", 0), "step_goal": data.get("goal", 10000)}
+        return {}
+    except Exception as e:
+        log.debug("Health sensor failed: %s", e)
+        return {}

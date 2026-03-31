@@ -20,6 +20,16 @@ _EXTENSIONS_DIR = Path(__file__).parent / "extensions"
 
 
 @dataclass
+class SensorConfig:
+    """Configuration for a skill's background sensor."""
+
+    name: str  # sensor name (e.g. "reminders", "health")
+    function: object  # async callable returning dict
+    interval_min: int = 5  # how often to run (minutes)
+    identify_opportunities: object | None = None  # optional: (state, last_state) -> list[Opportunity]
+
+
+@dataclass
 class Skill:
     """A registered skill backed by an action module."""
 
@@ -33,6 +43,7 @@ class Skill:
     examples: list[str] = field(default_factory=list)
     command: str | None = None  # Telegram /command
     command_handler: str | None = None  # function name for /command
+    sensor: SensorConfig | None = None  # optional background sensor
 
     def match(self, text: str) -> str | None:
         """Return the first matching action_type for the given text, or None."""
@@ -178,6 +189,10 @@ class SkillRegistry:
     def list_skills(self) -> list[Skill]:
         return list(self._skills.values())
 
+    def get_sensors(self) -> list[SensorConfig]:
+        """Return all registered sensors from skills that have them."""
+        return [s.sensor for s in self._skills.values() if s.sensor is not None]
+
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -215,6 +230,22 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         if kw:
             keywords[atype] = kw
 
+    # Build sensor config if present
+    sensor = None
+    sensor_raw = raw.get("sensor")
+    if sensor_raw and isinstance(sensor_raw, dict):
+        sensor_fn_name = sensor_raw.get("function")
+        sensor_fn = getattr(mod, sensor_fn_name, None) if sensor_fn_name else None
+        opp_fn_name = sensor_raw.get("identify_opportunities")
+        opp_fn = getattr(mod, opp_fn_name, None) if opp_fn_name else None
+        if sensor_fn:
+            sensor = SensorConfig(
+                name=sensor_raw.get("name", name),
+                function=sensor_fn,
+                interval_min=sensor_raw.get("interval_min", 5),
+                identify_opportunities=opp_fn,
+            )
+
     return Skill(
         name=name,
         description=raw.get("description", ""),
@@ -226,6 +257,7 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         examples=raw.get("examples", []),
         command=raw.get("command"),
         command_handler=raw.get("command_handler"),
+        sensor=sensor,
     )
 
 

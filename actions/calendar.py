@@ -37,6 +37,7 @@ SKILL = {
         {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
     ],
     "examples": ["What's on my calendar today?", "Any meetings this afternoon?"],
+    "sensor": {"function": "sense_calendar", "interval_min": 5, "identify_opportunities": "identify_calendar_opportunities"},
 }
 
 SCOPES_READ = ["https://www.googleapis.com/auth/calendar.readonly"]
@@ -219,6 +220,66 @@ def _delete_event_sync(event_id: str) -> bool:
 async def delete_event(event_id: str) -> bool:
     """Delete a calendar event by ID."""
     return await asyncio.to_thread(_delete_event_sync, event_id)
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_calendar() -> dict:
+    """Sensor: check for upcoming meetings in next 2 hours."""
+    try:
+        events = await get_today_events()
+        now = datetime.now(ZoneInfo(TIMEZONE))
+        upcoming = []
+        for ev in (events or []):
+            start_str = ev.get("start", "")
+            if isinstance(start_str, dict):
+                start_str = start_str.get("dateTime") or start_str.get("date", "")
+            if not start_str:
+                continue
+            try:
+                start = datetime.fromisoformat(start_str)
+                if not start.tzinfo:
+                    start = start.replace(tzinfo=ZoneInfo(TIMEZONE))
+                delta = (start - now).total_seconds() / 60
+                if 0 < delta <= 120:
+                    ev["_minutes_until"] = int(delta)
+                    upcoming.append(ev)
+            except (ValueError, TypeError):
+                pass
+        return {"upcoming_events": upcoming}
+    except Exception as e:
+        log.debug("Calendar sensor failed: %s", e)
+        return {"upcoming_events": []}
+
+
+def identify_calendar_opportunities(state: dict, last_state: dict, cooldowns: dict):
+    """Identify meeting prep opportunities from calendar sensor data."""
+    import time as _time
+    from agent_loop import Opportunity, Urgency, _on_cooldown
+
+    opps = []
+    now = _time.monotonic()
+
+    for ev in state.get("calendar", {}).get("upcoming_events", []):
+        mins = ev.get("_minutes_until", 999)
+        if mins <= 35:
+            title = ev.get("summary", "meeting")
+            start_key = ev.get("start", "")
+            if isinstance(start_key, dict):
+                start_key = start_key.get("dateTime", "")[:10]
+            opp_id = f"meeting_prep_{title[:30]}_{start_key}"
+            if _on_cooldown(opp_id, cooldowns, now, hours=12):
+                continue
+            opps.append(Opportunity(
+                id=opp_id, source="calendar",
+                summary=f"\U0001f4c5 Meeting in {mins}min: {title}",
+                urgency=Urgency.MEDIUM, action_type="meeting_prep",
+                payload={"event": ev}, requires_llm=True,
+            ))
+
+    return opps
 
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
