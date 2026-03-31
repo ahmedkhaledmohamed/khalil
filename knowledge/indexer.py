@@ -166,6 +166,22 @@ def init_db() -> sqlite3.Connection:
         );
 
         CREATE INDEX IF NOT EXISTS idx_activity_timing ON activity_timing(signal_type, day_of_week, hour);
+
+        -- Follow-up persistence: track surfaced alerts and nudge if unaddressed
+        CREATE TABLE IF NOT EXISTS follow_ups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            source TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            action_type TEXT,
+            payload TEXT DEFAULT '{}',
+            status TEXT DEFAULT 'pending',
+            follow_up_at TEXT,
+            nudge_count INTEGER DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON follow_ups(status);
+        CREATE INDEX IF NOT EXISTS idx_follow_ups_at ON follow_ups(follow_up_at);
     """)
 
     # Create virtual table for vector search

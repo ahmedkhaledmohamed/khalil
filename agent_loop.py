@@ -10,14 +10,16 @@ loop is STATE-triggered — it acts when the world changes, not on a fixed sched
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import sqlite3
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import IntEnum
 from zoneinfo import ZoneInfo
 
-from config import TIMEZONE, AutonomyLevel
+from config import DB_PATH, TIMEZONE, AutonomyLevel
 
 log = logging.getLogger("khalil.agent_loop")
 
@@ -109,16 +111,21 @@ async def _sense_system_builtin() -> dict:
 # ---------------------------------------------------------------------------
 
 def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> list[Opportunity]:
-    """Built-in opportunity detection for sensors without skill modules.
+    """Built-in opportunity detection + proactive behavior triggers.
 
-    Most opportunity detection is now handled by skill-registered
-    identify_opportunities callbacks (see _get_opportunity_fns).
-    This function only covers built-in sensors that have no SKILL module.
+    Sources:
+    1. System health (disk space)
+    2. Follow-up persistence (pending follow-ups past their due time)
+    3. Routine drift detection (unusual silence)
+    4. Time-aware nudges (upcoming meetings, end-of-day reminders)
     """
     opps: list[Opportunity] = []
     now = time.monotonic()
+    now_dt = datetime.now(ZoneInfo(TIMEZONE))
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    current_hour = now_dt.hour
 
-    # --- Disk space warning (built-in system sensor) ---
+    # --- 1. Disk space warning (built-in system sensor) ---
     disk_pct = state.get("system", {}).get("disk_pct_used", 0)
     if disk_pct > 90:
         opp_id = "disk_space_warning"
@@ -131,7 +138,92 @@ def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> l
                 action_type=None,
             ))
 
+    # --- 2. Follow-up persistence ---
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        rows = conn.execute(
+            "SELECT id, source, summary, action_type, payload, nudge_count "
+            "FROM follow_ups WHERE status = 'pending' AND follow_up_at <= ?",
+            (now_str,),
+        ).fetchall()
+        for row in rows:
+            fid, source, summary, action_type, payload, nudge_count = row
+            opp_id = f"followup_{fid}"
+            if nudge_count >= 3:
+                # Auto-expire after 3 nudges
+                conn.execute("UPDATE follow_ups SET status = 'expired' WHERE id = ?", (fid,))
+                conn.commit()
+                continue
+            if not _on_cooldown(opp_id, cooldowns, now, hours=1):
+                opps.append(Opportunity(
+                    id=opp_id,
+                    source=source,
+                    summary=f"🔔 Follow-up: {summary}",
+                    urgency=Urgency.MEDIUM,
+                    action_type="follow_up_nudge",
+                    payload={"follow_up_id": fid, "nudge_count": nudge_count},
+                ))
+        conn.close()
+    except Exception as e:
+        log.debug("Follow-up check failed: %s", e)
+
+    # --- 3. Routine drift detection ---
+    try:
+        from learning import detect_routine_drift
+        drifts = detect_routine_drift()
+        for drift in drifts:
+            opp_id = f"routine_drift_{drift['type']}"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=24):
+                opps.append(Opportunity(
+                    id=opp_id,
+                    source="learning",
+                    summary=drift["summary"],
+                    urgency=Urgency.LOW,
+                    action_type=None,  # alert only
+                ))
+    except Exception as e:
+        log.debug("Routine drift check failed: %s", e)
+
+    # --- 4. Time-aware nudges ---
+
+    # 4a. End-of-day reminder sweep (5-6 PM)
+    if 17 <= current_hour <= 18:
+        opp_id = "eod_reminder_sweep"
+        if not _on_cooldown(opp_id, cooldowns, now, hours=20):
+            try:
+                from actions.reminders import list_reminders
+                active = list_reminders(status="active")
+                if active and len(active) >= 1:
+                    count = len(active)
+                    opps.append(Opportunity(
+                        id=opp_id,
+                        source="reminders",
+                        summary=f"📋 You have {count} incomplete reminder{'s' if count > 1 else ''} today",
+                        urgency=Urgency.LOW,
+                        action_type="reminder_sweep",
+                        payload={"reminders": [r["text"][:80] for r in active[:5]]},
+                    ))
+            except Exception as e:
+                log.debug("EOD reminder sweep failed: %s", e)
+
     return opps
+
+
+def acknowledge_follow_ups(source: str | None = None):
+    """Mark pending follow-ups as acknowledged. Called when user engages."""
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        if source:
+            conn.execute(
+                "UPDATE follow_ups SET status = 'acknowledged' WHERE status = 'pending' AND source = ?",
+                (source,),
+            )
+        else:
+            conn.execute("UPDATE follow_ups SET status = 'acknowledged' WHERE status = 'pending'")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        log.debug("Failed to acknowledge follow-ups: %s", e)
 
 
 def _on_cooldown(opp_id: str, cooldowns: dict, now: float, hours: int) -> bool:
@@ -269,13 +361,21 @@ class AgentLoop:
         if opp.action_type == "meeting_prep" and self.ask_llm:
             event = opp.payload.get("event", {})
             title = event.get("summary", "meeting")
+            attendees = event.get("attendees", [])
+            context_str = f"Meeting: {title}"
+            if attendees:
+                context_str += f"\nAttendees: {', '.join(attendees[:5])}"
             try:
-                from knowledge.context import get_relevant_context
-                context = get_relevant_context(title, max_chars=1500)
+                # Try knowledge context, fall back to basic info
+                try:
+                    from knowledge.context import get_relevant_context
+                    context_str += "\n" + get_relevant_context(title, max_chars=1500)
+                except Exception:
+                    pass
                 prep = await self.ask_llm(
                     f"Generate a brief meeting prep for: {title}. "
                     f"Include key context, talking points, and questions to ask.",
-                    context,
+                    context_str,
                 )
                 await self.channel.send_message(
                     self.chat_id,
@@ -285,6 +385,38 @@ class AgentLoop:
             except Exception as e:
                 log.warning("Meeting prep failed: %s", e)
                 return f"Meeting prep failed: {e}"
+
+        if opp.action_type == "follow_up_nudge":
+            fid = opp.payload.get("follow_up_id")
+            nudge_count = opp.payload.get("nudge_count", 0)
+            try:
+                conn = sqlite3.connect(str(DB_PATH))
+                # Increment nudge count and push follow_up_at by 2 hours
+                next_at = (datetime.now(ZoneInfo(TIMEZONE)) + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+                conn.execute(
+                    "UPDATE follow_ups SET nudge_count = nudge_count + 1, follow_up_at = ? WHERE id = ?",
+                    (next_at, fid),
+                )
+                conn.commit()
+                conn.close()
+                return f"Follow-up nudge #{nudge_count + 1} sent"
+            except Exception as e:
+                log.warning("Follow-up nudge DB update failed: %s", e)
+                return f"Follow-up nudge failed: {e}"
+
+        if opp.action_type == "reminder_sweep":
+            reminders = opp.payload.get("reminders", [])
+            lines = "\n".join(f"  • {r}" for r in reminders)
+            try:
+                await self.channel.send_message(
+                    self.chat_id,
+                    f"📋 **End-of-day check** — incomplete reminders:\n{lines}\n\n"
+                    "Reply 'done' to clear, or I'll check again tomorrow.",
+                )
+                return f"Reminder sweep: {len(reminders)} items surfaced"
+            except Exception as e:
+                log.warning("Reminder sweep failed: %s", e)
+                return f"Reminder sweep failed: {e}"
 
         return f"Unknown action: {opp.action_type}"
 

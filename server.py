@@ -3617,6 +3617,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = ctx.chat_id
     save_message(chat_id, "user", query)
 
+    # Acknowledge pending follow-ups — user is engaging
+    try:
+        from agent_loop import acknowledge_follow_ups
+        acknowledge_follow_ups()
+    except Exception:
+        pass
+
     # M9: Record activity timing for smart proactive alerts
     try:
         from scheduler.proactive import record_activity_timing
@@ -4785,6 +4792,24 @@ def _setup_scheduler():
         CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
         id="oauth_refresh",
         name="OAuth Token Refresh",
+        replace_existing=True,
+    )
+
+    # Daily signal-to-preference auto-extraction at 2 AM
+    async def _auto_extract_job():
+        try:
+            from learning import auto_extract_preferences
+            extracted = auto_extract_preferences()
+            if extracted:
+                log.info("Auto-extracted %d preferences from signals", len(extracted))
+        except Exception as e:
+            log.warning("Auto-extraction failed: %s", e)
+
+    scheduler.add_job(
+        _auto_extract_job,
+        CronTrigger(hour=2, minute=0, timezone=TIMEZONE),
+        id="auto_extract_preferences",
+        name="Signal-to-Preference Extraction",
         replace_existing=True,
     )
 
