@@ -5462,7 +5462,7 @@ def _setup_scheduler():
 
 @app.on_event("startup")
 async def startup():
-    global db_conn, autonomy, claude
+    global db_conn, autonomy, claude, OWNER_CHAT_ID
 
     log.info("Khalil starting up...")
 
@@ -5479,9 +5479,12 @@ async def startup():
 
     # Load persisted owner chat ID so notifications work after restart
     row = db_conn.execute("SELECT value FROM settings WHERE key = 'owner_chat_id'").fetchone()
-    if row:
-        OWNER_CHAT_ID = int(row[0])
-        log.info("Loaded owner chat ID: %d", OWNER_CHAT_ID)
+    if row and row[0]:
+        try:
+            OWNER_CHAT_ID = int(row[0])
+            log.info("Loaded owner chat ID: %d", OWNER_CHAT_ID)
+        except (ValueError, TypeError):
+            log.warning("Invalid owner_chat_id '%s' — send /start to re-register", row[0])
 
     # Initialize LLM backend
     if LLM_BACKEND == "claude":
