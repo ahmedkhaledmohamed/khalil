@@ -508,6 +508,7 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
                         lines.append(f"    {e['snippet'][:80]}")
                 await ctx.reply("\n".join(lines))
         except Exception as e:
-            await ctx.reply(f"\u274c {account.title()} email search failed: {e}")
+            from resilience import format_user_error
+            await ctx.reply(format_user_error(e, skill_name=f"{account.title()} Email"))
         return True
     return False

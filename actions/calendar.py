@@ -110,8 +110,14 @@ def _get_events_sync(days: int = 1, max_results: int = 20) -> list[dict]:
 
 
 async def get_today_events() -> list[dict]:
-    """Get today's calendar events."""
-    return await asyncio.to_thread(_get_events_sync, days=1)
+    """Get today's calendar events (with retry for transient failures)."""
+    from resilience import retry
+
+    @retry(max_attempts=2, backoff_factor=1.0)
+    async def _fetch():
+        return await asyncio.to_thread(_get_events_sync, days=1)
+
+    return await _fetch()
 
 
 async def get_upcoming_events(days: int = 7) -> list[dict]:
@@ -289,6 +295,7 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
             events = await get_today_events()
             await ctx.reply(format_events_text(events))
         except Exception as e:
-            await ctx.reply(f"\u274c Calendar fetch failed: {e}")
+            from resilience import format_user_error
+            await ctx.reply(format_user_error(e, skill_name="Calendar"))
         return True
     return False

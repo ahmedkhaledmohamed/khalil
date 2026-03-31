@@ -149,18 +149,30 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             _failed_sources.append("Readwise")
         return ""
 
-    (recent_raw, weather, calendar_text, job_text, github_text,
-     appstore_text, server_text, spotify_text, readwise_text) = await asyncio.gather(
-        _fetch_recent(),
-        _get_weather(),
-        _fetch_calendar(),
-        _fetch_jobs(),
-        _fetch_github_notifications(),
-        _fetch_appstore_summary(),
-        _fetch_server_health(),
-        _fetch_spotify_recent(),
-        _fetch_readwise_daily(),
-    )
+    # Overall timeout prevents the brief from hanging if a data source is stuck
+    try:
+        (recent_raw, weather, calendar_text, job_text, github_text,
+         appstore_text, server_text, spotify_text, readwise_text) = await asyncio.wait_for(
+            asyncio.gather(
+                _fetch_recent(),
+                _get_weather(),
+                _fetch_calendar(),
+                _fetch_jobs(),
+                _fetch_github_notifications(),
+                _fetch_appstore_summary(),
+                _fetch_server_health(),
+                _fetch_spotify_recent(),
+                _fetch_readwise_daily(),
+            ),
+            timeout=45,
+        )
+    except asyncio.TimeoutError:
+        log.error("Morning brief data gathering timed out (45s)")
+        _failed_sources.append("timeout — some sources too slow")
+        # Provide defaults for timed-out results
+        recent_raw, weather = [], ""
+        calendar_text = job_text = github_text = ""
+        appstore_text = server_text = spotify_text = readwise_text = ""
 
     recent_text = "\n".join(
         f"- [{r['category']}] {r['title']}: {r['content'][:150]}" for r in recent_raw
