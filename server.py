@@ -3362,6 +3362,63 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await ctx.reply(text)
 
 
+async def handle_photo_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming photo messages — download and route to doc_extract skill."""
+    import tempfile
+    import os
+
+    ctx = _ctx_from_update(update)
+    if not update.message or not update.message.photo:
+        return
+
+    caption = (update.message.caption or "").strip()
+    if not caption:
+        # No caption — treat as generic text extraction
+        caption = "extract text"
+
+    await ctx.typing()
+
+    # Download the largest photo
+    photo = update.message.photo[-1]  # highest resolution
+    photo_path = tempfile.mktemp(suffix=".jpg")
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        await tg_file.download_to_drive(photo_path)
+    except Exception as e:
+        log.error("Failed to download photo: %s", e)
+        await ctx.reply("Could not download the photo.")
+        return
+
+    # Match intent from caption
+    from skills import get_registry
+    registry = get_registry()
+    action_type, skill = registry.match_intent(caption)
+
+    if action_type and skill and skill.name == "doc_extract":
+        handler = registry.get_handler(action_type)
+        if handler:
+            intent = {"query": caption, "user_query": caption, "image_path": photo_path}
+            try:
+                await handler(action_type, intent, ctx)
+            finally:
+                if os.path.exists(photo_path):
+                    os.unlink(photo_path)
+            return
+
+    # Default: extract text from the image
+    from actions.doc_extract import extract_text
+    try:
+        await ctx.reply("🔍 Extracting text from image...")
+        text = await extract_text(photo_path)
+        await ctx.reply(f"📄 {text}")
+    except Exception as e:
+        log.error("Photo extraction failed: %s", e)
+        await ctx.reply(f"Could not extract text: {e}")
+    finally:
+        if os.path.exists(photo_path):
+            os.unlink(photo_path)
+
+
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle incoming voice messages — transcribe, route through SkillRegistry, process.
 
@@ -4375,6 +4432,7 @@ async def start_telegram_bot():
     _load_extensions(application)
 
     application.add_handler(CallbackQueryHandler(handle_callback))
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo_message))
     application.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice_message))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
