@@ -899,13 +899,34 @@ async def run_self_healing(triggers: list[dict], channel, chat_id: int):
             "fingerprint": fingerprint,
         })
 
+        # 5.5. Auto-merge high-confidence, small, non-blocked patches
+        auto_merged = False
+        if (
+            not guardian_blocked
+            and confidence >= 0.7
+            and lines_changed <= 15
+        ):
+            try:
+                import subprocess as _sp
+                merge_result = _sp.run(
+                    ["gh", "pr", "merge", pr_url, "--squash", "--auto"],
+                    capture_output=True, text=True, timeout=30,
+                )
+                if merge_result.returncode == 0:
+                    auto_merged = True
+                    log.info("Auto-merged healing PR: %s (confidence=%.2f)", pr_url, confidence)
+                else:
+                    log.warning("Auto-merge failed for %s: %s", pr_url, merge_result.stderr[:200])
+            except Exception as e:
+                log.warning("Auto-merge attempt failed: %s", e)
+
         # 6. Notify
+        merge_note = " (auto-merged)" if auto_merged else "\n\nReview and merge to apply the fix."
         await channel.send_message(
             chat_id,
             f"🔧 Self-Healing: {diagnosis['summary']}\n\n"
             f"{explanation}\n\n"
-            f"PR: {pr_url}\n\n"
-            f"Review and merge to apply the fix.",
+            f"PR: {pr_url}{merge_note}",
         )
 
         # 7. Record insight to prevent re-triggering

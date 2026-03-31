@@ -418,14 +418,24 @@ def apply_insight(insight_id: int, resolved_by: str = "user") -> bool:
     if not row:
         return False
 
-    # Parse recommendation to extract preference key/value
-    # The reflection engine stores these in a structured way
+    category = row["category"]
+    summary = row["summary"]
+
+    # Actually create a preference from the insight
+    if category in ("preference", "knowledge_gap"):
+        # Use summary as key (slugified) and recommendation as value
+        import re
+        key = re.sub(r"[^a-z0-9]+", "_", summary.lower())[:80].strip("_")
+        value = row["recommendation"] or summary
+        confidence = 0.6 if resolved_by == "auto" else 0.8
+        set_preference(key, value, source_insight_id=insight_id, confidence=confidence)
+
     conn.execute(
         "UPDATE insights SET status = 'applied', resolved_at = ?, resolved_by = ? WHERE id = ?",
         (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), resolved_by, insight_id),
     )
     conn.commit()
-    log.info("Insight #%d applied by %s: %s", insight_id, resolved_by, row["summary"])
+    log.info("Insight #%d applied by %s: %s", insight_id, resolved_by, summary)
     return True
 
 
