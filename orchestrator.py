@@ -86,8 +86,8 @@ def looks_like_multi_step(query: str) -> bool:
     # Fast path: explicit conjunctions
     if _MULTI_STEP_SIGNALS.search(query):
         return True
-    # Catch implicit sequences: comma-separated clauses, long requests with multiple verbs
-    if len(query) > 60 and "," in query:
+    # Catch implicit sequences: comma-separated clauses with multiple verbs
+    if len(query) > 30 and "," in query:
         # Comma + action verbs on both sides suggests multi-step
         _ACTION_VERBS = re.compile(
             r"\b(?:check|send|email|remind|set|create|add|draft|schedule|book|"
