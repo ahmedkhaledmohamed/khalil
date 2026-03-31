@@ -53,12 +53,12 @@ SKILL = {
         {"type": "cursor_status", "handler": "handle_intent", "keywords": "cursor ide status windows projects info", "description": "Show Cursor IDE status and open windows"},
         {"type": "cursor_extensions", "handler": "handle_intent", "keywords": "cursor extensions list", "description": "List installed Cursor extensions"},
         {"type": "cursor_terminal_status", "handler": "handle_intent", "keywords": "cursor terminal sessions status list terminals", "description": "Show Cursor terminal sessions"},
-        {"type": "cursor_terminal_exec", "handler": None, "keywords": "run send command cursor terminal", "description": "Run a command in Cursor terminal"},
-        {"type": "cursor_terminal_new", "handler": None, "keywords": "create new cursor terminal", "description": "Create a new Cursor terminal"},
+        {"type": "cursor_terminal_exec", "handler": "handle_intent", "keywords": "run send command cursor terminal", "description": "Run a command in Cursor terminal"},
+        {"type": "cursor_terminal_new", "handler": "handle_intent", "keywords": "create new cursor terminal", "description": "Create a new Cursor terminal"},
         {"type": "terminal_status", "handler": "handle_intent", "keywords": "terminal iterm sessions running status", "description": "Show iTerm2 terminal sessions and processes"},
-        {"type": "terminal_exec", "handler": None, "keywords": "run send command terminal iterm", "description": "Run a command in iTerm2"},
-        {"type": "terminal_new_tab", "handler": None, "keywords": "new terminal tab", "description": "Open a new iTerm2 tab"},
-        {"type": "cursor_open", "handler": None, "keywords": "open file cursor jump goto line", "description": "Open a file in Cursor"},
+        {"type": "terminal_exec", "handler": "handle_intent", "keywords": "run send command terminal iterm", "description": "Run a command in iTerm2"},
+        {"type": "terminal_new_tab", "handler": "handle_intent", "keywords": "new terminal tab", "description": "Open a new iTerm2 tab"},
+        {"type": "cursor_open", "handler": "handle_intent", "keywords": "open file cursor jump goto line", "description": "Open a file in Cursor"},
         {"type": "cursor_diff", "handler": "handle_intent", "keywords": "cursor diff files compare", "description": "Open a diff view in Cursor"},
     ],
     "examples": ["Cursor status", "What's running in terminal?", "Open file in Cursor"],
@@ -785,4 +785,121 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         else:
             await ctx.reply(f"⚠️ Failed: {result['error']}")
         return True
+
+    elif action == "terminal_exec":
+        cmd = intent.get("command", "")
+        session = intent.get("session", "current")
+        if not cmd:
+            return False
+        server = intent.get("_server", {})
+        autonomy = server.get("autonomy")
+        if autonomy:
+            autonomy.create_pending_action(
+                "terminal_exec", f"Run in terminal: {cmd}",
+                {"command": cmd, "session": session},
+            )
+            reply_kb = server.get("reply_with_keyboard")
+            kb = server.get("approve_deny_keyboard")
+            if reply_kb and kb:
+                await reply_kb(ctx,
+                    f"📟 Send to iTerm ({session}):\n\n`{cmd}`\n\n{autonomy.format_level()}",
+                    kb(), parse_mode="Markdown")
+                return True
+        await ctx.reply(f"📟 Would run in iTerm ({session}): `{cmd}`\n(Approval required)")
+        return True
+
+    elif action == "terminal_new_tab":
+        cmd = intent.get("command")
+        server = intent.get("_server", {})
+        autonomy = server.get("autonomy")
+        if autonomy and autonomy.needs_approval("terminal_new_tab"):
+            desc = f"New terminal tab" + (f" running: {cmd}" if cmd else "")
+            autonomy.create_pending_action("terminal_new_tab", desc, {"command": cmd})
+            reply_kb = server.get("reply_with_keyboard")
+            kb = server.get("approve_deny_keyboard")
+            if reply_kb and kb:
+                await reply_kb(ctx, f"📟 {desc}\n\n{autonomy.format_level()}", kb(), parse_mode="Markdown")
+                return True
+        result = await create_iterm_tab(cmd)
+        if result["success"]:
+            if autonomy:
+                autonomy.log_audit("terminal_new_tab", "Created new terminal tab", result="ok")
+            await ctx.reply("📟 New terminal tab opened" + (f"\nRunning: `{cmd}`" if cmd else ""))
+        else:
+            await ctx.reply(f"⚠️ Failed to create tab: {result['error']}")
+        return True
+
+    elif action == "cursor_open":
+        import os as _os
+        path = intent.get("path", "")
+        line = intent.get("line")
+        if not path:
+            return False
+        is_dir = _os.path.isdir(_os.path.expanduser(path))
+        action_name = "cursor_open_project" if is_dir else "cursor_open"
+        server = intent.get("_server", {})
+        autonomy = server.get("autonomy")
+        if autonomy and autonomy.needs_approval(action_name):
+            desc = f"Open in Cursor: {path}" + (f":{line}" if line else "")
+            autonomy.create_pending_action(action_name, desc, {"path": path, "line": line})
+            reply_kb = server.get("reply_with_keyboard")
+            kb = server.get("approve_deny_keyboard")
+            if reply_kb and kb:
+                await reply_kb(ctx, f"🖥 {desc}\n\n{autonomy.format_level()}", kb(), parse_mode="Markdown")
+                return True
+        result = await cursor_open(path, line)
+        if result["success"]:
+            if autonomy:
+                autonomy.log_audit(action_name, f"Opened {path}" + (f":{line}" if line else ""), result="ok")
+            await ctx.reply(f"🖥 Opened in Cursor: {path}" + (f":{line}" if line else ""))
+        else:
+            await ctx.reply(f"⚠️ Failed: {result['error']}")
+        return True
+
+    elif action == "cursor_terminal_exec":
+        cmd = intent.get("command", "")
+        if not cmd:
+            return False
+        target = intent.get("target", "0")
+        server = intent.get("_server", {})
+        autonomy = server.get("autonomy")
+        if autonomy:
+            autonomy.create_pending_action(
+                "cursor_terminal_exec", f"Run in Cursor terminal: {cmd}",
+                {"command": cmd, "target": target},
+            )
+            reply_kb = server.get("reply_with_keyboard")
+            kb = server.get("approve_deny_keyboard")
+            if reply_kb and kb:
+                await reply_kb(ctx,
+                    f"🖥 Send to Cursor terminal:\n\n`{cmd}`\n\n{autonomy.format_level()}",
+                    kb(), parse_mode="Markdown")
+                return True
+        await ctx.reply(f"🖥 Would run in Cursor terminal: `{cmd}`\n(Approval required)")
+        return True
+
+    elif action == "cursor_terminal_new":
+        cmd = intent.get("command")
+        server = intent.get("_server", {})
+        autonomy = server.get("autonomy")
+        if autonomy and autonomy.needs_approval("cursor_terminal_new"):
+            desc = f"New Cursor terminal" + (f" running: {cmd}" if cmd else "")
+            autonomy.create_pending_action("cursor_terminal_new", desc, {"command": cmd})
+            reply_kb = server.get("reply_with_keyboard")
+            kb = server.get("approve_deny_keyboard")
+            if reply_kb and kb:
+                await reply_kb(ctx, f"🖥 {desc}\n\n{autonomy.format_level()}", kb(), parse_mode="Markdown")
+                return True
+        result = await bridge_create_terminal(command=cmd)
+        if result.get("error"):
+            await ctx.reply(f"⚠️ {result['error']}")
+        else:
+            if autonomy:
+                autonomy.log_audit("cursor_terminal_new", "Created Cursor terminal", result="ok")
+            msg = "🖥 New Cursor terminal created"
+            if cmd:
+                msg += f"\nRunning: `{cmd}`"
+            await ctx.reply(msg)
+        return True
+
     return False

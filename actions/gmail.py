@@ -38,8 +38,8 @@ SKILL = {
     ],
     "actions": [
         {"type": "email", "handler": None, "keywords": "email send draft write about", "description": "Send or draft an email"},
-        {"type": "email_work", "handler": None, "keywords": "search check work email inbox", "description": "Search work email"},
-        {"type": "email_personal", "handler": None, "keywords": "search check personal email inbox", "description": "Search personal email"},
+        {"type": "email_work", "handler": "handle_intent", "keywords": "search check work email inbox", "description": "Search work email"},
+        {"type": "email_personal", "handler": "handle_intent", "keywords": "search check personal email inbox", "description": "Search personal email"},
     ],
     "examples": ["Send an email to John about the meeting", "Check my work inbox"],
 }
@@ -486,3 +486,27 @@ async def create_drive_doc(title: str, content: str = "") -> dict:
 async def create_drive_sheet(title: str, data: list[list[str]] | None = None) -> dict:
     """Create a Google Sheet (#54). Returns {id, title, url, type}."""
     return await asyncio.to_thread(_create_drive_sheet_sync, title, data)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action in ("email_work", "email_personal"):
+        account = "work" if action == "email_work" else "personal"
+        query = intent.get("query", intent.get("text", ""))
+        if not query:
+            query = "is:unread"
+        try:
+            emails = await search_emails_account(query, account=account, max_results=10)
+            if not emails:
+                await ctx.reply(f"No {account} emails found for \"{query}\".")
+            else:
+                lines = [f"\U0001f4e7 {account.title()} Email — \"{query}\" ({len(emails)} results):\n"]
+                for e in emails[:10]:
+                    lines.append(f"  \u2022 {e.get('from', '?')}: {e.get('subject', '(no subject)')}")
+                    if e.get("snippet"):
+                        lines.append(f"    {e['snippet'][:80]}")
+                await ctx.reply("\n".join(lines))
+        except Exception as e:
+            await ctx.reply(f"\u274c {account.title()} email search failed: {e}")
+        return True
+    return False

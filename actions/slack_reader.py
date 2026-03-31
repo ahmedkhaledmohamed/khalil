@@ -36,8 +36,8 @@ SKILL = {
         (r"\bslack\s+(?:messages?|channel)\b", "slack_read"),
     ],
     "actions": [
-        {"type": "slack_send", "handler": None, "keywords": "send post slack message channel", "description": "Send a Slack message"},
-        {"type": "slack_read", "handler": None, "keywords": "read slack messages channel", "description": "Read Slack messages"},
+        {"type": "slack_send", "handler": "handle_intent", "keywords": "send post slack message channel", "description": "Send a Slack message"},
+        {"type": "slack_read", "handler": "handle_intent", "keywords": "read slack messages channel", "description": "Read Slack messages"},
     ],
     "examples": ["Send a Slack message to #general", "Read Slack messages"],
 }
@@ -315,3 +315,39 @@ async def handle_slack(update, context):
 
     else:
         await update.message.reply_text(USAGE)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "slack_read":
+        channel = intent.get("channel", intent.get("query", ""))
+        if not channel:
+            # List channels if no specific one requested
+            try:
+                channels = await list_channels()
+                if not channels:
+                    await ctx.reply("No Slack channels found. Is the bot added to any?")
+                else:
+                    text = "Joined channels:\n" + "\n".join(f"  #{ch['name']}" for ch in channels)
+                    await ctx.reply(text[:4000])
+            except Exception as e:
+                await ctx.reply(f"\u274c Slack failed: {e}")
+            return True
+        try:
+            messages = await read_channel(channel.lstrip("#"), count=20)
+            if not messages:
+                await ctx.reply(f"No messages in #{channel.lstrip('#')}.")
+            else:
+                lines = [f"\U0001f4ac #{channel.lstrip('#')} ({len(messages)} messages):\n"]
+                for m in messages[-20:]:
+                    lines.append(f"  [{m['time']}] {m['user']}: {m['text'][:100]}")
+                await ctx.reply("\n".join(lines)[:4000])
+        except Exception as e:
+            await ctx.reply(f"\u274c Slack read failed: {e}")
+        return True
+
+    elif action == "slack_send":
+        await ctx.reply("Slack message sending requires approval. Use /slack or ask me to draft a message.")
+        return True
+
+    return False

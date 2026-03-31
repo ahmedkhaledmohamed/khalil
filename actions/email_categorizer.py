@@ -42,7 +42,7 @@ SKILL = {
         (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),
     ],
     "actions": [
-        {"type": "label", "handler": None, "keywords": "categorize label organize sort email inbox mail", "description": "Categorize inbox emails"},
+        {"type": "label", "handler": "handle_intent", "keywords": "categorize label organize sort email inbox mail", "description": "Categorize inbox emails"},
     ],
     "examples": ["Categorize my inbox", "Label my emails"],
 }
@@ -316,6 +316,19 @@ async def get_history(limit: int = 20) -> str:
     for r in rows:
         lines.append(f"  [{r['label_applied']}] {r['subject'][:60]}")
     return "\n".join(lines[:50])  # cap output
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "label":
+        try:
+            await ctx.reply("\U0001f3f7 Categorizing inbox emails...")
+            result = await run_categorization()
+            await ctx.reply(f"\U0001f3f7 {result}")
+        except Exception as e:
+            await ctx.reply(f"\u274c Email categorization failed: {e}")
+        return True
+    return False
 
 
 async def handle_label(update, context):

@@ -34,7 +34,7 @@ SKILL = {
         (r"\bmeeting(?:s)?\s+today\b", "calendar"),
     ],
     "actions": [
-        {"type": "calendar", "handler": None, "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
+        {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
     ],
     "examples": ["What's on my calendar today?", "Any meetings this afternoon?"],
 }
@@ -219,3 +219,15 @@ def _delete_event_sync(event_id: str) -> bool:
 async def delete_event(event_id: str) -> bool:
     """Delete a calendar event by ID."""
     return await asyncio.to_thread(_delete_event_sync, event_id)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "calendar":
+        try:
+            events = await get_today_events()
+            await ctx.reply(format_events_text(events))
+        except Exception as e:
+            await ctx.reply(f"\u274c Calendar fetch failed: {e}")
+        return True
+    return False
