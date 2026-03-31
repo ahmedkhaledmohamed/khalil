@@ -235,8 +235,68 @@ def _print_last_report() -> None:
     print(json.dumps(data, indent=2))
 
 
+def _print_coverage() -> None:
+    """Show action type coverage: which skills have golden/generated test cases."""
+    sys.path.insert(0, str(EVAL_DIR.parent))
+    from skills import get_registry
+    from eval.cases import load_golden_cases
+
+    registry = get_registry()
+
+    # All action types from registry
+    all_actions: dict[str, str] = {}  # action_type -> skill_name
+    for skill in registry.list_skills():
+        for action_type in skill.actions:
+            all_actions[action_type] = skill.name
+
+    # Golden cases coverage
+    golden = load_golden_cases()
+    golden_actions = {c.expected_action for c in golden if c.expected_action}
+
+    # Generated cases (from patterns)
+    generated_actions: set[str] = set()
+    for skill in registry.list_skills():
+        for _, action_type in skill.patterns:
+            generated_actions.add(action_type)
+
+    covered = golden_actions | generated_actions
+    uncovered = set(all_actions.keys()) - covered
+
+    total = len(all_actions)
+    print(f"\nAction Type Coverage")
+    print(f"{'=' * 60}")
+    print(f"  Total action types: {total}")
+    print(f"  Golden cases:       {len(golden_actions)} ({len(golden_actions)/total*100:.0f}%)")
+    print(f"  Generated (pattern):{len(generated_actions)} ({len(generated_actions)/total*100:.0f}%)")
+    print(f"  Any coverage:       {len(covered)} ({len(covered)/total*100:.0f}%)")
+    print(f"  Uncovered:          {len(uncovered)}")
+
+    if uncovered:
+        print(f"\nUncovered action types ({len(uncovered)}):")
+        for action in sorted(uncovered):
+            print(f"  - {action} (skill: {all_actions[action]})")
+
+    # Per-skill summary
+    print(f"\nPer-skill golden case count:")
+    skill_golden: dict[str, int] = {}
+    for c in golden:
+        if c.expected_action and c.expected_action in all_actions:
+            skill = all_actions[c.expected_action]
+            skill_golden[skill] = skill_golden.get(skill, 0) + 1
+
+    for skill in sorted(registry.list_skills(), key=lambda s: s.name):
+        count = skill_golden.get(skill.name, 0)
+        action_count = len(skill.actions)
+        marker = "\u2714" if count > 0 else "\u2718"
+        print(f"  {marker} {skill.name:25s} {count:3d} golden / {action_count} actions")
+
+
 def main() -> None:
     args = sys.argv[1:]
+
+    if "--coverage" in args:
+        _print_coverage()
+        return
 
     if "--report" in args:
         _print_last_report()

@@ -1642,3 +1642,588 @@ conversational_edge:
     expected_contains: []
     expected_path: conversational
     complexity: trivial
+
+# --- Phase 5: New skill categories ---
+
+apple_health:
+  - query: "How many steps today?"
+    expected_action: health_steps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my step count?"
+    expected_action: health_steps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Steps today"
+    expected_action: health_steps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Weekly steps summary"
+    expected_action: health_steps_week
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How did I sleep last night?"
+    expected_action: health_sleep
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Sleep quality last night"
+    expected_action: health_sleep
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my heart rate?"
+    expected_action: health_heart_rate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Resting heart rate"
+    expected_action: health_heart_rate
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my workouts this week"
+    expected_action: health_workouts
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Health summary"
+    expected_action: health_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Apple health overview"
+    expected_action: health_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How am I doing health-wise?"
+    expected_action: health_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+calorie_tracker:
+  - query: "Log 500 calories for lunch"
+    expected_action: calorie_log
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How many calories today?"
+    expected_action: calorie_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Calorie count today"
+    expected_action: calorie_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Track 30g protein"
+    expected_action: calorie_log
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What did I eat today?"
+    expected_action: calorie_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Set my calorie goal to 2000"
+    expected_action: calorie_goal
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Am I over my calorie budget?"
+    expected_action: calorie_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Log breakfast: eggs and toast, 400 cal"
+    expected_action: calorie_log
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+fasting_tracker:
+  - query: "Start a fast"
+    expected_action: fasting_start
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Begin 16:8 fast"
+    expected_action: fasting_start
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How long have I been fasting?"
+    expected_action: fasting_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Fasting status"
+    expected_action: fasting_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "End my fast"
+    expected_action: fasting_end
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Break the fast"
+    expected_action: fasting_end
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my fasting history"
+    expected_action: fasting_history
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How long until my fast ends?"
+    expected_action: fasting_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+pomodoro:
+  - query: "Start a pomodoro"
+    expected_action: pomodoro_start
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Begin focus session"
+    expected_action: pomodoro_start
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Stop pomodoro"
+    expected_action: pomodoro_stop
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "End my focus session"
+    expected_action: pomodoro_stop
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pomodoro status"
+    expected_action: pomodoro_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How many pomodoros today?"
+    expected_action: pomodoro_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Focus session stats"
+    expected_action: pomodoro_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Start a 45 minute focus timer"
+    expected_action: pomodoro_start
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+apple_music:
+  - query: "Play some music"
+    expected_action: apple_music_play
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Pause the music"
+    expected_action: apple_music_pause
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Skip this song"
+    expected_action: apple_music_next
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's playing right now?"
+    expected_action: apple_music_now_playing
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Next track"
+    expected_action: apple_music_next
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Resume music"
+    expected_action: apple_music_play
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Stop playing music"
+    expected_action: apple_music_pause
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What song is this?"
+    expected_action: apple_music_now_playing
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+macos_focus:
+  - query: "Turn on Do Not Disturb"
+    expected_action: macos_focus_dnd_on
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Enable DND"
+    expected_action: macos_focus_dnd_on
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Turn off Do Not Disturb"
+    expected_action: macos_focus_dnd_off
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Disable DND"
+    expected_action: macos_focus_dnd_off
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Is DND on?"
+    expected_action: macos_focus_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Focus mode status"
+    expected_action: macos_focus_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Silence notifications"
+    expected_action: macos_focus_dnd_on
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "I need to concentrate, block distractions"
+    expected_action: macos_focus_dnd_on
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+homekit:
+  - query: "Turn on the lights"
+    expected_action: homekit_lights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Turn off the lights"
+    expected_action: homekit_lights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Dim the lights to 50%"
+    expected_action: homekit_lights
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Set the temperature to 72"
+    expected_action: homekit_thermostat
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's the temperature at home?"
+    expected_action: homekit_thermostat
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Run the Movie Night scene"
+    expected_action: homekit_scene
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Activate the good morning scene"
+    expected_action: homekit_scene
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's the home status?"
+    expected_action: homekit_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Lock the front door"
+    expected_action: homekit_lock
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Is the door locked?"
+    expected_action: homekit_lock
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+clipboard:
+  - query: "Show clipboard history"
+    expected_action: clipboard_history
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What did I copy recently?"
+    expected_action: clipboard_history
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's on my clipboard?"
+    expected_action: clipboard_last
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Last thing I copied"
+    expected_action: clipboard_last
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search clipboard for that URL"
+    expected_action: clipboard_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Find in clipboard history"
+    expected_action: clipboard_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Recent clipboard entries"
+    expected_action: clipboard_history
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Current clipboard content"
+    expected_action: clipboard_last
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+obsidian:
+  - query: "Search Obsidian for meeting notes"
+    expected_action: obsidian_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find my note about project ideas"
+    expected_action: obsidian_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Create a new Obsidian note"
+    expected_action: obsidian_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Make a note in Obsidian"
+    expected_action: obsidian_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search my vault for productivity"
+    expected_action: obsidian_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What notes do I have about APIs?"
+    expected_action: obsidian_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "New note: weekly planning"
+    expected_action: obsidian_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Add a note to my Obsidian vault"
+    expected_action: obsidian_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+bear_notes:
+  - query: "Search Bear for meeting notes"
+    expected_action: bear_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find my notes in Bear about Swift"
+    expected_action: bear_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Create a Bear note"
+    expected_action: bear_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "New note in Bear: project ideas"
+    expected_action: bear_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my recent Bear notes"
+    expected_action: bear_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search Bear for design patterns"
+    expected_action: bear_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+anki_connect:
+  - query: "Show my Anki stats"
+    expected_action: anki_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How many Anki cards due today?"
+    expected_action: anki_due
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Anki review status"
+    expected_action: anki_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Cards due for review"
+    expected_action: anki_due
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create an Anki card"
+    expected_action: anki_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Add a flashcard about Python decorators"
+    expected_action: anki_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+recipe_finder:
+  - query: "Find a recipe for chicken pasta"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What can I cook with eggs and cheese?"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Recipe for banana bread"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search recipes for vegetarian dinner"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Quick dinner ideas"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What should I make for lunch?"
+    expected_action: recipe_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+expense_tracker:
+  - query: "Log an expense of $50 for groceries"
+    expected_action: expense_log
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How much did I spend this month?"
+    expected_action: expense_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Monthly expense summary"
+    expected_action: expense_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Track $20 for coffee"
+    expected_action: expense_log
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my spending this month?"
+    expected_action: expense_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Set budget for dining out to $300"
+    expected_action: expense_budget
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Am I over budget on groceries?"
+    expected_action: expense_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+workflows:
+  - query: "Start my focus routine"
+    expected_action: workflow_run
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Run morning routine"
+    expected_action: workflow_run
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Wind down routine"
+    expected_action: workflow_run
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Start focus mode"
+    expected_action: workflow_run
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "List my workflows"
+    expected_action: workflow_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What routines do I have?"
+    expected_action: workflow_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a new workflow"
+    expected_action: workflow_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Execute my evening routine"
+    expected_action: workflow_run
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial

@@ -25,6 +25,9 @@ elif "--conversational" in sys.argv:
     sys.argv = [sys.argv[0], "--cases", str(tmp)]
     from eval import main
     main()
+elif "--coverage" in sys.argv:
+    from eval import _print_coverage
+    _print_coverage()
 else:
     from eval import main
     main()
