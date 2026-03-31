@@ -2395,3 +2395,77 @@ blogwatcher:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+tmux_control:
+  - query: "List my tmux sessions"
+    expected_action: tmux_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's running in tmux?"
+    expected_action: tmux_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Send 'npm start' to the dev session"
+    expected_action: tmux_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Run 'make build' in the build session"
+    expected_action: tmux_send
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Create a new tmux session called build"
+    expected_action: tmux_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Kill the scraper session"
+    expected_action: tmux_kill
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+gui_automation:
+  - query: "Click at 500, 300"
+    expected_action: gui_click
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Click on 200, 400"
+    expected_action: gui_click
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Type 'hello world'"
+    expected_action: gui_type
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Type into the search field"
+    expected_action: gui_type
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Tile Slack and Cursor side by side"
+    expected_action: gui_window
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Move Safari to the left half"
+    expected_action: gui_window
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Fullscreen Terminal"
+    expected_action: gui_window
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Screenshot the top-right corner"
+    expected_action: gui_screenshot_region
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
