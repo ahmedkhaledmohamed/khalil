@@ -1649,11 +1649,21 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             from skills import get_registry
             handler = get_registry().get_handler(action)
             if handler is not None:
-                result = await handler(action, intent, ctx)
+                try:
+                    result = await asyncio.wait_for(
+                        handler(action, intent, ctx),
+                        timeout=30,
+                    )
+                except asyncio.TimeoutError:
+                    log.error("Skill handler timed out for %s (30s)", action)
+                    await ctx.reply(f"⚠️ {action} timed out after 30s. Try again or check /health.")
+                    return True
                 if result:
                     return True
         except Exception as e:
-            log.debug("Skill handler dispatch failed for %s: %s", action, e)
+            log.error("Skill handler failed for %s: %s", action, e)
+            await ctx.reply(f"⚠️ {action} failed: {e}")
+            # Fall through to legacy dispatch / LLM for a helpful response
 
     # --- Legacy dispatch (for actions not yet migrated to skill handlers) ---
 
@@ -3182,34 +3192,61 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show system health status."""
+    """Show system health status including all integrations."""
     ctx = _ctx_from_update(update)
+    await ctx.reply("Running health checks...")
+
     from monitoring import run_health_check
 
     report = await run_health_check()
     ollama = report["ollama"]
     db = report["database"]
+    integrations = report.get("integrations", {})
 
     lines = [f"🏥 System Health: {report['status'].upper()}\n"]
 
-    # Ollama
+    # Core infrastructure
+    lines.append("**Infrastructure**")
     if ollama["status"] == "ok":
-        lines.append(f"✅ Ollama: OK ({len(ollama.get('models', []))} models)")
+        lines.append(f"  ✅ Ollama ({len(ollama.get('models', []))} models)")
     else:
-        lines.append(f"❌ Ollama: {ollama.get('error', 'down')}")
+        lines.append(f"  ❌ Ollama: {ollama.get('error', 'down')}")
 
-    # Database
     if db["status"] == "ok":
-        lines.append(f"✅ Database: {db['documents']} docs")
-        lines.append(f"   Reminders: {db['active_reminders']} active")
-        lines.append(f"   Pending actions: {db['pending_actions']}")
-        lines.append(f"   Last email sync: {db['last_email_sync']}")
+        lines.append(f"  ✅ Database ({db['documents']} docs, {db['active_reminders']} reminders)")
     else:
-        lines.append(f"❌ Database: {db.get('error', 'unavailable')}")
+        lines.append(f"  ❌ Database: {db.get('error', 'unavailable')}")
 
-    # Issues
+    # Integrations
+    icon_map = {"ok": "✅", "error": "❌", "degraded": "⚠️", "not_configured": "➖"}
+    integration_names = {
+        "calendar": "Google Calendar",
+        "gmail": "Gmail",
+        "spotify": "Spotify",
+        "claude": "Claude API",
+        "github": "GitHub CLI",
+        "oauth": "OAuth Tokens",
+    }
+
+    lines.append("\n**Integrations**")
+    for key in ["calendar", "gmail", "spotify", "claude", "github", "oauth"]:
+        info = integrations.get(key, {})
+        icon = icon_map.get(info.get("status", "error"), "❓")
+        label = integration_names.get(key, key)
+        detail = ""
+        if key == "calendar" and info.get("status") == "ok":
+            detail = f" ({info.get('events_today', 0)} events today)"
+        elif key == "oauth" and info.get("status") == "ok":
+            detail = f" ({info.get('healthy', 0)}/{info.get('total', 0)} healthy)"
+        elif key == "oauth" and info.get("unhealthy"):
+            detail = f" (unhealthy: {', '.join(info['unhealthy'])})"
+        elif info.get("status") == "error":
+            detail = f": {info.get('error', 'unknown')[:80]}"
+        lines.append(f"  {icon} {label}{detail}")
+
+    # Issues summary
     if report["issues"]:
-        lines.append(f"\n⚠️ Issues:")
+        lines.append(f"\n⚠️ **Issues ({len(report['issues'])})**")
         for issue in report["issues"]:
             lines.append(f"  • {issue}")
 
