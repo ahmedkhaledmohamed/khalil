@@ -195,6 +195,74 @@ class SkillRegistry:
             words.update(skill.name.split("_"))
         return words
 
+    def suggest_skills(self, text: str, max_suggestions: int = 2) -> list[str]:
+        """Suggest relevant skills the user might not know about.
+
+        Returns a list of short suggestion strings like:
+        "Set a reminder: 'remind me to ...'", "Check weather: 'Toronto weather'"
+        """
+        text_lower = text.lower()
+        scored: list[tuple[int, Skill]] = []
+
+        for skill in self._skills.values():
+            score = 0
+            # Keyword overlap (but NOT pattern match — if pattern matched, skill already triggered)
+            for keywords in skill.keywords.values():
+                overlap = len(
+                    set(re.findall(r"\b\w+\b", text_lower))
+                    & set(keywords.split())
+                )
+                score += overlap
+            # Skip if already triggered (pattern matched = would have been handled)
+            for pattern, _ in skill.patterns:
+                if pattern.search(text_lower):
+                    score = 0
+                    break
+            if score > 0:
+                scored.append((score, skill))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        suggestions = []
+        for _, skill in scored[:max_suggestions]:
+            example = skill.examples[0] if skill.examples else skill.description
+            suggestions.append(f"{skill.description}: \"{example}\"")
+        return suggestions
+
+    def format_help_by_category(self) -> str:
+        """Format skills grouped by what the user can DO, not technical categories."""
+        # Map technical categories to user-facing groups
+        group_map = {
+            "communication": "Communication",
+            "productivity": "Productivity",
+            "health": "Health & Wellness",
+            "finance": "Finance",
+            "system": "System & Dev",
+            "development": "System & Dev",
+            "entertainment": "Entertainment",
+            "knowledge": "Knowledge",
+            "learning": "Knowledge",
+        }
+        groups: dict[str, list[Skill]] = {}
+        for skill in self._skills.values():
+            group = group_map.get(skill.category, "Other")
+            groups.setdefault(group, []).append(skill)
+
+        lines = ["Things I can do for you:\n"]
+        for group_name in ["Productivity", "Communication", "Finance",
+                           "Health & Wellness", "System & Dev", "Knowledge",
+                           "Entertainment", "Other"]:
+            skills = groups.get(group_name, [])
+            if not skills:
+                continue
+            lines.append(f"**{group_name}**")
+            for skill in sorted(skills, key=lambda s: s.name):
+                example = f" — e.g. \"{skill.examples[0]}\"" if skill.examples else ""
+                lines.append(f"  {skill.description}{example}")
+            lines.append("")
+
+        lines.append(f"Total: {len(self._skills)} skills, {len(self._action_index)} actions")
+        return "\n".join(lines)
+
     def list_skills(self) -> list[Skill]:
         return list(self._skills.values())
 

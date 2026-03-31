@@ -47,7 +47,9 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     from actions.reminders import list_reminders
     reminders = list_reminders()
 
-    # --- Parallel async data gathering ---
+    # --- Parallel async data gathering (with failure tracking) ---
+    _failed_sources = []
+
     async def _fetch_recent():
         return await hybrid_search("recent important updates reminders deadlines", limit=5)
 
@@ -58,7 +60,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if events:
                 return f"\n\nToday's calendar ({len(events)} events):\n{format_events_text(events)}"
         except Exception as e:
-            log.debug("Calendar fetch for brief failed: %s", e)
+            log.warning("Calendar fetch for brief failed: %s", e)
+            _failed_sources.append("Calendar")
         return ""
 
     async def _fetch_jobs():
@@ -70,7 +73,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
                     f"- {j['title']} @ {j['company']}" for j in jobs[:3]
                 )
         except Exception:
-            pass
+            _failed_sources.append("Jobs")
         return ""
 
     async def _fetch_github_notifications():
@@ -80,7 +83,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if notifications:
                 return f"\n\nGitHub: {len(notifications)} unread notification(s)"
         except Exception as e:
-            log.debug("GitHub notifications fetch for brief failed: %s", e)
+            log.warning("GitHub notifications fetch for brief failed: %s", e)
+            _failed_sources.append("GitHub")
         return ""
 
     async def _fetch_appstore_summary():
@@ -101,7 +105,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if parts:
                 return f"\n\nZia (App Store): {', '.join(parts)}"
         except Exception as e:
-            log.debug("App Store fetch for brief failed: %s", e)
+            log.warning("App Store fetch for brief failed: %s", e)
+            _failed_sources.append("App Store")
         return ""
 
     async def _fetch_server_health():
@@ -117,7 +122,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if parts:
                 return f"\n\nServers: {', '.join(parts)}"
         except Exception as e:
-            log.debug("DigitalOcean fetch for brief failed: %s", e)
+            log.warning("DigitalOcean fetch for brief failed: %s", e)
+            _failed_sources.append("Servers")
         return ""
 
     async def _fetch_spotify_recent():
@@ -128,7 +134,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
                 names = [f"{t.get('name', '?')} — {t.get('artist', '?')}" for t in tracks]
                 return f"\n\nRecently played: {'; '.join(names)}"
         except Exception as e:
-            log.debug("Spotify fetch for brief failed: %s", e)
+            log.warning("Spotify fetch for brief failed: %s", e)
+            _failed_sources.append("Spotify")
         return ""
 
     async def _fetch_readwise_daily():
@@ -138,7 +145,8 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if highlights:
                 return f"\n\nReadwise: {len(highlights)} highlight(s) for review today"
         except Exception as e:
-            log.debug("Readwise fetch for brief failed: %s", e)
+            log.warning("Readwise fetch for brief failed: %s", e)
+            _failed_sources.append("Readwise")
         return ""
 
     (recent_raw, weather, calendar_text, job_text, github_text,
@@ -206,12 +214,49 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     except Exception:
         pass
 
+    # Note which data sources failed so the LLM can mention it
+    failed_text = ""
+    if _failed_sources:
+        failed_text = f"\n\n[Data sources unavailable: {', '.join(_failed_sources)}]"
+        log.warning("Morning brief: %d data sources failed: %s", len(_failed_sources), _failed_sources)
+
+    # Capability highlights — surface 2-3 underused skills
+    discovery_text = ""
+    try:
+        from learning import get_capability_heatmap
+        heatmap = get_capability_heatmap()
+        unused = heatmap.get("unused_skills", [])[:3]
+        if unused:
+            from skills import get_registry
+            registry = get_registry()
+            tips = []
+            for name in unused:
+                skills = [s for s in registry.list_skills() if s.name == name]
+                if skills and skills[0].examples:
+                    tips.append(f"Try: \"{skills[0].examples[0]}\"")
+            if tips:
+                discovery_text = f"\n\nDid you know? {' | '.join(tips)}"
+    except Exception:
+        pass
+
+    # Recent learning — what Khalil adapted
+    learning_text = ""
+    try:
+        from learning import get_insights
+        recent_applied = get_insights(status="applied", limit=3)
+        if recent_applied:
+            items = [f"- {i['summary']}" for i in recent_applied[:2]]
+            learning_text = f"\n\nRecently learned:\n" + "\n".join(items)
+    except Exception:
+        pass
+
     context = (
         f"Personal Profile:\n{personal}\n\n"
         f"Recent Items:\n{recent_text}"
         f"{reminder_text}{weather_text}{calendar_text}{job_text}{github_text}"
         f"{appstore_text}{server_text}{spotify_text}{readwise_text}"
         f"{work_text}{goal_text}{deadline_text}"
+        f"{discovery_text}{learning_text}{failed_text}"
     )
 
     brief = await ask_claude_fn(
@@ -229,8 +274,11 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         "- Server health if available (one line)\n"
         "- Readwise daily review count if available (one line)\n"
         "- Job matches if any new ones found\n"
+        "- 'Did you know?' skill suggestions if provided (one line)\n"
+        "- 'Recently learned' adaptations if provided (one line)\n"
+        "- If any data sources were unavailable, note it briefly at the end (e.g. 'Note: Calendar was unreachable')\n"
         "- A closing line with suggested focus for the day\n"
-        "- Keep it under 18 lines, be direct and actionable.",
+        "- Keep it under 20 lines, be direct and actionable.",
         context,
         system_extra=f"Today's date: {today_iso}, {day_name}",
     )

@@ -1,5 +1,6 @@
 """Health checks and monitoring for Khalil subsystems."""
 
+import asyncio
 import logging
 import subprocess
 from datetime import datetime, timedelta
@@ -106,10 +107,108 @@ def check_database() -> dict:
         return {"status": "error", "error": str(e)}
 
 
+async def _check_calendar() -> dict:
+    """Check if Google Calendar API is reachable."""
+    try:
+        from actions.calendar import get_today_events
+        events = await get_today_events()
+        return {"status": "ok", "events_today": len(events) if events else 0}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
+async def _check_gmail() -> dict:
+    """Check if Gmail API is reachable."""
+    try:
+        from actions.gmail import check_inbox
+        result = await check_inbox(limit=1)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
+async def _check_spotify() -> dict:
+    """Check if Spotify API is reachable."""
+    try:
+        from actions.spotify import get_recently_played
+        await get_recently_played(limit=1)
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
+async def _check_claude() -> dict:
+    """Check if Claude/Anthropic API is reachable."""
+    try:
+        import anthropic
+        client = anthropic.Anthropic()
+        # Minimal API call to verify key works
+        client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=5,
+            messages=[{"role": "user", "content": "hi"}],
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
+async def _check_github() -> dict:
+    """Check if GitHub CLI is authenticated."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "gh", "auth", "status",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode == 0:
+            return {"status": "ok"}
+        return {"status": "error", "error": stderr.decode().strip()[:200]}
+    except FileNotFoundError:
+        return {"status": "not_configured", "error": "gh CLI not installed"}
+    except Exception as e:
+        return {"status": "error", "error": str(e)[:200]}
+
+
 async def run_health_check() -> dict:
     """Run all health checks and return a combined report."""
+    import asyncio as _aio
+
     ollama = await check_ollama()
     db = check_database()
+
+    # Check integrations in parallel (with timeouts)
+    async def _safe(name, coro, timeout=15):
+        try:
+            return name, await _aio.wait_for(coro, timeout=timeout)
+        except _aio.TimeoutError:
+            return name, {"status": "error", "error": f"timed out ({timeout}s)"}
+        except Exception as e:
+            return name, {"status": "error", "error": str(e)[:200]}
+
+    integration_checks = await _aio.gather(
+        _safe("calendar", _check_calendar()),
+        _safe("gmail", _check_gmail()),
+        _safe("spotify", _check_spotify()),
+        _safe("claude", _check_claude()),
+        _safe("github", _check_github()),
+    )
+    integrations = dict(integration_checks)
+
+    # Check OAuth tokens
+    try:
+        from oauth_utils import check_all_tokens
+        tokens = check_all_tokens()
+        unhealthy = [t for t in tokens if t["status"] not in ("healthy", "refreshed")]
+        integrations["oauth"] = {
+            "status": "ok" if not unhealthy else "degraded",
+            "healthy": len(tokens) - len(unhealthy),
+            "total": len(tokens),
+            "unhealthy": [t["name"] for t in unhealthy],
+        }
+    except Exception as e:
+        integrations["oauth"] = {"status": "error", "error": str(e)[:200]}
 
     # Determine overall status
     issues = []
@@ -117,6 +216,9 @@ async def run_health_check() -> dict:
         issues.append(f"Ollama: {ollama.get('error', 'unavailable')}")
     if db["status"] != "ok":
         issues.append(f"Database: {db.get('error', 'unavailable')}")
+    for name, result in integrations.items():
+        if result.get("status") not in ("ok", "not_configured"):
+            issues.append(f"{name.capitalize()}: {result.get('error', 'unavailable')}")
 
     # Check if email sync is stale (> 24 hours)
     if db.get("last_email_sync") and db["last_email_sync"] != "never":
@@ -124,7 +226,6 @@ async def run_health_check() -> dict:
             last = datetime.fromisoformat(db["last_email_sync"])
             tz = ZoneInfo(TIMEZONE)
             now = datetime.now(tz)
-            # Make last tz-aware if needed
             if last.tzinfo is None:
                 last = last.replace(tzinfo=tz)
             hours_ago = (now - last).total_seconds() / 3600
@@ -140,6 +241,7 @@ async def run_health_check() -> dict:
         "issues": issues,
         "ollama": ollama,
         "database": db,
+        "integrations": integrations,
     }
 
 
