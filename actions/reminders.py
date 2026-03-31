@@ -22,7 +22,7 @@ SKILL = {
         (r"\bdon'?t\s+(?:let\s+me\s+)?forget\b", "reminder"),
     ],
     "actions": [
-        {"type": "reminder", "handler": None, "keywords": "remind reminder set forget", "description": "Create a reminder"},
+        {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder"},
     ],
     "examples": ["Remind me to call Sarah in 2 hours", "Set a reminder for tomorrow 9am"],
 }
@@ -353,3 +353,30 @@ def create_icloud_reminder(text: str, due_date: str | None = None) -> dict:
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         log.warning("iCloud reminder creation failed: %s", e)
         return {"name": text, "created": False, "error": str(e)}
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle a natural language intent. Returns True if handled."""
+    if action == "reminder":
+        time_str = intent.get("time", "")
+        text = intent.get("text", "")
+        if not text:
+            return False
+
+        due_at = _parse_relative_time(time_str) if time_str else None
+        if not due_at:
+            await ctx.reply(
+                f"I understood you want a reminder for: {text}\n"
+                f"But I couldn't parse the time \"{time_str}\".\n"
+                "Try: /remind in 2 hours {text}"
+            )
+            return True
+
+        result = create_reminder(text, due_at)
+        await ctx.reply(
+            f"\u23f0 Reminder set!\n\n"
+            f"#{result['id']}: {result['text']}\n"
+            f"Due: {result['due_at']}"
+        )
+        return True
+    return False
