@@ -63,6 +63,33 @@ class HealthSignals(DomainStatus):
 
 
 @dataclass
+class NutritionStatus(DomainStatus):
+    """Daily nutrition from calorie tracker."""
+    calories_today: int = 0
+    calorie_goal: int = 0
+    protein_g: int = 0
+    protein_goal: int = 0
+    meals_logged: int = 0
+
+
+@dataclass
+class FastingStatus(DomainStatus):
+    """Current fasting state from fasting tracker."""
+    active: bool = False
+    elapsed_hours: float = 0.0
+    target_hours: float = 0.0
+    protocol: str = ""
+
+
+@dataclass
+class FocusStatus(DomainStatus):
+    """Daily focus/productivity from pomodoro tracker."""
+    sessions_today: int = 0
+    total_minutes: int = 0
+    completed: int = 0
+
+
+@dataclass
 class DomainSnapshot:
     """Full cross-domain snapshot."""
     timestamp: str = ""
@@ -71,6 +98,9 @@ class DomainSnapshot:
     finance: FinanceStatus = field(default_factory=FinanceStatus)
     goals: GoalStatus = field(default_factory=GoalStatus)
     health: HealthSignals = field(default_factory=HealthSignals)
+    nutrition: NutritionStatus = field(default_factory=NutritionStatus)
+    fasting: FastingStatus = field(default_factory=FastingStatus)
+    focus: FocusStatus = field(default_factory=FocusStatus)
 
 
 # --- Aggregation helpers ---
@@ -242,6 +272,24 @@ def _aggregate_finance() -> FinanceStatus:
     except Exception as e:
         log.debug("Finance aggregation failed: %s", e)
 
+    # Enrich with expense tracker data
+    try:
+        from actions.expense_tracker import get_monthly_summary
+        expenses = get_monthly_summary()
+        total = expenses.get("total", 0)
+        budgets = expenses.get("budgets", {})
+        over_budget = []
+        for cat, spent in expenses.get("by_category", {}).items():
+            budget = budgets.get(cat, 0)
+            if budget and spent > budget:
+                over_budget.append(f"{cat}: ${spent:.0f}/${budget:.0f}")
+        if over_budget:
+            if status.risk_level == "green":
+                status.risk_level = "yellow"
+            status.items_at_risk.extend(f"Over budget: {item}" for item in over_budget[:3])
+    except Exception as e:
+        log.debug("Expense enrichment failed: %s", e)
+
     return status
 
 
@@ -318,6 +366,60 @@ def _aggregate_health_sync() -> HealthSignals:
     return signals
 
 
+def _aggregate_nutrition() -> NutritionStatus:
+    """Pull today's nutrition data from calorie tracker."""
+    status = NutritionStatus()
+    try:
+        from actions.calorie_tracker import get_daily_summary
+        data = get_daily_summary()
+        status.calories_today = data.get("calories", 0)
+        status.calorie_goal = data.get("calorie_goal", 0)
+        status.protein_g = data.get("protein_g", 0)
+        status.protein_goal = data.get("protein_goal", 0)
+        status.meals_logged = data.get("meals", 0)
+
+        if status.calorie_goal and status.calories_today > status.calorie_goal * 1.2:
+            status.risk_level = "yellow"
+            status.items_at_risk.append(f"Over calorie goal: {status.calories_today}/{status.calorie_goal}")
+    except Exception as e:
+        log.debug("Nutrition aggregation failed: %s", e)
+    return status
+
+
+def _aggregate_fasting() -> FastingStatus:
+    """Pull current fasting state from fasting tracker."""
+    status = FastingStatus()
+    try:
+        from actions.fasting_tracker import get_status
+        data = get_status()
+        if data:
+            status.active = True
+            status.elapsed_hours = data.get("elapsed_hours", 0)
+            status.target_hours = data.get("target_hours", 0)
+            status.protocol = data.get("protocol", "")
+            remaining = data.get("remaining_hours", 0)
+            if remaining < 0:
+                status.risk_level = "yellow"
+                status.items_at_risk.append(f"Fast exceeded target by {abs(remaining):.1f}h")
+    except Exception as e:
+        log.debug("Fasting aggregation failed: %s", e)
+    return status
+
+
+def _aggregate_focus() -> FocusStatus:
+    """Pull today's focus/pomodoro stats."""
+    status = FocusStatus()
+    try:
+        from actions.pomodoro import get_today_stats
+        data = get_today_stats()
+        status.sessions_today = data.get("sessions", 0)
+        status.total_minutes = data.get("total_min", 0)
+        status.completed = data.get("completed", 0)
+    except Exception as e:
+        log.debug("Focus aggregation failed: %s", e)
+    return status
+
+
 async def aggregate_all_domains() -> DomainSnapshot:
     """Single call to aggregate status across all life domains.
 
@@ -335,6 +437,9 @@ async def aggregate_all_domains() -> DomainSnapshot:
     snapshot.finance = _aggregate_finance()
     snapshot.goals = _aggregate_goals()
     snapshot.health = _aggregate_health_sync()
+    snapshot.nutrition = _aggregate_nutrition()
+    snapshot.fasting = _aggregate_fasting()
+    snapshot.focus = _aggregate_focus()
 
     # Async aggregations (calendar API calls)
     try:
@@ -407,5 +512,23 @@ def snapshot_to_text(snapshot: DomainSnapshot) -> str:
                  f"{h.overdue_personal_items} overdue items")
     if h.items_at_risk:
         lines.extend(f"  - {item}" for item in h.items_at_risk[:3])
+
+    # Nutrition
+    n = snapshot.nutrition
+    if n.calories_today or n.meals_logged:
+        risk_icon = {"green": "G", "yellow": "Y", "red": "R"}.get(n.risk_level, "?")
+        cal_str = f"{n.calories_today}/{n.calorie_goal}" if n.calorie_goal else str(n.calories_today)
+        lines.append(f"[{risk_icon}] Nutrition: {cal_str} cal, {n.protein_g}g protein, {n.meals_logged} meals")
+
+    # Fasting
+    fs = snapshot.fasting
+    if fs.active:
+        risk_icon = {"green": "G", "yellow": "Y", "red": "R"}.get(fs.risk_level, "?")
+        lines.append(f"[{risk_icon}] Fasting: {fs.elapsed_hours:.1f}/{fs.target_hours}h ({fs.protocol})")
+
+    # Focus
+    fc = snapshot.focus
+    if fc.sessions_today:
+        lines.append(f"[G] Focus: {fc.sessions_today} sessions, {fc.total_minutes}min, {fc.completed} completed")
 
     return "\n".join(lines)
