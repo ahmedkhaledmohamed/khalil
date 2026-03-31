@@ -260,6 +260,34 @@ async def send_mid_quarter_review(channel: "Channel", chat_id: int, ask_claude_f
         _record_scheduler_failure("mid_quarter_review", e)
 
 
+async def send_evening_digest(channel: "Channel", chat_id: int, ask_claude_fn):
+    """Generate and send evening health/focus digest."""
+    from scheduler.digests import generate_evening_digest
+
+    try:
+        digest = await generate_evening_digest(ask_claude_fn)
+        await channel.send_message(chat_id, digest)
+        _record_digest_sent("evening_digest")
+        log.info("Evening digest sent")
+    except Exception as e:
+        log.error(f"Failed to send evening digest: {e}")
+        _record_scheduler_failure("evening_digest", e)
+
+
+async def send_capability_health(channel: "Channel", chat_id: int):
+    """Generate and send weekly capability health report."""
+    from scheduler.digests import generate_capability_health_digest
+
+    try:
+        report = await generate_capability_health_digest()
+        await channel.send_message(chat_id, f"\U0001f4ca {report}")
+        _record_digest_sent("capability_health")
+        log.info("Capability health report sent")
+    except Exception as e:
+        log.error(f"Failed to send capability health report: {e}")
+        _record_scheduler_failure("capability_health", e)
+
+
 async def run_knowledge_enrichment(channel: "Channel", chat_id: int):
     """Detect knowledge gaps and fill them via web search."""
     from knowledge.indexer import init_db
