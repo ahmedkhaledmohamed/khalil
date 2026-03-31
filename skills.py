@@ -127,7 +127,7 @@ class SkillRegistry:
         top = [s for _, s in scored[:max_skills]]
 
         if not top:
-            return self.format_category_summary()
+            return self.format_full_capabilities()
 
         lines = ["Available capabilities:"]
         for skill in top:
@@ -144,6 +144,26 @@ class SkillRegistry:
         lines = ["Available capability categories:"]
         for cat, names in sorted(cats.items()):
             lines.append(f"- {cat}: {', '.join(names)}")
+        return "\n".join(lines)
+
+    def format_full_capabilities(self) -> str:
+        """Full capability manifest for system prompt injection.
+
+        Groups skills by category with action counts. Used to ensure the LLM
+        knows everything Khalil can do.
+        """
+        cats: dict[str, list[Skill]] = {}
+        for skill in self._skills.values():
+            cats.setdefault(skill.category, []).append(skill)
+
+        lines = [f"Khalil has {len(self._skills)} skills and {len(self._action_index)} action types:\n"]
+        for cat in sorted(cats):
+            skills = cats[cat]
+            lines.append(f"**{cat}** ({len(skills)} skills):")
+            for skill in sorted(skills, key=lambda s: s.name):
+                action_count = len(skill.actions)
+                lines.append(f"  - {skill.name}: {skill.description} ({action_count} actions)")
+            lines.append("")
         return "\n".join(lines)
 
     def get_all_keywords(self) -> set[str]:
