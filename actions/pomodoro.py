@@ -18,14 +18,16 @@ SKILL = {
     "description": "Pomodoro focus timer with work/break cycles",
     "category": "productivity",
     "patterns": [
-        (r"\bstart\s+(?:a\s+)?(?:pomodoro|focus\s+(?:session|timer))\b", "pomodoro_start"),
-        (r"\bpomodoro\b", "pomodoro_start"),
-        (r"\bfocus\s+for\s+\d+\s*min", "pomodoro_start"),
-        (r"\b(?:stop|cancel)\s+(?:the\s+)?(?:pomodoro|focus\s+(?:session|timer))\b", "pomodoro_stop"),
+        # Specific patterns first — order matters
         (r"\bpomodoro\s+(?:status|timer)\b", "pomodoro_status"),
         (r"\bam\s+I\s+(?:in\s+)?(?:a\s+)?(?:focus|pomodoro)\b", "pomodoro_status"),
         (r"\bpomodoro\s+(?:history|stats|today)\b", "pomodoro_history"),
         (r"\bhow\s+many\s+pomodoros?\b", "pomodoro_history"),
+        (r"\b(?:stop|cancel)\s+(?:the\s+)?(?:pomodoro|focus\s+(?:session|timer))\b", "pomodoro_stop"),
+        # Generic start patterns last (catch-all)
+        (r"\bstart\s+(?:a\s+)?(?:pomodoro|focus\s+(?:session|timer))\b", "pomodoro_start"),
+        (r"\bfocus\s+for\s+\d+\s*min", "pomodoro_start"),
+        (r"\bpomodoro\b", "pomodoro_start"),
     ],
     "actions": [
         {"type": "pomodoro_start", "handler": "handle_intent", "keywords": "pomodoro focus timer start session work concentrate", "description": "Start a focus session"},

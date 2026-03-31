@@ -17,14 +17,19 @@ SKILL = {
     "category": "productivity",
     "command": "remind",
     "patterns": [
+        # List/show patterns first (more specific)
+        (r"\b(?:show|list|what\s+are)\s+(?:my\s+)?reminders?\b", "reminder_list"),
+        (r"\b(?:upcoming|pending|active)\s+reminders?\b", "reminder_list"),
+        # Create patterns
         (r"\bremind\s+me\b", "reminder"),
         (r"\bset\s+(?:a\s+)?reminder\b", "reminder"),
         (r"\bdon'?t\s+(?:let\s+me\s+)?forget\b", "reminder"),
     ],
     "actions": [
         {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder"},
+        {"type": "reminder_list", "handler": "handle_intent", "keywords": "show list reminders upcoming pending active what", "description": "List active reminders"},
     ],
-    "examples": ["Remind me to call Sarah in 2 hours", "Set a reminder for tomorrow 9am"],
+    "examples": ["Remind me to call Sarah in 2 hours", "What are my reminders?", "Show my reminders"],
     "sensor": {"function": "sense_reminders", "interval_min": 5, "identify_opportunities": "identify_reminder_opportunities"},
     "voice": {"response_style": "brief"},
 }
@@ -425,6 +430,23 @@ def identify_reminder_opportunities(state: dict, last_state: dict, cooldowns: di
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle a natural language intent. Returns True if handled."""
+    if action == "reminder_list":
+        try:
+            reminders = list_reminders()
+            if not reminders:
+                await ctx.reply("No active reminders.")
+                return True
+            lines = [f"⏰ **{len(reminders)} active reminder(s)**\n"]
+            for r in reminders[:15]:
+                lines.append(f"  #{r['id']}: {r['text']} — due {r['due_at'][:16]}")
+            if len(reminders) > 15:
+                lines.append(f"  ...and {len(reminders) - 15} more")
+            await ctx.reply("\n".join(lines))
+        except Exception as e:
+            from resilience import format_user_error
+            await ctx.reply(format_user_error(e, skill_name="Reminders"))
+        return True
+
     if action == "reminder":
         time_str = intent.get("time", "")
         text = intent.get("text", "")
