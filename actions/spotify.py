@@ -37,6 +37,7 @@ SKILL = {
         {"type": "spotify_top", "handler": "handle_intent", "keywords": "top tracks artists most played spotify", "description": "Top tracks/artists"},
     ],
     "examples": ["What's playing?", "My top artists", "Recently played"],
+    "voice": {"response_style": "brief"},
 }
 
 

@@ -3363,10 +3363,19 @@ async def cmd_learn(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle incoming voice messages — transcribe and process as text."""
+    """Handle incoming voice messages — transcribe, route through SkillRegistry, process.
+
+    Voice pipeline:
+    1. Download and transcribe audio → text
+    2. Match intent via SkillRegistry to check voice config
+    3. If skill requires confirmation, ask before executing
+    4. Route transcribed text through handle_message()
+    5. Optionally reply with TTS audio if VOICE_REPLY_ENABLED
+    """
     import tempfile
     import os
     from actions.voice import convert_ogg_to_wav, transcribe_voice
+    from config import VOICE_REPLY_ENABLED
 
     ctx = _ctx_from_update(update)
 
@@ -3406,10 +3415,72 @@ async def handle_voice_message(update: Update, context: ContextTypes.DEFAULT_TYP
         await ctx.reply("Could not transcribe voice message (is Whisper available?).")
         return
 
-    # Show what was heard, then process as regular text
-    await ctx.reply(f"Heard: \"{text}\"")
+    await ctx.reply(f'🎤 Heard: "{text}"')
+
+    # Check if the matched skill needs voice confirmation before executing
+    from skills import get_registry
+    registry = get_registry()
+    action_type, skill = registry.match_intent(text)
+
+    if action_type and registry.needs_voice_confirmation(action_type):
+        skill_name = skill.name if skill else action_type
+        await ctx.reply(
+            f"⚠️ Voice command matched **{skill_name}** — this action requires confirmation.\n"
+            f"Reply 'yes' to proceed, or anything else to cancel."
+        )
+        # Store pending voice command for confirmation
+        _voice_pending[ctx.chat_id] = text
+        return
+
+    # Mark this message as voice-originated for response style hints
     update.message.text = text
+    ctx._voice_mode = True  # type: ignore[attr-defined]
     await handle_message(update, context)
+
+    # Optional TTS reply
+    if VOICE_REPLY_ENABLED:
+        await _send_voice_reply(ctx)
+
+
+# Pending voice commands awaiting confirmation (chat_id -> transcribed text)
+_voice_pending: dict[int, str] = {}
+
+
+async def _handle_voice_confirmation(text: str, update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if this text is a confirmation for a pending voice command.
+
+    Returns True if handled (caller should stop processing), False otherwise.
+    """
+    ctx = _ctx_from_update(update)
+    pending = _voice_pending.pop(ctx.chat_id, None)
+    if pending is None:
+        return False
+
+    if text.strip().lower() in ("yes", "y", "confirm", "do it", "go ahead", "proceed"):
+        update.message.text = pending
+        ctx._voice_mode = True  # type: ignore[attr-defined]
+        await handle_message(update, context)
+        return True
+    else:
+        await ctx.reply("Voice command cancelled.")
+        return True
+
+
+async def _send_voice_reply(ctx) -> None:
+    """Send TTS audio reply for the last text response (best-effort)."""
+    try:
+        from actions.voice import synthesize_speech
+        # Get the last reply text from context (if available)
+        last_text = getattr(ctx, '_last_reply_text', None)
+        if not last_text:
+            return
+        audio_path = await synthesize_speech(last_text[:200])
+        if audio_path:
+            await ctx.reply_voice(audio_path)
+            import os
+            os.unlink(audio_path)
+    except Exception as e:
+        log.debug("TTS reply failed: %s", e)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3425,6 +3496,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     query = update.message.text if update.message else None
     if not query:
+        return
+
+    # Check for pending voice confirmation
+    if await _handle_voice_confirmation(query, update, context):
         return
 
     # Check for sensitive data in query
@@ -3619,6 +3694,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Prepend live state before archive context so LLM sees current state first
     if live_context:
         full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+
+    # Voice mode: instruct LLM to keep responses short and speakable
+    voice_mode = getattr(ctx, '_voice_mode', False)
+    if voice_mode:
+        full_context = (
+            "[Voice mode: User is speaking via voice. Keep your response concise "
+            "(1-3 sentences), conversational, and easy to read aloud. "
+            "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
+            + full_context
+        )
 
     # Ask LLM
     response = await ask_claude(query, full_context)
@@ -3858,6 +3943,15 @@ async def handle_message_generic(ctx: MessageContext):
 
     if live_context:
         full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+
+    # Voice mode: brief, speakable responses
+    if getattr(ctx, '_voice_mode', False):
+        full_context = (
+            "[Voice mode: User is speaking via voice. Keep your response concise "
+            "(1-3 sentences), conversational, and easy to read aloud. "
+            "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
+            + full_context
+        )
 
     response = await ask_claude(query, full_context)
 

@@ -20,6 +20,14 @@ _EXTENSIONS_DIR = Path(__file__).parent / "extensions"
 
 
 @dataclass
+class VoiceConfig:
+    """Voice-specific metadata for a skill."""
+
+    confirm_before_execute: bool = False  # require verbal confirmation before running
+    response_style: str = "brief"  # "brief" or "full" — controls response verbosity
+
+
+@dataclass
 class SensorConfig:
     """Configuration for a skill's background sensor."""
 
@@ -44,6 +52,7 @@ class Skill:
     command: str | None = None  # Telegram /command
     command_handler: str | None = None  # function name for /command
     sensor: SensorConfig | None = None  # optional background sensor
+    voice: VoiceConfig | None = None  # optional voice-specific config
 
     def match(self, text: str) -> str | None:
         """Return the first matching action_type for the given text, or None."""
@@ -193,6 +202,22 @@ class SkillRegistry:
         """Return all registered sensors from skills that have them."""
         return [s.sensor for s in self._skills.values() if s.sensor is not None]
 
+    def needs_voice_confirmation(self, action_type: str) -> bool:
+        """Check if an action requires voice confirmation before execution."""
+        skill = self._action_index.get(action_type)
+        if not skill:
+            return False
+        if skill.voice and skill.voice.confirm_before_execute:
+            return True
+        return False
+
+    def get_voice_config(self, action_type: str) -> VoiceConfig | None:
+        """Get voice config for an action's parent skill."""
+        skill = self._action_index.get(action_type)
+        if skill:
+            return skill.voice
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Discovery
@@ -246,6 +271,15 @@ def _build_skill(module_name: str, mod) -> Skill | None:
                 identify_opportunities=opp_fn,
             )
 
+    # Build voice config if present
+    voice = None
+    voice_raw = raw.get("voice")
+    if voice_raw and isinstance(voice_raw, dict):
+        voice = VoiceConfig(
+            confirm_before_execute=voice_raw.get("confirm_before_execute", False),
+            response_style=voice_raw.get("response_style", "brief"),
+        )
+
     return Skill(
         name=name,
         description=raw.get("description", ""),
@@ -258,6 +292,7 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         command=raw.get("command"),
         command_handler=raw.get("command_handler"),
         sensor=sensor,
+        voice=voice,
     )
 
 

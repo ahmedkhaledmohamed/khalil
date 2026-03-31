@@ -14,6 +14,54 @@ from config import OLLAMA_URL, VOICE_REPLY_ENABLED, TTS_VOICE
 
 log = logging.getLogger("khalil.actions.voice")
 
+SKILL = {
+    "name": "voice",
+    "description": "Voice interaction — transcribe speech and synthesize audio replies",
+    "category": "system",
+    "patterns": [
+        (r"\b(?:say|speak|read\s+aloud)\b.*", "voice_tts"),
+        (r"\bvoice\s+(?:mode|reply|response)\s+(?:on|off|enable|disable)\b", "voice_toggle"),
+    ],
+    "actions": [
+        {"type": "voice_tts", "handler": "handle_intent", "keywords": "say speak read aloud voice tts", "description": "Synthesize speech from text"},
+        {"type": "voice_toggle", "handler": "handle_intent", "keywords": "voice mode reply response toggle", "description": "Toggle voice reply mode"},
+    ],
+    "examples": ["Say hello", "Enable voice replies"],
+    "voice": {"response_style": "brief"},
+}
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle voice-related intents."""
+    if action == "voice_tts":
+        text = intent.get("query", "").strip()
+        # Strip the "say" prefix
+        import re
+        text = re.sub(r"^(?:say|speak|read\s+aloud)\s+", "", text, flags=re.IGNORECASE).strip()
+        if not text:
+            await ctx.reply("What would you like me to say?")
+            return True
+        audio_path = await synthesize_speech(text)
+        if audio_path:
+            await ctx.reply_voice(audio_path)
+            os.unlink(audio_path)
+        else:
+            await ctx.reply(f"Could not synthesize speech. Here's the text: {text}")
+        return True
+
+    if action == "voice_toggle":
+        query = intent.get("query", "").lower()
+        import config
+        if "on" in query or "enable" in query:
+            config.VOICE_REPLY_ENABLED = True
+            await ctx.reply("Voice replies enabled. I'll respond with audio when you send voice messages.")
+        else:
+            config.VOICE_REPLY_ENABLED = False
+            await ctx.reply("Voice replies disabled.")
+        return True
+
+    return False
+
 
 async def _run(cmd: list[str], timeout: float = 30) -> tuple[str, str, int]:
     """Run a subprocess and return (stdout, stderr, returncode)."""
