@@ -2469,3 +2469,99 @@ gui_automation:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+onepassword:
+  - query: "Password for GitHub"
+    expected_action: op_get
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Get my credentials for AWS"
+    expected_action: op_get
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "OTP for Spotify"
+    expected_action: op_otp
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "2FA code for GitHub"
+    expected_action: op_otp
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search 1password for Netflix"
+    expected_action: op_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search my passwords for work"
+    expected_action: op_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+coding_agent:
+  - query: "Fix the failing test in khalil"
+    expected_action: code_task
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Refactor the blogwatcher module"
+    expected_action: code_task
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Add error handling to summarize.py"
+    expected_action: code_task
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Coding task status"
+    expected_action: code_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How's the coding task going?"
+    expected_action: code_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show the last code diff"
+    expected_action: code_diff
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+doc_extract:
+  - query: "Extract this receipt"
+    expected_action: extract_receipt
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Scan this receipt"
+    expected_action: extract_receipt
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What does this screenshot say?"
+    expected_action: extract_text
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Read this image"
+    expected_action: extract_text
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Extract the table from this image"
+    expected_action: extract_table
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Parse this photo"
+    expected_action: extract_text
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
