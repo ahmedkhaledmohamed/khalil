@@ -334,7 +334,7 @@ def _get_mcp_tools_text() -> str:
         return ""
 
 
-LLM_TIMEOUT = 60.0  # seconds — Ollama can be slow on first call
+LLM_TIMEOUT = 90.0  # seconds — qwen3 thinking model can be slow
 CLAUDE_TIMEOUT = 30.0
 _ollama_recovery_attempted = False
 
@@ -578,6 +578,11 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
             return fallback
         return "⚠️ LLM unavailable — Ollama circuit breaker open and Claude fallback failed."
 
+    # qwen3 is a thinking model — disable thinking for simple/standard queries
+    _ollama_system = system
+    if _routed_tier.value != "complex" and "qwen3" in OLLAMA_LLM_MODEL:
+        _ollama_system = system + "\n\n/no_think"
+
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
             response = await client.post(
@@ -585,7 +590,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                 json={
                     "model": OLLAMA_LLM_MODEL,
                     "messages": [
-                        {"role": "system", "content": system},
+                        {"role": "system", "content": _ollama_system},
                         {"role": "user", "content": user_message},
                     ],
                     "stream": False,
@@ -615,7 +620,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                         json={
                             "model": OLLAMA_LLM_MODEL,
                             "messages": [
-                                {"role": "system", "content": system},
+                                {"role": "system", "content": _ollama_system},
                                 {"role": "user", "content": user_message},
                             ],
                             "stream": False,
