@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -445,3 +446,118 @@ def get_goal_progress_summary() -> str:
     except Exception as e:
         log.debug("Goal progress summary failed: %s", e)
         return f"{quarter} Goals: Error reading goals"
+
+
+# --- Goal-Driven Daily Planner ---
+
+@dataclass
+class DailyAction:
+    """A single recommended action for the day."""
+    description: str
+    time_estimate: str  # "30min", "1h", "2h"
+    linked_goal: str    # which goal this advances
+    priority: int       # 1 = highest
+
+
+async def generate_daily_plan(ask_claude_fn) -> list[DailyAction]:
+    """Generate 3 prioritized actions for today based on goals, calendar, and capacity.
+
+    Returns a list of DailyAction objects (usually 3).
+    """
+    # Gather context from multiple sources
+    parts = []
+
+    # 1. Goals summary
+    goal_summary = get_goal_progress_summary()
+    parts.append(f"GOALS:\n{goal_summary}")
+
+    # 2. Domain snapshot (calendar, work, finance, health)
+    try:
+        from synthesis.aggregator import aggregate_all_domains, snapshot_to_text
+        snapshot = await aggregate_all_domains()
+        parts.append(f"DOMAIN STATUS:\n{snapshot_to_text(snapshot)}")
+    except Exception as e:
+        log.debug("Daily plan: snapshot failed: %s", e)
+
+    # 3. Active reminders
+    try:
+        from actions.reminders import list_reminders
+        reminders = list_reminders(status="active")
+        if reminders:
+            r_text = "\n".join(f"  - {r['text']} (due: {r['due_at']})" for r in reminders[:10])
+            parts.append(f"ACTIVE REMINDERS:\n{r_text}")
+    except Exception:
+        pass
+
+    # 4. Overdue commitments
+    try:
+        import sqlite3
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT action_text, person, due_date FROM meeting_commitments "
+            "WHERE status = 'open' AND due_date <= date('now') ORDER BY due_date LIMIT 5"
+        ).fetchall()
+        if rows:
+            c_text = "\n".join(f"  - {r['action_text']} (for {r['person']}, due {r['due_date']})" for r in rows)
+            parts.append(f"OVERDUE COMMITMENTS:\n{c_text}")
+        conn.close()
+    except Exception:
+        pass
+
+    context = "\n\n".join(parts)
+
+    prompt = (
+        "Based on the context below, suggest exactly 3 prioritized actions for today.\n\n"
+        "Rules:\n"
+        "- Each action should be concrete and completable in one sitting\n"
+        "- Link each action to a specific goal or commitment\n"
+        "- Include a realistic time estimate\n"
+        "- Priority 1 = most important/urgent\n"
+        "- Focus on what moves the needle, not busywork\n\n"
+        f"Context:\n{context}\n\n"
+        "Respond with ONLY a JSON array (no markdown fences):\n"
+        '[{"description": "...", "time_estimate": "30min", "linked_goal": "...", "priority": 1}, ...]'
+    )
+
+    response = await ask_claude_fn(
+        prompt, "",
+        system_extra="Respond with ONLY a JSON array of 3 actions. No explanation.",
+    )
+    response = response.strip()
+
+    # Parse response
+    try:
+        if "```" in response:
+            response = response.split("```")[1]
+            if response.startswith("json"):
+                response = response[4:]
+        actions_data = json.loads(response.strip())
+        if not isinstance(actions_data, list):
+            return []
+        return [
+            DailyAction(
+                description=a.get("description", ""),
+                time_estimate=a.get("time_estimate", ""),
+                linked_goal=a.get("linked_goal", ""),
+                priority=a.get("priority", i + 1),
+            )
+            for i, a in enumerate(actions_data[:3])
+        ]
+    except (json.JSONDecodeError, KeyError) as e:
+        log.warning("Daily plan parse failed: %s", e)
+        return []
+
+
+def format_daily_plan(actions: list[DailyAction]) -> str:
+    """Format daily plan for Telegram display."""
+    if not actions:
+        return "📋 Couldn't generate today's plan — try again later."
+    lines = ["📋 **Today's Plan**\n"]
+    for a in sorted(actions, key=lambda x: x.priority):
+        lines.append(
+            f"{a.priority}. **{a.description}** (~{a.time_estimate})\n"
+            f"   → _{a.linked_goal}_"
+        )
+    lines.append("\nReply **approve** to set these as reminders, or **dismiss** to skip.")
+    return "\n".join(lines)

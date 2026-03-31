@@ -83,7 +83,21 @@ def looks_like_multi_step(query: str) -> bool:
     Returns True if decomposition should be attempted.
     False means the existing single-intent flow should handle it.
     """
-    return bool(_MULTI_STEP_SIGNALS.search(query))
+    # Fast path: explicit conjunctions
+    if _MULTI_STEP_SIGNALS.search(query):
+        return True
+    # Catch implicit sequences: comma-separated clauses, long requests with multiple verbs
+    if len(query) > 60 and "," in query:
+        # Comma + action verbs on both sides suggests multi-step
+        _ACTION_VERBS = re.compile(
+            r"\b(?:check|send|email|remind|set|create|add|draft|schedule|book|"
+            r"cancel|find|search|get|look|open|start|stop|summarize|plan)\b",
+            re.IGNORECASE,
+        )
+        verbs = _ACTION_VERBS.findall(query)
+        if len(verbs) >= 2:
+            return True
+    return False
 
 
 async def decompose_request(query: str, context: str, ask_llm_fn) -> list[TaskStep]:
@@ -164,7 +178,8 @@ async def execute_plan(
         query: original user query
         channel: Channel instance for progress updates
         chat_id: chat to send updates to
-        execute_step_fn: async callable(step: TaskStep) -> str that executes a single step
+        execute_step_fn: async callable(step: TaskStep, prior_results: dict[str, str]) -> str
+                         that executes a single step with results from completed dependencies,
                          and returns a result string. Raises on failure.
     """
     plan_id = f"plan_{uuid.uuid4().hex[:8]}"
@@ -173,6 +188,8 @@ async def execute_plan(
     # Build dependency graph: step_id -> set of step_ids it depends on
     pending_deps = {s.id: set(s.depends_on) for s in steps}
     step_map = {s.id: s for s in steps}
+    # Accumulate results from completed steps for downstream consumption
+    step_results: dict[str, str] = {}
 
     result = PlanResult(plan_id=plan_id, query=query, steps=steps)
 
@@ -225,13 +242,16 @@ async def execute_plan(
             async def _run_step(step: TaskStep):
                 step_num = steps.index(step) + 1
                 step.status = "running"
+                # Gather results from this step's dependencies
+                prior = {dep_id: step_results.get(dep_id, "") for dep_id in step.depends_on}
                 try:
                     await channel.send_message(
                         chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
                     )
-                    step_result = await execute_step_fn(step)
+                    step_result = await execute_step_fn(step, prior)
                     step.status = "completed"
                     step.result = step_result
+                    step_results[step.id] = step_result or ""
                     result.completed_count += 1
                     await channel.send_message(
                         chat_id, f"✅ Step {step_num}/{total}: {step.description}"

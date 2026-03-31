@@ -226,6 +226,71 @@ def acknowledge_follow_ups(source: str | None = None):
         log.debug("Failed to acknowledge follow-ups: %s", e)
 
 
+async def _identify_cross_domain_opportunities(snapshot, cooldowns: dict) -> list[Opportunity]:
+    """Detect compound opportunities from cross-domain synthesis.
+
+    Uses the DomainSnapshot to find situations where multiple domains
+    are stressed simultaneously, or where one domain's state implies
+    action in another.
+    """
+    opps = []
+    now = time.monotonic()
+
+    # Count domains at yellow or red risk level
+    domains_at_risk = []
+    for domain_name in ("work", "finance", "goals", "health"):
+        domain = getattr(snapshot, domain_name, None)
+        if domain and hasattr(domain, "risk_level"):
+            if domain.risk_level in ("yellow", "red"):
+                domains_at_risk.append(domain_name)
+
+    # Compound stress: 2+ domains at risk
+    if len(domains_at_risk) >= 2:
+        opp_id = "cross_domain_stress"
+        if not _on_cooldown(opp_id, cooldowns, now, hours=12):
+            risk_summary = ", ".join(domains_at_risk)
+            opps.append(Opportunity(
+                id=opp_id,
+                source="synthesis",
+                summary=f"⚠️ Multiple areas need attention: {risk_summary}",
+                urgency=Urgency.MEDIUM,
+                action_type=None,
+            ))
+
+    # Overcommitment check
+    try:
+        from synthesis.capacity import detect_overcommitment
+        report = await detect_overcommitment(snapshot)
+        if report.score > 70:
+            opp_id = "capacity_warning"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=24):
+                opps.append(Opportunity(
+                    id=opp_id,
+                    source="synthesis",
+                    summary=f"🔴 Capacity score: {report.score}/100 — consider deferring lower-priority items",
+                    urgency=Urgency.MEDIUM,
+                    action_type=None,
+                ))
+    except Exception as e:
+        log.debug("Capacity check failed: %s", e)
+
+    # No deep work but goals behind
+    if hasattr(snapshot, "health") and hasattr(snapshot, "goals"):
+        if (snapshot.health.deep_work_hours_available < 1.0
+                and snapshot.goals.risk_level in ("yellow", "red")):
+            opp_id = "no_deep_work_goals_behind"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=24):
+                opps.append(Opportunity(
+                    id=opp_id,
+                    source="synthesis",
+                    summary="📊 Goals behind schedule but no deep work blocks today — consider protecting focus time",
+                    urgency=Urgency.LOW,
+                    action_type=None,
+                ))
+
+    return opps
+
+
 def _on_cooldown(opp_id: str, cooldowns: dict, now: float, hours: int) -> bool:
     """Check if this opportunity was recently surfaced."""
     last = cooldowns.get(opp_id, 0)
@@ -260,6 +325,7 @@ class AgentLoop:
         self._last_state: dict = {}
         self._cooldowns: dict[str, float] = {}  # opp_id -> monotonic timestamp
         self._tick_count = 0
+        self._snapshot_cache: tuple[float, object] | None = None  # (monotonic_time, DomainSnapshot)
 
     async def start(self):
         """Start the background loop. Call as asyncio.create_task(loop.start())."""
@@ -311,18 +377,48 @@ class AgentLoop:
 
         self._last_state = state
 
+        # 2b. SYNTHESIZE — cross-domain opportunity detection (hourly)
+        now_mono = time.monotonic()
+        should_aggregate = (
+            self._snapshot_cache is None
+            or (now_mono - self._snapshot_cache[0]) > 3600  # refresh hourly
+        )
+        if should_aggregate:
+            try:
+                from synthesis.aggregator import aggregate_all_domains
+                snapshot = await aggregate_all_domains()
+                self._snapshot_cache = (now_mono, snapshot)
+                cross_opps = await _identify_cross_domain_opportunities(snapshot, self._cooldowns)
+                opportunities.extend(cross_opps)
+            except Exception as e:
+                log.debug("Cross-domain synthesis failed: %s", e)
+
         if not opportunities:
             return  # nothing to do
 
-        # 3. FILTER — quiet hours, user presence
+        # 3. FILTER — quiet hours, user presence, learned behavior
         now_dt = datetime.now(ZoneInfo(TIMEZONE))
         in_quiet = self._in_quiet_hours(now_dt)
+
+        # Load behavior profile to filter by learned preferences
+        suppress_skills = set()
+        try:
+            from learning import get_behavior_profile
+            profile = get_behavior_profile()
+            suppress_skills = set(profile.suppress_skills)
+        except Exception:
+            pass
 
         acted: list[tuple[Opportunity, str]] = []
         alerted: list[Opportunity] = []
         suppressed: list[Opportunity] = []
 
         for opp in opportunities:
+            # Skip opportunities from broken/suppressed skills
+            if opp.source in suppress_skills:
+                suppressed.append(opp)
+                continue
+
             # Skip low/medium urgency during quiet hours
             if in_quiet and opp.urgency < Urgency.HIGH:
                 suppressed.append(opp)

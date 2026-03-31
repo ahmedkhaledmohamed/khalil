@@ -2423,3 +2423,55 @@ def detect_routine_drift() -> list[dict]:
             })
 
     return drifts
+
+
+# --- Behavior Profile (preferences → actionable behavior) ---
+
+from dataclasses import dataclass as _dataclass, field as _field
+
+
+@_dataclass
+class BehaviorProfile:
+    """Aggregated behavioral preferences derived from learned data.
+
+    Consumed by agent_loop (opportunity filtering), server (system prompt),
+    and scheduler (alert timing).
+    """
+    peak_hours: list[int] = _field(default_factory=list)
+    suppress_skills: list[str] = _field(default_factory=list)
+    response_length: str = "concise"
+    response_format: str = "bullets"
+    avg_latency_ms: int = 0
+
+
+def get_behavior_profile() -> BehaviorProfile:
+    """Build a BehaviorProfile from active preferences.
+
+    Pure data transformation — reads preferences, returns structured profile.
+    """
+    profile = BehaviorProfile()
+
+    # Peak activity hours
+    peak = get_preference("peak_activity_hours")
+    if isinstance(peak, list):
+        profile.peak_hours = peak
+
+    # Broken skills → suppress list
+    prefs = list_preferences()
+    for p in prefs:
+        if p["key"].startswith("broken_skill_") and p["value"]:
+            skill_name = p["key"].replace("broken_skill_", "")
+            profile.suppress_skills.append(skill_name)
+
+    # Response style
+    style = get_preference("response_style")
+    if isinstance(style, dict):
+        profile.response_length = style.get("length", "concise")
+        profile.response_format = style.get("format", "bullets")
+
+    # Latency baseline
+    lat = get_preference("avg_response_latency_ms")
+    if isinstance(lat, (int, float)):
+        profile.avg_latency_ms = int(lat)
+
+    return profile
