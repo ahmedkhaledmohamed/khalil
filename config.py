@@ -90,6 +90,11 @@ KEYRING_SERVICE = "khalil-assistant"
 #   appstore-issuer-id    — Issuer ID from App Store Connect
 #   appstore-private-key  — Contents of the .p8 private key file
 
+# Agent loop — continuous sense-think-act background process
+AGENT_LOOP_ENABLED = os.getenv("KHALIL_AGENT_LOOP", "true").lower() == "true"
+AGENT_LOOP_INTERVAL_S = int(os.getenv("KHALIL_AGENT_LOOP_INTERVAL", "300"))  # 5 min default
+AGENT_LOOP_QUIET_HOURS = (23, 7)  # no non-urgent actions between 11pm-7am
+
 # Self-healing
 HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
 

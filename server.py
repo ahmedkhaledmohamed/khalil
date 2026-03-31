@@ -5614,6 +5614,24 @@ async def startup():
     except Exception as e:
         log.warning("Startup self-test failed: %s", e)
 
+    # Start agent loop — continuous sense-think-act background process
+    from config import AGENT_LOOP_ENABLED, AGENT_LOOP_INTERVAL_S, AGENT_LOOP_QUIET_HOURS
+    if AGENT_LOOP_ENABLED and OWNER_CHAT_ID and channel:
+        from agent_loop import AgentLoop
+        _agent_loop = AgentLoop(
+            channel=channel,
+            chat_id=OWNER_CHAT_ID,
+            autonomy=autonomy,
+            ask_llm_fn=ask_llm,
+            interval_s=AGENT_LOOP_INTERVAL_S,
+            quiet_hours=AGENT_LOOP_QUIET_HOURS,
+        )
+        asyncio.create_task(_agent_loop.start())
+        log.info("Agent loop started (interval=%ds)", AGENT_LOOP_INTERVAL_S)
+    else:
+        log.info("Agent loop disabled (KHALIL_AGENT_LOOP=%s, owner=%s, channel=%s)",
+                 AGENT_LOOP_ENABLED, OWNER_CHAT_ID, bool(channel))
+
     log.info("Khalil is ready.")
 
 
