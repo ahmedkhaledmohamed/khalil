@@ -5530,6 +5530,15 @@ async def startup():
         mcp_manager._cached_tools = await mcp_manager.get_all_tools()
         log.info("MCP client manager initialized (%d tools available)",
                  len(mcp_manager._cached_tools))
+        # M2: Register MCP tools as Khalil skills
+        try:
+            from mcp_skill_bridge import register_mcp_skills
+            from skills import get_registry
+            count = await register_mcp_skills(get_registry())
+            if count:
+                log.info("MCP skill bridge: registered %d tools as skills", count)
+        except Exception as bridge_err:
+            log.warning("MCP skill bridge failed: %s", bridge_err)
     except Exception as e:
         log.warning("MCP client initialization failed: %s", e)
 
