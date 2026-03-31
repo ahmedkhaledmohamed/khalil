@@ -291,6 +291,99 @@ def get_extension_health(days: int = 7) -> list[dict]:
     return result
 
 
+# --- Capability Health Report ---
+
+def get_capability_health(days: int = 7) -> dict:
+    """Generate a capability health report combining usage, accuracy, and extension stats.
+
+    Returns a dict with:
+    - total_skills: number of registered skills
+    - used_skills: number of skills invoked in the period
+    - unused_skills: list of skill names never invoked
+    - top_used: top 5 most used actions
+    - intent_accuracy: {total, matches, accuracy_pct, mismatches}
+    - extension_health: per-extension stats
+    - action_success_rate: {total, successes, failures, rate_pct}
+    """
+    heatmap = get_capability_heatmap(days=days)
+    accuracy = get_intent_accuracy(days=days)
+    ext_health = get_extension_health(days=days)
+
+    used_actions = {h["action"] for h in heatmap if h["action"]}
+
+    # Get all registered action types from skill registry
+    all_actions = set()
+    try:
+        from skills import get_registry
+        registry = get_registry()
+        for skill in registry.list_skills():
+            all_actions.update(skill.actions.keys())
+    except Exception:
+        pass
+
+    unused = sorted(all_actions - used_actions)
+
+    # Action success/failure rate from audit log
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    audit_rows = conn.execute(
+        "SELECT result FROM audit_log WHERE timestamp > ?",
+        (cutoff,),
+    ).fetchall()
+    total_actions = len(audit_rows)
+    failures = sum(1 for r in audit_rows if r[0] and "error" in (r[0] or "").lower())
+    successes = total_actions - failures
+
+    return {
+        "total_skills": len(all_actions),
+        "used_skills": len(used_actions),
+        "unused_skills": unused[:20],
+        "top_used": heatmap[:5],
+        "intent_accuracy": accuracy,
+        "extension_health": ext_health,
+        "action_success_rate": {
+            "total": total_actions,
+            "successes": successes,
+            "failures": failures,
+            "rate_pct": round(successes / total_actions * 100, 1) if total_actions else 0.0,
+        },
+    }
+
+
+def format_capability_health(report: dict) -> str:
+    """Format capability health report as human-readable text."""
+    lines = ["**Capability Health Report**\n"]
+
+    used = report["used_skills"]
+    total = report["total_skills"]
+    lines.append(f"Skills: {used}/{total} used this week ({round(used/total*100) if total else 0}%)")
+
+    if report["top_used"]:
+        lines.append("\nTop used:")
+        for h in report["top_used"]:
+            lines.append(f"  {h['action']}: {h['count']}x")
+
+    acc = report["intent_accuracy"]
+    if acc["total"]:
+        lines.append(f"\nIntent accuracy: {acc['accuracy_pct']}% ({acc['matches']}/{acc['total']})")
+        if acc["mismatches"]:
+            lines.append("Top mismatches:")
+            for m in acc["mismatches"][:3]:
+                lines.append(f"  pattern={m['pattern_hint']} vs llm={m['llm_action']} ({m['count']}x)")
+
+    sr = report["action_success_rate"]
+    if sr["total"]:
+        lines.append(f"\nAction success rate: {sr['rate_pct']}% ({sr['successes']}/{sr['total']})")
+
+    if report["unused_skills"]:
+        lines.append(f"\nUnused capabilities ({len(report['unused_skills'])}):")
+        lines.append(f"  {', '.join(report['unused_skills'][:10])}")
+        if len(report["unused_skills"]) > 10:
+            lines.append(f"  ... and {len(report['unused_skills']) - 10} more")
+
+    return "\n".join(lines)
+
+
 # --- Insight Management ---
 
 def store_insight(category: str, summary: str, evidence: str, recommendation: str) -> int:
