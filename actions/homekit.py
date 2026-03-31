@@ -62,6 +62,7 @@ SKILL = {
         "Lock the front door",
     ],
     "sensor": {"function": "sense_home", "interval_min": 30, "identify_opportunities": "identify_home_opportunities"},
+    "voice": {"confirm_before_execute": True, "response_style": "brief"},
 }
 
 

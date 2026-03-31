@@ -26,6 +26,7 @@ SKILL = {
     ],
     "examples": ["Remind me to call Sarah in 2 hours", "Set a reminder for tomorrow 9am"],
     "sensor": {"function": "sense_reminders", "interval_min": 5, "identify_opportunities": "identify_reminder_opportunities"},
+    "voice": {"response_style": "brief"},
 }
 
 

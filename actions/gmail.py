@@ -42,6 +42,7 @@ SKILL = {
         {"type": "email_personal", "handler": "handle_intent", "keywords": "search check personal email inbox", "description": "Search personal email"},
     ],
     "examples": ["Send an email to John about the meeting", "Check my work inbox"],
+    "voice": {"confirm_before_execute": True, "response_style": "brief"},
 }
 
 SCOPES_READ = ["https://www.googleapis.com/auth/gmail.readonly"]

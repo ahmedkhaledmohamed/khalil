@@ -28,6 +28,7 @@ SKILL = {
         {"type": "weather_forecast", "handler": "handle_intent", "keywords": "weather forecast days week ahead", "description": "Multi-day forecast"},
     ],
     "examples": ["What's the weather in Toronto?", "5-day forecast"],
+    "voice": {"response_style": "brief"},
 }
 
 

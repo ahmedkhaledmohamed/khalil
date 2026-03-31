@@ -47,6 +47,7 @@ SKILL = {
         {"type": "shell", "handler": None, "keywords": "run command shell open app brew install network disk space", "description": "Execute shell commands"},
     ],
     "examples": ["Open Safari", "Check disk space", "Run brew update"],
+    "voice": {"confirm_before_execute": True, "response_style": "brief"},
 }
 
 # --- Classification ---

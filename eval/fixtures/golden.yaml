@@ -2227,3 +2227,45 @@ workflows:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+voice:
+  - query: "Say hello world"
+    expected_action: voice_tts
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Speak this sentence out loud"
+    expected_action: voice_tts
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Read aloud the following text"
+    expected_action: voice_tts
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Say good morning Ahmed"
+    expected_action: voice_tts
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Enable voice replies"
+    expected_action: voice_toggle
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Voice mode on"
+    expected_action: voice_toggle
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Disable voice response"
+    expected_action: voice_toggle
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Turn off voice reply"
+    expected_action: voice_toggle
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial

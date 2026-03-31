@@ -31,6 +31,7 @@ SKILL = {
         {"type": "digitalocean_spend", "handler": "handle_intent", "keywords": "server cost bill spend digitalocean", "description": "Monthly spend"},
     ],
     "examples": ["Server status", "DigitalOcean spending"],
+    "voice": {"confirm_before_execute": True, "response_style": "brief"},
 }
 
 
