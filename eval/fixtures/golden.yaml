@@ -2269,3 +2269,129 @@ voice:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+summarize:
+  - query: "Summarize this article: https://example.com/post"
+    expected_action: summarize_url
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "TLDR of https://blog.example.com/latest"
+    expected_action: summarize_url
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Key points from https://medium.com/some-article"
+    expected_action: summarize_url
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Summarize this page https://news.ycombinator.com"
+    expected_action: summarize_url
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Summarize this YouTube video: https://youtube.com/watch?v=abc123"
+    expected_action: summarize_youtube
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "TLDR of https://youtu.be/xyz789"
+    expected_action: summarize_youtube
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Summarize this PDF document"
+    expected_action: summarize_pdf
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Summary of this video https://www.youtube.com/watch?v=test"
+    expected_action: summarize_youtube
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+session_logs:
+  - query: "What did I ask you yesterday?"
+    expected_action: session_recall
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What did I say about expenses last week?"
+    expected_action: session_recall
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search my history for recipe"
+    expected_action: session_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Find that conversation about Toronto"
+    expected_action: session_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Search my chat history for Spotify"
+    expected_action: session_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "My most used skills"
+    expected_action: session_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "How many times did I use you this week?"
+    expected_action: session_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Usage stats for the past month"
+    expected_action: session_stats
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+blogwatcher:
+  - query: "Add this RSS feed: https://blog.example.com/feed"
+    expected_action: blog_add
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Subscribe to this blog feed"
+    expected_action: blog_add
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Follow this blog https://example.com/rss"
+    expected_action: blog_add
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Check my feeds"
+    expected_action: blog_check
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Any new blog posts?"
+    expected_action: blog_check
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "New articles from my feeds"
+    expected_action: blog_check
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "List my subscriptions"
+    expected_action: blog_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Remove the Verge feed"
+    expected_action: blog_remove
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
