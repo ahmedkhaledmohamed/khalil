@@ -220,12 +220,43 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         failed_text = f"\n\n[Data sources unavailable: {', '.join(_failed_sources)}]"
         log.warning("Morning brief: %d data sources failed: %s", len(_failed_sources), _failed_sources)
 
+    # Capability highlights — surface 2-3 underused skills
+    discovery_text = ""
+    try:
+        from learning import get_capability_heatmap
+        heatmap = get_capability_heatmap()
+        unused = heatmap.get("unused_skills", [])[:3]
+        if unused:
+            from skills import get_registry
+            registry = get_registry()
+            tips = []
+            for name in unused:
+                skills = [s for s in registry.list_skills() if s.name == name]
+                if skills and skills[0].examples:
+                    tips.append(f"Try: \"{skills[0].examples[0]}\"")
+            if tips:
+                discovery_text = f"\n\nDid you know? {' | '.join(tips)}"
+    except Exception:
+        pass
+
+    # Recent learning — what Khalil adapted
+    learning_text = ""
+    try:
+        from learning import get_insights
+        recent_applied = get_insights(status="applied", limit=3)
+        if recent_applied:
+            items = [f"- {i['summary']}" for i in recent_applied[:2]]
+            learning_text = f"\n\nRecently learned:\n" + "\n".join(items)
+    except Exception:
+        pass
+
     context = (
         f"Personal Profile:\n{personal}\n\n"
         f"Recent Items:\n{recent_text}"
         f"{reminder_text}{weather_text}{calendar_text}{job_text}{github_text}"
         f"{appstore_text}{server_text}{spotify_text}{readwise_text}"
-        f"{work_text}{goal_text}{deadline_text}{failed_text}"
+        f"{work_text}{goal_text}{deadline_text}"
+        f"{discovery_text}{learning_text}{failed_text}"
     )
 
     brief = await ask_claude_fn(
@@ -243,9 +274,11 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         "- Server health if available (one line)\n"
         "- Readwise daily review count if available (one line)\n"
         "- Job matches if any new ones found\n"
+        "- 'Did you know?' skill suggestions if provided (one line)\n"
+        "- 'Recently learned' adaptations if provided (one line)\n"
         "- If any data sources were unavailable, note it briefly at the end (e.g. 'Note: Calendar was unreachable')\n"
         "- A closing line with suggested focus for the day\n"
-        "- Keep it under 18 lines, be direct and actionable.",
+        "- Keep it under 20 lines, be direct and actionable.",
         context,
         system_extra=f"Today's date: {today_iso}, {day_name}",
     )
