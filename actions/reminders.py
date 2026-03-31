@@ -25,6 +25,7 @@ SKILL = {
         {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder"},
     ],
     "examples": ["Remind me to call Sarah in 2 hours", "Set a reminder for tomorrow 9am"],
+    "sensor": {"function": "sense_reminders", "interval_min": 5, "identify_opportunities": "identify_reminder_opportunities"},
 }
 
 
@@ -353,6 +354,66 @@ def create_icloud_reminder(text: str, due_date: str | None = None) -> dict:
     except (subprocess.TimeoutExpired, FileNotFoundError) as e:
         log.warning("iCloud reminder creation failed: %s", e)
         return {"name": text, "created": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_reminders() -> dict:
+    """Sensor: check for overdue and upcoming reminders."""
+    try:
+        reminders = list_reminders()
+        now = datetime.now(ZoneInfo(TIMEZONE))
+        overdue = []
+        upcoming = []
+        for r in reminders:
+            due_str = r.get("due_at", "")
+            if not due_str:
+                continue
+            try:
+                due_dt = datetime.fromisoformat(due_str).replace(tzinfo=ZoneInfo(TIMEZONE))
+                if due_dt < now:
+                    overdue.append(r)
+                elif due_dt < now + timedelta(hours=1):
+                    upcoming.append(r)
+            except (ValueError, TypeError):
+                pass
+        return {"overdue": overdue, "upcoming": upcoming}
+    except Exception as e:
+        log.debug("Reminder sensor failed: %s", e)
+        return {"overdue": [], "upcoming": []}
+
+
+def identify_reminder_opportunities(state: dict, last_state: dict, cooldowns: dict):
+    """Identify actionable opportunities from reminder sensor data."""
+    import time as _time
+    from agent_loop import Opportunity, Urgency, _on_cooldown
+
+    opps = []
+    now = _time.monotonic()
+
+    for r in state.get("reminders", {}).get("overdue", []):
+        opp_id = f"reminder_overdue_{r.get('id', r.get('text', '')[:20])}"
+        if _on_cooldown(opp_id, cooldowns, now, hours=4):
+            continue
+        opps.append(Opportunity(
+            id=opp_id, source="reminders",
+            summary=f"\u23f0 Overdue reminder: {r.get('text', 'unknown')}",
+            urgency=Urgency.MEDIUM, action_type=None, payload={"reminder": r},
+        ))
+
+    for r in state.get("reminders", {}).get("upcoming", []):
+        opp_id = f"reminder_upcoming_{r.get('id', r.get('text', '')[:20])}"
+        if _on_cooldown(opp_id, cooldowns, now, hours=2):
+            continue
+        opps.append(Opportunity(
+            id=opp_id, source="reminders",
+            summary=f"\U0001f4cb Reminder coming up: {r.get('text', 'unknown')}",
+            urgency=Urgency.LOW, action_type=None,
+        ))
+
+    return opps
 
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:

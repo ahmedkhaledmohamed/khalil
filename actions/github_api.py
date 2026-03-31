@@ -36,6 +36,7 @@ SKILL = {
         {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue"},
     ],
     "examples": ["GitHub notifications", "Check my PRs", "Create issue on khalil repo"],
+    "sensor": {"function": "sense_github", "interval_min": 5, "identify_opportunities": "identify_github_opportunities"},
 }
 
 BASE_URL = "https://api.github.com"
@@ -222,6 +223,44 @@ async def get_pr_status(repo: str, pr_number: int) -> dict:
             "deletions": pr.get("deletions", 0),
             "changed_files": pr.get("changed_files", 0),
         }
+
+
+# ---------------------------------------------------------------------------
+# Agent loop sensor
+# ---------------------------------------------------------------------------
+
+async def sense_github() -> dict:
+    """Sensor: check for unread GitHub notifications."""
+    try:
+        notifs = await get_notifications(unread_only=True)
+        return {"unread_notifications": notifs or []}
+    except Exception as e:
+        log.debug("GitHub sensor failed: %s", e)
+        return {"unread_notifications": []}
+
+
+def identify_github_opportunities(state: dict, last_state: dict, cooldowns: dict):
+    """Identify new GitHub notifications worth surfacing."""
+    import time as _time
+    from agent_loop import Opportunity, Urgency, _on_cooldown
+
+    opps = []
+    now = _time.monotonic()
+
+    gh_notifs = state.get("github_api", {}).get("unread_notifications", [])
+    if gh_notifs:
+        last_count = len(last_state.get("github_api", {}).get("unread_notifications", []))
+        if len(gh_notifs) > last_count:
+            opp_id = "github_notifications_new"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=1):
+                titles = [n.get("title", "?") for n in gh_notifs[:5]]
+                opps.append(Opportunity(
+                    id=opp_id, source="github_api",
+                    summary=f"\U0001f514 {len(gh_notifs)} GitHub notification(s):\n" + "\n".join(f"  \u2022 {t}" for t in titles),
+                    urgency=Urgency.LOW, action_type=None,
+                ))
+
+    return opps
 
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:

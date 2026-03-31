@@ -55,76 +55,46 @@ class LoopResult:
 
 
 # ---------------------------------------------------------------------------
-# Sensors — each returns a dict fragment of current state
+# Sensor discovery — pulls from SkillRegistry, with built-in fallbacks
 # ---------------------------------------------------------------------------
 
-async def _sense_reminders() -> dict:
-    """Check for overdue and upcoming reminders."""
+def _get_sensors() -> list[tuple[str, object]]:
+    """Get all sensors: registry-discovered + built-in fallbacks.
+
+    Returns list of (name, async_callable) tuples.
+    """
+    sensors: dict[str, object] = {}
+
+    # Discover from skill registry
     try:
-        from actions.reminders import list_reminders
-        reminders = list_reminders()
-        now = datetime.now(ZoneInfo(TIMEZONE))
-        overdue = []
-        upcoming = []
-        for r in reminders:
-            if not r.get("active"):
-                continue
-            due = r.get("due")
-            if due:
-                try:
-                    due_dt = datetime.fromisoformat(due).replace(tzinfo=ZoneInfo(TIMEZONE))
-                    if due_dt < now:
-                        overdue.append(r)
-                    elif due_dt < now + timedelta(hours=1):
-                        upcoming.append(r)
-                except (ValueError, TypeError):
-                    pass
-        return {"overdue": overdue, "upcoming": upcoming}
+        from skills import get_registry
+        for sensor_config in get_registry().get_sensors():
+            sensors[sensor_config.name] = sensor_config.function
     except Exception as e:
-        log.debug("Reminder sensor failed: %s", e)
-        return {"overdue": [], "upcoming": []}
+        log.debug("Sensor discovery from registry failed: %s", e)
+
+    # Built-in fallbacks (only if not already registered by a skill)
+    if "system" not in sensors:
+        sensors["system"] = _sense_system_builtin
+
+    return list(sensors.items())
 
 
-async def _sense_calendar() -> dict:
-    """Check for upcoming meetings in next 2 hours."""
+def _get_opportunity_fns() -> list[object]:
+    """Get all identify_opportunities callbacks from registered sensors."""
+    fns = []
     try:
-        from actions.calendar import get_today_events
-        events = await get_today_events()
-        now = datetime.now(ZoneInfo(TIMEZONE))
-        upcoming = []
-        for ev in (events or []):
-            start_str = ev.get("start", {}).get("dateTime") or ev.get("start", {}).get("date")
-            if not start_str:
-                continue
-            try:
-                start = datetime.fromisoformat(start_str)
-                if not start.tzinfo:
-                    start = start.replace(tzinfo=ZoneInfo(TIMEZONE))
-                delta = (start - now).total_seconds() / 60
-                if 0 < delta <= 120:  # within next 2 hours
-                    ev["_minutes_until"] = int(delta)
-                    upcoming.append(ev)
-            except (ValueError, TypeError):
-                pass
-        return {"upcoming_events": upcoming}
-    except Exception as e:
-        log.debug("Calendar sensor failed: %s", e)
-        return {"upcoming_events": []}
+        from skills import get_registry
+        for sensor_config in get_registry().get_sensors():
+            if sensor_config.identify_opportunities:
+                fns.append(sensor_config.identify_opportunities)
+    except Exception:
+        pass
+    return fns
 
 
-async def _sense_github() -> dict:
-    """Check for unread GitHub notifications."""
-    try:
-        from actions.github_api import get_notifications
-        notifications = await get_notifications(unread_only=True)
-        return {"unread_notifications": notifications or []}
-    except Exception as e:
-        log.debug("GitHub sensor failed: %s", e)
-        return {"unread_notifications": []}
-
-
-async def _sense_system() -> dict:
-    """Basic system health check."""
+async def _sense_system_builtin() -> dict:
+    """Built-in system health check (no SKILL module)."""
     try:
         import shutil
         total, used, free = shutil.disk_usage("/")
@@ -139,73 +109,16 @@ async def _sense_system() -> dict:
 # ---------------------------------------------------------------------------
 
 def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> list[Opportunity]:
-    """Compare current state to last state and identify actionable items."""
+    """Built-in opportunity detection for sensors without skill modules.
+
+    Most opportunity detection is now handled by skill-registered
+    identify_opportunities callbacks (see _get_opportunity_fns).
+    This function only covers built-in sensors that have no SKILL module.
+    """
     opps: list[Opportunity] = []
     now = time.monotonic()
 
-    # --- Overdue reminders ---
-    for r in state.get("reminders", {}).get("overdue", []):
-        opp_id = f"reminder_overdue_{r.get('id', r.get('text', '')[:20])}"
-        if _on_cooldown(opp_id, cooldowns, now, hours=4):
-            continue
-        opps.append(Opportunity(
-            id=opp_id,
-            source="reminders",
-            summary=f"⏰ Overdue reminder: {r.get('text', 'unknown')}",
-            urgency=Urgency.MEDIUM,
-            action_type=None,  # alert only — user decides
-            payload={"reminder": r},
-        ))
-
-    # --- Upcoming reminders (within 1 hour) ---
-    for r in state.get("reminders", {}).get("upcoming", []):
-        opp_id = f"reminder_upcoming_{r.get('id', r.get('text', '')[:20])}"
-        if _on_cooldown(opp_id, cooldowns, now, hours=2):
-            continue
-        opps.append(Opportunity(
-            id=opp_id,
-            source="reminders",
-            summary=f"📋 Reminder coming up: {r.get('text', 'unknown')}",
-            urgency=Urgency.LOW,
-            action_type=None,
-        ))
-
-    # --- Meeting in 30 minutes, no prep sent ---
-    for ev in state.get("calendar", {}).get("upcoming_events", []):
-        mins = ev.get("_minutes_until", 999)
-        if mins <= 35:
-            title = ev.get("summary", "meeting")
-            opp_id = f"meeting_prep_{title[:30]}_{ev.get('start', {}).get('dateTime', '')[:10]}"
-            if _on_cooldown(opp_id, cooldowns, now, hours=12):
-                continue
-            opps.append(Opportunity(
-                id=opp_id,
-                source="calendar",
-                summary=f"📅 Meeting in {mins}min: {title}",
-                urgency=Urgency.MEDIUM,
-                action_type="meeting_prep",
-                payload={"event": ev},
-                requires_llm=True,
-            ))
-
-    # --- GitHub notifications (batched) ---
-    gh_notifs = state.get("github", {}).get("unread_notifications", [])
-    if gh_notifs:
-        # Only surface if new since last tick
-        last_count = len(last_state.get("github", {}).get("unread_notifications", []))
-        if len(gh_notifs) > last_count:
-            opp_id = "github_notifications_new"
-            if not _on_cooldown(opp_id, cooldowns, now, hours=1):
-                titles = [n.get("subject", {}).get("title", "?") for n in gh_notifs[:5]]
-                opps.append(Opportunity(
-                    id=opp_id,
-                    source="github",
-                    summary=f"🔔 {len(gh_notifs)} GitHub notification(s):\n" + "\n".join(f"  • {t}" for t in titles),
-                    urgency=Urgency.LOW,
-                    action_type=None,
-                ))
-
-    # --- Disk space warning ---
+    # --- Disk space warning (built-in system sensor) ---
     disk_pct = state.get("system", {}).get("disk_pct_used", 0)
     if disk_pct > 90:
         opp_id = "disk_space_warning"
@@ -213,7 +126,7 @@ def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> l
             opps.append(Opportunity(
                 id=opp_id,
                 source="system",
-                summary=f"💾 Disk space warning: {disk_pct}% used",
+                summary=f"\U0001f4be Disk space warning: {disk_pct}% used",
                 urgency=Urgency.LOW,
                 action_type=None,
             ))
@@ -278,25 +191,32 @@ class AgentLoop:
         self._tick_count += 1
         tick_start = time.monotonic()
 
-        # 1. SENSE — collect state from all sensors in parallel
+        # 1. SENSE — discover and run all sensors in parallel
+        sensors = _get_sensors()
         sensor_results = await asyncio.gather(
-            _sense_reminders(),
-            _sense_calendar(),
-            _sense_github(),
-            _sense_system(),
+            *(fn() for _, fn in sensors),
             return_exceptions=True,
         )
         state = {}
-        sensor_names = ["reminders", "calendar", "github", "system"]
-        for name, result in zip(sensor_names, sensor_results):
+        for (name, _), result in zip(sensors, sensor_results):
             if isinstance(result, Exception):
                 log.debug("Sensor %s failed: %s", name, result)
                 state[name] = {}
             else:
                 state[name] = result
 
-        # 2. THINK — identify opportunities
+        # 2. THINK — identify opportunities (built-in + skill-registered)
         opportunities = _identify_opportunities(state, self._last_state, self._cooldowns)
+
+        # Also collect opportunities from skill sensors
+        for opp_fn in _get_opportunity_fns():
+            try:
+                extra = opp_fn(state, self._last_state, self._cooldowns)
+                if extra:
+                    opportunities.extend(extra)
+            except Exception as e:
+                log.debug("Opportunity fn failed: %s", e)
+
         self._last_state = state
 
         if not opportunities:
