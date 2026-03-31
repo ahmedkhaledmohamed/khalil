@@ -3059,7 +3059,7 @@ class TestGoogleContacts:
 
     def test_contacts_pattern_search(self):
         from server import _looks_like_action
-        assert _looks_like_action("search my contacts for Ahmed") == "contacts"
+        assert _looks_like_action("search my contacts for John") == "contacts"
 
     def test_contacts_pattern_email_for(self):
         from server import _looks_like_action
@@ -3284,7 +3284,7 @@ class TestCoherenceAnalysis:
         learning._db_conn = tmp_db
         tmp_db.execute(
             "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
-            (1, "user", "I already told you my name is Ahmed"),
+            (1, "user", "I already told you my name is John"),
         )
         tmp_db.commit()
         try:

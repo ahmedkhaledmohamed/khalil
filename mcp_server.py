@@ -17,12 +17,12 @@ from mcp.server.fastmcp import FastMCP
 from knowledge.search import hybrid_search, keyword_search, get_stats
 from knowledge.context import get_section, get_section_names, get_relevant_context
 
-mcp = FastMCP("khalil", instructions="Khalil — Ahmed's personal knowledge base. Search archives, get context sections, and retrieve life timeline events.")
+mcp = FastMCP("khalil", instructions="Khalil — a personal knowledge base. Search archives, get context sections, and retrieve life timeline events.")
 
 
 @mcp.tool()
 async def search_knowledge(query: str, category: str | None = None) -> str:
-    """Search Ahmed's personal knowledge base (emails, Drive, timeline, context).
+    """Search the personal knowledge base (emails, Drive, timeline, context).
 
     Args:
         query: Search query (e.g. "RRSP overcontribution", "Spotify messaging")
@@ -43,7 +43,7 @@ async def search_knowledge(query: str, category: str | None = None) -> str:
 
 @mcp.tool()
 async def get_context(section_name: str) -> str:
-    """Get a specific section from Ahmed's CONTEXT.md personal profile.
+    """Get a specific section from the user's CONTEXT.md personal profile.
 
     Args:
         section_name: Section name or partial match (e.g. "career", "family", "values", "projects")
@@ -57,7 +57,7 @@ async def get_context(section_name: str) -> str:
 
 @mcp.tool()
 async def get_timeline(year: str | None = None) -> str:
-    """Get life timeline events from Ahmed's email history.
+    """Get life timeline events from the user's email history.
 
     Args:
         year: Optional year filter (e.g. "2024", "2022")

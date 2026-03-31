@@ -272,7 +272,7 @@ reminders:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Set a reminder for 5pm to call mom"
+  - query: "Set a reminder for 5pm to call Sarah"
     expected_action: reminder
     expected_contains: []
     expected_path: direct_action
@@ -719,7 +719,7 @@ imessage:
     expected_path: direct_action
     complexity: trivial
   # Edge phrasings
-  - query: "What did my wife text me?"
+  - query: "What did Sarah text me?"
     expected_action: imessage_read
     expected_contains: []
     expected_path: direct_action
@@ -729,7 +729,7 @@ imessage:
     expected_contains: []
     expected_path: direct_action
     complexity: moderate
-  - query: "Show my conversation with Mom"
+  - query: "Show my conversation with Sarah"
     expected_action: imessage_read
     expected_contains: []
     expected_path: direct_action
@@ -848,7 +848,7 @@ browser:
     expected_contains: []
     expected_path: direct_action
     complexity: moderate
-  - query: "Open backstage.spotify.net"
+  - query: "Open dashboard.example.com"
     expected_action: browser_navigate
     expected_contains: []
     expected_path: direct_action

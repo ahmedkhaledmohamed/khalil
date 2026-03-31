@@ -121,7 +121,7 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
 # --- Goal Progress Signals (M12) ---
 
 def record_goal_progress(goal_text: str, domain: str, description: str = ""):
-    """Record a goal progress signal when Ahmed works on a goal-related project.
+    """Record a goal progress signal when the user works on a goal-related project.
 
     Args:
         goal_text: The goal text being progressed.
@@ -2125,10 +2125,10 @@ def get_active_response_preferences() -> str:
             parts.append(f"Detail level: {parsed}.")
         elif key.startswith("expertise_"):
             domain = key.replace("expertise_", "").replace("_", " ")
-            parts.append(f"Ahmed has expertise in {domain} -- skip basic explanations.")
+            parts.append(f"The user has expertise in {domain} -- skip basic explanations.")
         elif key.startswith("skip_explain_"):
             topic = key.replace("skip_explain_", "").replace("_", " ")
-            parts.append(f"Ahmed knows {topic} -- don't explain basics.")
+            parts.append(f"The user knows {topic} -- don't explain basics.")
         elif key == "preferred_format":
             parts.append(f"Prefer {parsed} format for responses.")
         elif key.startswith("pref_"):

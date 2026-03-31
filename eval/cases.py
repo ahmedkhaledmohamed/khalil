@@ -335,7 +335,7 @@ def _generate_edge_cases() -> list[TestCase]:
         ("you know what I mean", "moderate", "conversational", None, ["edge", "ambiguous"]),
 
         # Multi-intent
-        ("check weather and send email to mom", "complex", "llm_intent", None, ["edge", "multi_intent"]),
+        ("check weather and send email to Sarah", "complex", "llm_intent", None, ["edge", "multi_intent"]),
         ("play spotify and set a reminder for 5pm", "complex", "llm_intent", None, ["edge", "multi_intent"]),
         ("what's the weather and also check my calendar", "complex", "llm_intent", None, ["edge", "multi_intent"]),
         ("send a message and play music", "complex", "llm_intent", None, ["edge", "multi_intent"]),
@@ -398,7 +398,7 @@ def _generate_conversational() -> list[TestCase]:
         "Who am I?",
         "What do you know about me?",
         "What's my job?",
-        "How old are my kids?",
+        "What's on my calendar today?",
         "What are my goals for this year?",
         "Tell me about my side projects",
         "What's my investment strategy?",
