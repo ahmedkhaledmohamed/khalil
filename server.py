@@ -594,63 +594,63 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
     if _routed_tier.value != "complex" and "qwen3" in OLLAMA_LLM_MODEL:
         _ollama_system = system + "\n\n/no_think"
 
-    try:
+    _ollama_payload = {
+        "model": OLLAMA_LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": _ollama_system},
+            {"role": "user", "content": user_message},
+        ],
+        "stream": False,
+    }
+
+    async def _ollama_call() -> str:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-            response = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json={
-                    "model": OLLAMA_LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": _ollama_system},
-                        {"role": "user", "content": user_message},
-                    ],
-                    "stream": False,
-                },
-            )
-            response.raise_for_status()
+            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=_ollama_payload)
+            resp.raise_for_status()
+            return resp.json()["message"]["content"]
+
+    # Retry loop: handles timeouts with a second attempt
+    _connect_failed = False
+    for _attempt in range(1, 3):
+        try:
+            result = await _ollama_call()
             _cb_ollama.record_success()
-            return response.json()["message"]["content"]
-    except httpx.TimeoutException:
-        log.error("Ollama LLM call timed out after %.0fs", LLM_TIMEOUT)
-        _cb_ollama.record_failure()
-        from learning import record_signal
-        record_signal("llm_failure", {"backend": "ollama", "error": "timeout"})
-        return "⚠️ LLM timed out. Ollama may be overloaded — try again in a moment."
-    except httpx.ConnectError:
+            return result
+        except httpx.TimeoutException:
+            log.warning("Ollama timed out (attempt %d/2)", _attempt)
+            if _attempt < 2:
+                await asyncio.sleep(2)
+                continue
+            _cb_ollama.record_failure()
+            from learning import record_signal
+            record_signal("llm_failure", {"backend": "ollama", "error": "timeout"})
+            return "⚠️ LLM timed out. Ollama may be overloaded — try again in a moment."
+        except httpx.ConnectError:
+            _connect_failed = True
+            break
+        except (httpx.HTTPError, KeyError) as e:
+            log.error("Ollama LLM call failed: %s", e)
+            from learning import record_signal
+            record_signal("llm_failure", {"backend": "ollama", "error": f"{type(e).__name__}: {e}"[:200]})
+            return f"⚠️ LLM error: {type(e).__name__}. Check Ollama logs."
+
+    # ConnectError path: Ollama is not running — try recovery then fallback
+    if _connect_failed:
         log.error("Cannot connect to Ollama at %s", OLLAMA_URL)
         _cb_ollama.record_failure()
         from learning import record_signal
         record_signal("llm_failure", {"backend": "ollama", "error": "connection_refused"})
-        # Attempt Ollama recovery
         if await _try_recover_ollama():
-            # Retry the request after recovery
             try:
-                async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
-                    response = await client.post(
-                        f"{OLLAMA_URL}/api/chat",
-                        json={
-                            "model": OLLAMA_LLM_MODEL,
-                            "messages": [
-                                {"role": "system", "content": _ollama_system},
-                                {"role": "user", "content": user_message},
-                            ],
-                            "stream": False,
-                        },
-                    )
-                    response.raise_for_status()
-                    return response.json()["message"]["content"]
+                result = await _ollama_call()
+                _cb_ollama.record_success()
+                return result
             except Exception:
-                pass  # Fall through to Claude fallback
-        # Fall back to Claude API
+                pass
         fallback = await _fallback_to_claude(query, context, system, user_message)
         if fallback:
             return fallback
         return "⚠️ LLM unavailable — Ollama is not running and Claude fallback failed. Start Ollama with: ollama serve"
-    except (httpx.HTTPError, KeyError) as e:
-        log.error("Ollama LLM call failed: %s", e)
-        from learning import record_signal
-        record_signal("llm_failure", {"backend": "ollama", "error": f"{type(e).__name__}: {e}"[:200]})
-        return f"⚠️ LLM error: {type(e).__name__}. Check Ollama logs."
 
 
 # Alias for backward compatibility with scheduler/digests references
