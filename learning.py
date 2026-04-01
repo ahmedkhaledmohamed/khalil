@@ -2243,3 +2243,235 @@ def get_active_response_preferences() -> str:
         + "\n".join(f"- {p}" for p in parts)
         + "\n"
     )
+
+
+# --- Signal-to-Preference Auto-Extraction ---
+
+def auto_extract_preferences() -> list[dict]:
+    """Deterministic extraction of preferences from interaction signals.
+
+    Scans high-frequency signal patterns and converts them to preferences
+    without LLM involvement. Only extracts when pattern has ≥5 occurrences
+    and ≥80% consistency.
+
+    Returns list of {"key": ..., "value": ..., "source": ...} for each extracted preference.
+    """
+    conn = _get_conn()
+    extracted = []
+    cutoff = (datetime.utcnow() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # 1. Model routing — preferred model per context
+    rows = conn.execute(
+        "SELECT json_extract(context, '$.model') as model, COUNT(*) as cnt "
+        "FROM interaction_signals WHERE signal_type = 'model_routed' AND created_at > ? "
+        "GROUP BY model ORDER BY cnt DESC",
+        (cutoff,),
+    ).fetchall()
+    total_routed = sum(r[1] for r in rows)
+    if total_routed >= 5 and rows:
+        top_model, top_count = rows[0][0], rows[0][1]
+        if top_model and top_count / total_routed >= 0.8:
+            key = "preferred_model"
+            existing = get_preference(key)
+            if existing != top_model:
+                set_preference(key, top_model, confidence=0.6)
+                extracted.append({"key": key, "value": top_model, "source": f"{top_count}/{total_routed} routing signals"})
+                log.info("Auto-extracted preference: %s = %s (from %d signals)", key, top_model, total_routed)
+
+    # 2. Most-used skills by time of day — peak activity hours
+    rows = conn.execute(
+        "SELECT CAST(strftime('%%H', created_at) AS INTEGER) as hour, COUNT(*) as cnt "
+        "FROM interaction_signals WHERE signal_type = 'capability_usage' AND created_at > ? "
+        "GROUP BY hour ORDER BY cnt DESC",
+        (cutoff,),
+    ).fetchall()
+    if rows and sum(r[1] for r in rows) >= 10:
+        peak_hours = [r[0] for r in rows[:3]]  # top 3 hours
+        key = "peak_activity_hours"
+        existing = get_preference(key)
+        if existing != peak_hours:
+            set_preference(key, peak_hours, confidence=0.6)
+            extracted.append({"key": key, "value": peak_hours, "source": f"capability_usage signals"})
+            log.info("Auto-extracted preference: %s = %s", key, peak_hours)
+
+    # 3. Consistently failing skills — mark as broken
+    rows = conn.execute(
+        "SELECT json_extract(context, '$.action') as action, COUNT(*) as cnt "
+        "FROM interaction_signals WHERE signal_type = 'action_execution_failure' AND created_at > ? "
+        "GROUP BY action HAVING cnt >= 5 ORDER BY cnt DESC",
+        (cutoff,),
+    ).fetchall()
+    for r in rows:
+        action, fail_count = r[0], r[1]
+        if not action:
+            continue
+        # Check if there are ANY successes for this action
+        success_row = conn.execute(
+            "SELECT COUNT(*) FROM interaction_signals "
+            "WHERE signal_type = 'capability_usage' AND json_extract(context, '$.action') = ? AND created_at > ?",
+            (action, cutoff),
+        ).fetchone()
+        success_count = success_row[0] if success_row else 0
+        total = fail_count + success_count
+        if total >= 5 and fail_count / total >= 0.8:
+            key = f"broken_skill_{action}"
+            if get_preference(key) is None:
+                set_preference(key, True, confidence=0.7)
+                extracted.append({"key": key, "value": True, "source": f"{fail_count}/{total} failures"})
+                log.info("Auto-extracted preference: %s (fail rate %.0f%%)", key, fail_count / total * 100)
+
+    # 4. Preferred response style — from implicit_preference signals
+    rows = conn.execute(
+        "SELECT json_extract(context, '$.key') as pkey, json_extract(context, '$.value') as pval, COUNT(*) as cnt "
+        "FROM interaction_signals WHERE signal_type = 'implicit_preference' AND created_at > ? "
+        "GROUP BY pkey, pval HAVING cnt >= 3 ORDER BY cnt DESC",
+        (cutoff,),
+    ).fetchall()
+    for r in rows:
+        pkey, pval, cnt = r[0], r[1], r[2]
+        if pkey and pval:
+            key = f"pref_{pkey}"
+            existing = get_preference(key)
+            if existing != pval:
+                set_preference(key, pval, confidence=0.5)
+                extracted.append({"key": key, "value": pval, "source": f"{cnt} implicit_preference signals"})
+                log.info("Auto-extracted preference: %s = %s (from %d signals)", key, pval, cnt)
+
+    # 5. Average response latency expectation
+    rows = conn.execute(
+        "SELECT AVG(json_extract(context, '$.latency_ms')) as avg_lat, COUNT(*) as cnt "
+        "FROM interaction_signals WHERE signal_type = 'response_latency' AND created_at > ?",
+        (cutoff,),
+    ).fetchall()
+    if rows and rows[0][1] >= 20:
+        avg_latency = round(rows[0][0])
+        key = "avg_response_latency_ms"
+        set_preference(key, avg_latency, confidence=0.5)
+        extracted.append({"key": key, "value": avg_latency, "source": f"{rows[0][1]} latency signals"})
+
+    log.info("Auto-extraction complete: %d preferences extracted", len(extracted))
+    return extracted
+
+
+# --- Routine Drift Detection ---
+
+def detect_routine_drift() -> list[dict]:
+    """Detect breaks in the user's routine by comparing today's activity to the 14-day average.
+
+    Returns list of drift events, e.g.:
+        [{"type": "quiet_morning", "usual_hour": 8, "current_hour": 10, "summary": "..."}]
+    """
+    conn = _get_conn()
+    now = datetime.utcnow()
+    current_hour = now.hour
+    today_str = now.strftime("%Y-%m-%d")
+
+    # Build 14-day activity profile: {hour: avg_signal_count}
+    cutoff = (now - timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+    rows = conn.execute(
+        "SELECT CAST(strftime('%%H', created_at) AS INTEGER) as hour, "
+        "COUNT(*) as cnt, COUNT(DISTINCT date(created_at)) as days "
+        "FROM interaction_signals WHERE created_at > ? AND date(created_at) != ? "
+        "GROUP BY hour",
+        (cutoff, today_str),
+    ).fetchall()
+
+    if not rows:
+        return []
+
+    profile = {}
+    for r in rows:
+        hour, cnt, days = r[0], r[1], r[2]
+        if days >= 3:  # need at least 3 data points per hour
+            profile[hour] = cnt / days
+
+    if not profile:
+        return []
+
+    # Count today's signals
+    today_count = conn.execute(
+        "SELECT COUNT(*) FROM interaction_signals WHERE date(created_at) = ?",
+        (today_str,),
+    ).fetchone()[0]
+
+    drifts = []
+
+    # Find the earliest "active" hour (avg >= 2 signals/day)
+    active_hours = sorted(h for h, avg in profile.items() if avg >= 2)
+    if active_hours:
+        usual_start = active_hours[0]
+        # If we're 2+ hours past usual start and no activity today
+        if current_hour >= usual_start + 2 and today_count == 0:
+            drifts.append({
+                "type": "quiet_morning",
+                "usual_hour": usual_start,
+                "current_hour": current_hour,
+                "summary": f"No activity today — usually active by {usual_start}:00",
+            })
+
+    # Check for unusually quiet day (by afternoon, significantly below average)
+    if current_hour >= 14:
+        avg_by_now = sum(
+            profile.get(h, 0) for h in range(0, current_hour + 1)
+        )
+        if avg_by_now >= 5 and today_count < avg_by_now * 0.3:
+            drifts.append({
+                "type": "unusually_quiet",
+                "expected_by_now": round(avg_by_now),
+                "actual": today_count,
+                "summary": f"Unusually quiet — {today_count} interactions vs ~{round(avg_by_now)} typical by {current_hour}:00",
+            })
+
+    return drifts
+
+
+# --- Behavior Profile (preferences → actionable behavior) ---
+
+from dataclasses import dataclass as _dataclass, field as _field
+
+
+@_dataclass
+class BehaviorProfile:
+    """Aggregated behavioral preferences derived from learned data.
+
+    Consumed by agent_loop (opportunity filtering), server (system prompt),
+    and scheduler (alert timing).
+    """
+    peak_hours: list[int] = _field(default_factory=list)
+    suppress_skills: list[str] = _field(default_factory=list)
+    response_length: str = "concise"
+    response_format: str = "bullets"
+    avg_latency_ms: int = 0
+
+
+def get_behavior_profile() -> BehaviorProfile:
+    """Build a BehaviorProfile from active preferences.
+
+    Pure data transformation — reads preferences, returns structured profile.
+    """
+    profile = BehaviorProfile()
+
+    # Peak activity hours
+    peak = get_preference("peak_activity_hours")
+    if isinstance(peak, list):
+        profile.peak_hours = peak
+
+    # Broken skills → suppress list
+    prefs = list_preferences()
+    for p in prefs:
+        if p["key"].startswith("broken_skill_") and p["value"]:
+            skill_name = p["key"].replace("broken_skill_", "")
+            profile.suppress_skills.append(skill_name)
+
+    # Response style
+    style = get_preference("response_style")
+    if isinstance(style, dict):
+        profile.response_length = style.get("length", "concise")
+        profile.response_format = style.get("format", "bullets")
+
+    # Latency baseline
+    lat = get_preference("avg_response_latency_ms")
+    if isinstance(lat, (int, float)):
+        profile.avg_latency_ms = int(lat)
+
+    return profile

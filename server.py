@@ -3617,6 +3617,49 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = ctx.chat_id
     save_message(chat_id, "user", query)
 
+    # Acknowledge pending follow-ups — user is engaging
+    try:
+        from agent_loop import acknowledge_follow_ups
+        acknowledge_follow_ups()
+    except Exception:
+        pass
+
+    # Daily plan approval: "approve" creates reminders from pending plan
+    if query.strip().lower() in ("approve", "approve plan"):
+        try:
+            row = db_conn.execute("SELECT value FROM settings WHERE key = 'pending_daily_plan'").fetchone()
+            if row and row[0]:
+                import json as _json
+                from actions.reminders import create_reminder
+                from datetime import datetime as _dt, timedelta
+                from zoneinfo import ZoneInfo as _ZI
+                actions = _json.loads(row[0])
+                now_dt = _dt.now(_ZI(TIMEZONE))
+                created = []
+                for i, a in enumerate(actions):
+                    # Space reminders 2h apart starting from now + 1h
+                    due = now_dt + timedelta(hours=1 + i * 2)
+                    create_reminder(f"📋 {a['description']} (~{a['time_estimate']})", due)
+                    created.append(a["description"])
+                db_conn.execute("DELETE FROM settings WHERE key = 'pending_daily_plan'")
+                db_conn.commit()
+                items = "\n".join(f"  {i+1}. {d}" for i, d in enumerate(created))
+                await ctx.reply(f"✅ Plan approved! Created {len(created)} reminders:\n{items}")
+                return
+        except Exception as e:
+            log.debug("Daily plan approval failed: %s", e)
+
+    if query.strip().lower() in ("dismiss", "dismiss plan"):
+        try:
+            db_conn.execute("DELETE FROM settings WHERE key = 'pending_daily_plan'")
+            db_conn.commit()
+            from learning import record_signal
+            record_signal("daily_plan_dismissed", {"query": query})
+            await ctx.reply("📋 Plan dismissed. I'll learn from this for tomorrow.")
+            return
+        except Exception:
+            pass
+
     # M9: Record activity timing for smart proactive alerts
     try:
         from scheduler.proactive import record_activity_timing
@@ -3721,9 +3764,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     plan_lines.append(f"{i}. {step.description}")
                 plan_text = "\n".join(plan_lines)
 
-                async def _execute_single_step(step):
-                    """Execute a single TaskStep by routing through detect_intent + handle_action_intent."""
+                async def _execute_single_step(step, prior_results=None):
+                    """Execute a single TaskStep by routing through detect_intent + handle_action_intent.
+
+                    Args:
+                        step: TaskStep to execute
+                        prior_results: dict of {step_id: result_text} from completed dependencies
+                    """
                     from orchestrator import TaskStep
+                    prior_results = prior_results or {}
+
+                    # Build context from prior step results
+                    prior_context = ""
+                    if prior_results:
+                        parts = [f"[Result from {sid}]: {text[:500]}" for sid, text in prior_results.items() if text]
+                        if parts:
+                            prior_context = "\n".join(parts)
+
                     # Map orchestrator action types to intent dicts
                     intent = None
                     if step.action == "reminder":
@@ -3739,8 +3796,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         intent = await detect_intent(step.description)
                     if intent:
                         intent["user_query"] = step.description
-                        # Execute via handle_action_intent — but we need to capture the result
-                        # Since handle_action_intent sends messages directly, we treat success as no exception
+                        # Inject prior step results as context for downstream steps
+                        if prior_context:
+                            intent["prior_step_context"] = prior_context
                         handled = await handle_action_intent(intent, ctx)
                         if handled:
                             return f"Completed: {step.description}"
@@ -4584,6 +4642,42 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Goal-driven daily plan at 7:05 AM (right after morning brief)
+    async def _daily_plan_job():
+        if not _can_send():
+            return
+        try:
+            from scheduler.planning import generate_daily_plan, format_daily_plan
+            actions = await generate_daily_plan(ask_claude)
+            if actions:
+                text = format_daily_plan(actions)
+                await channel.send_message(OWNER_CHAT_ID, text)
+                # Store pending plan for approval handling
+                try:
+                    import json as _json
+                    db_conn.execute(
+                        "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                        ("pending_daily_plan", _json.dumps([
+                            {"description": a.description, "time_estimate": a.time_estimate,
+                             "linked_goal": a.linked_goal, "priority": a.priority}
+                            for a in actions
+                        ])),
+                    )
+                    db_conn.commit()
+                except Exception:
+                    pass
+                log.info("Daily plan sent: %d actions", len(actions))
+        except Exception as e:
+            log.warning("Daily plan generation failed: %s", e)
+
+    scheduler.add_job(
+        _daily_plan_job,
+        CronTrigger(hour=7, minute=5, timezone=TIMEZONE),
+        id="daily_plan",
+        name="Goal-Driven Daily Plan",
+        replace_existing=True,
+    )
+
     # Financial alerts on the 1st and 15th of each month at 9 AM
     scheduler.add_job(
         _financial_alert_job,
@@ -4785,6 +4879,24 @@ def _setup_scheduler():
         CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
         id="oauth_refresh",
         name="OAuth Token Refresh",
+        replace_existing=True,
+    )
+
+    # Daily signal-to-preference auto-extraction at 2 AM
+    async def _auto_extract_job():
+        try:
+            from learning import auto_extract_preferences
+            extracted = auto_extract_preferences()
+            if extracted:
+                log.info("Auto-extracted %d preferences from signals", len(extracted))
+        except Exception as e:
+            log.warning("Auto-extraction failed: %s", e)
+
+    scheduler.add_job(
+        _auto_extract_job,
+        CronTrigger(hour=2, minute=0, timezone=TIMEZONE),
+        id="auto_extract_preferences",
+        name="Signal-to-Preference Extraction",
         replace_existing=True,
     )
 

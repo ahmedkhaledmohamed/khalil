@@ -109,11 +109,12 @@ def create_reminder(text: str, due_at: datetime) -> dict:
     return {"id": reminder_id, "text": text, "due_at": due_at.isoformat(), "status": "active"}
 
 
-def list_reminders() -> list[dict]:
-    """List all active reminders."""
+def list_reminders(status: str = "active") -> list[dict]:
+    """List reminders filtered by status."""
     conn = _get_conn()
     rows = conn.execute(
-        "SELECT id, text, due_at, status, created_at FROM reminders WHERE status = 'active' ORDER BY due_at"
+        "SELECT id, text, due_at, status, created_at FROM reminders WHERE status = ? ORDER BY due_at",
+        (status,),
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -275,6 +276,16 @@ def check_due_reminders() -> list[dict]:
             (now, r["id"]),
         )
         fired.append(dict(r))
+
+        # Insert follow-up for proactive nudging (30 min after firing)
+        follow_up_at = (datetime.now(tz) + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            conn.execute(
+                "INSERT INTO follow_ups (source, summary, follow_up_at) VALUES (?, ?, ?)",
+                ("reminder", r["text"][:200], follow_up_at),
+            )
+        except Exception:
+            pass  # Table may not exist yet on first run
 
     conn.commit()
     conn.close()

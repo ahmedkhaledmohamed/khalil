@@ -60,6 +60,23 @@ async def send_morning_brief(channel: "Channel", chat_id: int, ask_claude_fn):
         await channel.send_message(chat_id, brief)
         _record_digest_sent("morning_brief")
         log.info("Morning brief sent successfully")
+
+        # Insert follow-up: check engagement 3 hours after brief
+        try:
+            import sqlite3
+            from datetime import datetime, timedelta
+            from zoneinfo import ZoneInfo
+            from config import DB_PATH, TIMEZONE
+            follow_up_at = (datetime.now(ZoneInfo(TIMEZONE)) + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+            conn = sqlite3.connect(str(DB_PATH))
+            conn.execute(
+                "INSERT INTO follow_ups (source, summary, follow_up_at) VALUES (?, ?, ?)",
+                ("digest", "Morning brief — any action items?", follow_up_at),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass  # Table may not exist yet
     except Exception as e:
         log.error(f"Failed to send morning brief: {e}")
         _record_scheduler_failure("morning_brief", e)
