@@ -669,20 +669,13 @@ async def run_weekly_reflection(ask_llm_fn) -> list[dict]:
         log.error("Reflection LLM call failed: %s", response)
         return []
 
-    try:
-        # Handle markdown code blocks
-        if "```" in response:
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
-        insights = json.loads(response.strip())
-    except (json.JSONDecodeError, IndexError):
-        log.error("Reflection returned invalid JSON: %s", response[:200])
-        return []
+    from llm import WeeklyInsight, parse_llm_json_list
 
-    if not isinstance(insights, list):
-        log.error("Reflection returned non-array: %s", type(insights))
+    insight_models = parse_llm_json_list(response, WeeklyInsight)
+    if not insight_models:
+        log.error("Reflection returned invalid or empty JSON: %s", response[:200])
         return []
+    insights = [m.model_dump() for m in insight_models]
 
     # Store insights and auto-apply safe ones
     stored = []
@@ -1070,18 +1063,13 @@ Maximum 3 meta-insights."""
         log.error("Monthly meta-reflection LLM call failed: %s", response[:200] if response else "empty")
         return []
 
-    try:
-        if "```" in response:
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
-        meta_insights = json.loads(response.strip())
-    except (json.JSONDecodeError, IndexError):
+    from llm import MonthlyMetaInsight, parse_llm_json_list
+
+    meta_insight_models = parse_llm_json_list(response, MonthlyMetaInsight)
+    if not meta_insight_models:
         log.error("Monthly meta-reflection returned invalid JSON: %s", response[:200])
         return []
-
-    if not isinstance(meta_insights, list):
-        return []
+    meta_insights = [m.model_dump() for m in meta_insight_models]
 
     stored = []
     for mi in meta_insights[:3]:

@@ -730,20 +730,18 @@ Rules:
 - Respond with ONLY the JSON object, no markdown."""
 
         try:
+            from llm import WorkflowProposal, parse_llm_json
+
             response = await self._ask_llm(
                 prompt, "",
                 system_extra="You are designing a workflow automation. Respond with ONLY valid JSON.",
             )
-            response = response.strip()
-            # Handle markdown code blocks
-            if "```" in response:
-                response = response.split("```")[1]
-                if response.startswith("json"):
-                    response = response[4:]
-                response = response.strip()
-
-            wf_data = json.loads(response)
-        except (json.JSONDecodeError, Exception) as e:
+            proposal = parse_llm_json(response.strip(), WorkflowProposal)
+            if proposal is None:
+                log.error("Failed to parse workflow proposal from LLM: %s", response[:200])
+                return None
+            wf_data = proposal.model_dump()
+        except Exception as e:
             log.error("Failed to parse workflow proposal from LLM: %s", e)
             return None
 
