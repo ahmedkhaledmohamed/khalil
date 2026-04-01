@@ -1494,23 +1494,19 @@ async def detect_intent(query: str) -> dict | None:
         "If it's just a question or conversation (not asking you to DO something), respond with exactly: NONE"
     )
 
+    from llm import ActionIntent, parse_llm_json
+
     response = await ask_llm(prompt, "", system_extra="Respond with JSON or NONE only. No explanation.")
 
     response = response.strip()
     if response.upper() == "NONE" or response.startswith("⚠️"):
         return None
 
-    # Try to parse JSON from response
-    try:
-        # Handle LLM wrapping in markdown code blocks
-        if "```" in response:
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
-        return json.loads(response.strip())
-    except (json.JSONDecodeError, IndexError):
+    intent = parse_llm_json(response, ActionIntent)
+    if intent is None:
         log.debug("Intent detection returned non-JSON: %s", response[:100])
         return None
+    return intent.model_dump(exclude_defaults=True)
 
 
 async def _execute_with_retry(cmd: str, description: str, max_retries: int = 1):

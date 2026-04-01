@@ -165,24 +165,19 @@ async def classify_gap(query: str, ask_llm_fn) -> dict | None:
         system_extra="You are classifying user requests. Be strict — only flag as capability_gap if it truly requires new code.",
     )
 
-    try:
-        # Handle markdown code blocks
-        text = response.strip()
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        result = json.loads(text.strip())
-    except (json.JSONDecodeError, IndexError):
+    from llm import CapabilityGapResult, parse_llm_json
+
+    gap = parse_llm_json(response.strip(), CapabilityGapResult)
+    if gap is None:
         log.warning("Gap classification returned invalid JSON: %s", response[:200])
         return None
 
-    if result.get("type") != "capability_gap":
+    if gap.type != "capability_gap":
         return None
 
-    name = result.get("name", "").strip()
-    command = result.get("command", "").strip()
-    description = result.get("description", "").strip()
+    name = gap.name.strip()
+    command = gap.command.strip()
+    description = gap.description.strip()
 
     if not name or not command or not description:
         return None

@@ -111,14 +111,12 @@ async def extract_receipt(image_path: str) -> dict:
         "}\n"
         "Return ONLY the JSON, no explanation."
     )
+    from llm import ReceiptData, parse_llm_json
+
     result = await _analyze_image_with_llm(image_path, prompt)
-    try:
-        # Try to parse as JSON
-        json_match = re.search(r"\{.*\}", result, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-    except json.JSONDecodeError:
-        pass
+    receipt = parse_llm_json(result, ReceiptData)
+    if receipt is not None:
+        return receipt.model_dump()
     return {"raw": result}
 
 
