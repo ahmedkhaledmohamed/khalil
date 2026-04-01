@@ -73,9 +73,9 @@ OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
 TIMEZONE = os.getenv("KHALIL_TIMEZONE", "UTC")
 
 # Weather (Open-Meteo, free, no API key)
-# Set to your coordinates, or leave unset to skip weather features
-WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT")) if os.getenv("KHALIL_WEATHER_LAT") else None
-WEATHER_LON = float(os.getenv("KHALIL_WEATHER_LON")) if os.getenv("KHALIL_WEATHER_LON") else None
+# Defaults to Toronto. Override with KHALIL_WEATHER_LAT / KHALIL_WEATHER_LON.
+WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT", "43.6629"))
+WEATHER_LON = float(os.getenv("KHALIL_WEATHER_LON", "-79.3957"))
 
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed

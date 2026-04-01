@@ -554,20 +554,31 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         # Fall through to Ollama path below instead of Claude
 
     if LLM_BACKEND == "claude" and claude and not _force_local:
-        try:
-            response = await claude.messages.create(
-                model=_selected_model,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            return response.content[0].text
-        except Exception as e:
-            log.error("Claude API call failed: %s", e)
-            from learning import record_signal
-            record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
-            return f"⚠️ LLM unavailable (Claude error: {type(e).__name__}). Try again later."
+        _max_retries = 3
+        for _attempt in range(1, _max_retries + 1):
+            try:
+                response = await claude.messages.create(
+                    model=_selected_model,
+                    max_tokens=1500,
+                    system=system,
+                    messages=[{"role": "user", "content": user_message}],
+                    timeout=CLAUDE_TIMEOUT,
+                )
+                return response.content[0].text
+            except Exception as e:
+                _err_str = str(e).lower()
+                _is_rate_limit = "429" in _err_str or "rate" in _err_str or "overloaded" in _err_str
+                if _is_rate_limit and _attempt < _max_retries:
+                    _delay = min(2.0 * (2 ** (_attempt - 1)), 10.0)
+                    log.warning("Claude rate limited (attempt %d/%d), retrying in %.1fs", _attempt, _max_retries, _delay)
+                    await asyncio.sleep(_delay)
+                    continue
+                log.error("Claude API call failed: %s", e)
+                from learning import record_signal
+                record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
+                if _is_rate_limit:
+                    return "⚠️ Rate limited. Try again in a minute."
+                return f"⚠️ LLM unavailable (Claude error: {type(e).__name__}). Try again later."
 
     # Default: Ollama local LLM
     # #20: Circuit breaker — skip Ollama if circuit is open
