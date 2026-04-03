@@ -19,6 +19,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 from config import TOKEN_FILE_CALENDAR, TIMEZONE
 
@@ -69,8 +70,27 @@ def _authorize_write():
 
 def _get_calendar_service(write: bool = False):
     """Get Calendar API service. Use write=True for create/update/delete."""
-    creds = _get_credentials(write=write)
-    return build("calendar", "v3", credentials=creds)
+    try:
+        creds = _get_credentials(write=write)
+        return build("calendar", "v3", credentials=creds)
+    except RuntimeError as e:
+        raise RuntimeError(f"Calendar auth failed: {e}. Re-authorize with: python3 -c \"from actions.calendar import _get_credentials; _get_credentials()\"") from e
+
+
+def _handle_http_error(e: HttpError, write: bool = False):
+    """Handle Google API HTTP errors — invalidate token on auth failures."""
+    status = e.resp.status if hasattr(e, "resp") else 0
+    if status in (401, 403):
+        token_file = TOKEN_FILE_CALENDAR_WRITE if write else TOKEN_FILE_CALENDAR
+        log.error("Calendar API returned %d — invalidating cached token %s", status, token_file.name)
+        if token_file.exists():
+            token_file.unlink()
+        raise RuntimeError(
+            f"Calendar access denied (HTTP {status}). Token invalidated. "
+            "Next request will attempt re-auth. If this persists, check that "
+            "Calendar API is enabled in Google Cloud Console."
+        ) from e
+    raise
 
 
 def _get_events_sync(days: int = 1, max_results: int = 20) -> list[dict]:
@@ -82,15 +102,18 @@ def _get_events_sync(days: int = 1, max_results: int = 20) -> list[dict]:
     time_min = now.isoformat()
     time_max = (now + timedelta(days=days)).isoformat()
 
-    events_result = service.events().list(
-        calendarId="primary",
-        timeMin=time_min,
-        timeMax=time_max,
-        maxResults=max_results,
-        singleEvents=True,
-        orderBy="startTime",
-        timeZone=TIMEZONE,
-    ).execute()
+    try:
+        events_result = service.events().list(
+            calendarId="primary",
+            timeMin=time_min,
+            timeMax=time_max,
+            maxResults=max_results,
+            singleEvents=True,
+            orderBy="startTime",
+            timeZone=TIMEZONE,
+        ).execute()
+    except HttpError as e:
+        _handle_http_error(e, write=False)
 
     events = events_result.get("items", [])
     result = []
@@ -193,7 +216,10 @@ def _create_event_sync(
     if location:
         event_body["location"] = location
 
-    event = service.events().insert(calendarId="primary", body=event_body).execute()
+    try:
+        event = service.events().insert(calendarId="primary", body=event_body).execute()
+    except HttpError as e:
+        _handle_http_error(e, write=True)
     return {
         "id": event["id"],
         "summary": event.get("summary", ""),
@@ -219,7 +245,10 @@ async def create_event(
 def _delete_event_sync(event_id: str) -> bool:
     """Delete a calendar event by ID. Runs in thread."""
     service = _get_calendar_service(write=True)
-    service.events().delete(calendarId="primary", eventId=event_id).execute()
+    try:
+        service.events().delete(calendarId="primary", eventId=event_id).execute()
+    except HttpError as e:
+        _handle_http_error(e, write=True)
     return True
 
 
