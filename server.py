@@ -3989,6 +3989,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "llm_response_snippet": display_response[:200],
                 })
                 log.info("Intent pattern miss: query=%r matched=%s", query[:80], matched_action)
+                # LLM said "I can't" but an existing skill could handle it.
+                # Try LLM intent detection to generate a concrete action.
+                recovery_intent = await detect_intent(query)
+                if recovery_intent and recovery_intent.get("action"):
+                    log.info("Gap recovery: LLM generated intent %s for query=%r", recovery_intent["action"], query[:80])
+                    try:
+                        await progress_msg.delete()
+                    except Exception:
+                        pass
+                    await handle_action_intent(recovery_intent, ctx)
+                    return
                 await _try_inline_healing(ctx)
                 # Skip self-extension — this is a pattern miss, not a capability gap
             else:
