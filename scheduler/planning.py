@@ -524,29 +524,21 @@ async def generate_daily_plan(ask_claude_fn) -> list[DailyAction]:
         prompt, "",
         system_extra="Respond with ONLY a JSON array of 3 actions. No explanation.",
     )
-    response = response.strip()
+    from llm import DailyActionModel, parse_llm_json_list
 
-    # Parse response
-    try:
-        if "```" in response:
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
-        actions_data = json.loads(response.strip())
-        if not isinstance(actions_data, list):
-            return []
-        return [
-            DailyAction(
-                description=a.get("description", ""),
-                time_estimate=a.get("time_estimate", ""),
-                linked_goal=a.get("linked_goal", ""),
-                priority=a.get("priority", i + 1),
-            )
-            for i, a in enumerate(actions_data[:3])
-        ]
-    except (json.JSONDecodeError, KeyError) as e:
-        log.warning("Daily plan parse failed: %s", e)
+    action_models = parse_llm_json_list(response.strip(), DailyActionModel)
+    if not action_models:
+        log.warning("Daily plan parse failed: %s", response[:200])
         return []
+    return [
+        DailyAction(
+            description=a.description,
+            time_estimate=a.time_estimate,
+            linked_goal=a.linked_goal,
+            priority=a.priority if a.priority != 1 else i + 1,
+        )
+        for i, a in enumerate(action_models[:3])
+    ]
 
 
 def format_daily_plan(actions: list[DailyAction]) -> str:

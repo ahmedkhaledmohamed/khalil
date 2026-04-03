@@ -5,7 +5,9 @@ Tracks last sync timestamp in the settings table.
 """
 
 import asyncio
+import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from config import DB_PATH, DATA_DIR
@@ -29,9 +31,22 @@ def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50) -
         except (ValueError, TypeError):
             pass
 
-    results = service.users().messages().list(
-        userId="me", q=query, maxResults=max_results
-    ).execute()
+    def _api_call_with_retry(request, retries=2):
+        """Execute a Google API request, retrying on empty/transient responses."""
+        for attempt in range(retries):
+            try:
+                return request.execute()
+            except (json.JSONDecodeError, Exception) as e:
+                if "Expecting value" in str(e) or "Empty" in str(e):
+                    if attempt < retries - 1:
+                        log.warning("Gmail API empty response (attempt %d/%d), retrying", attempt + 1, retries)
+                        time.sleep(1)
+                        continue
+                raise
+
+    results = _api_call_with_retry(
+        service.users().messages().list(userId="me", q=query, maxResults=max_results)
+    )
 
     messages = results.get("messages", [])
     if not messages:
@@ -39,9 +54,9 @@ def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50) -
 
     emails = []
     for msg in messages:
-        full = service.users().messages().get(
-            userId="me", id=msg["id"], format="full"
-        ).execute()
+        full = _api_call_with_retry(
+            service.users().messages().get(userId="me", id=msg["id"], format="full")
+        )
         headers = {h["name"]: h["value"] for h in full["payload"]["headers"]}
 
         # Extract plain text body

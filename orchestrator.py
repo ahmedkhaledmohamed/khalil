@@ -149,19 +149,12 @@ async def decompose_request(query: str, context: str, ask_llm_fn) -> list[TaskSt
     if response.upper() == "SINGLE" or response.startswith("⚠️"):
         return []
 
-    # Parse JSON
-    try:
-        if "```" in response:
-            response = response.split("```")[1]
-            if response.startswith("json"):
-                response = response[4:]
-        steps_data = json.loads(response.strip())
-        if not isinstance(steps_data, list) or len(steps_data) < 2:
-            return []
-        return [TaskStep.from_dict(s) for s in steps_data]
-    except (json.JSONDecodeError, IndexError, KeyError) as e:
-        log.debug("Decomposition returned unparseable response: %s", str(e)[:100])
+    from llm import TaskStepModel, parse_llm_json_list
+
+    steps = parse_llm_json_list(response, TaskStepModel)
+    if len(steps) < 2:
         return []
+    return [TaskStep.from_dict(s.model_dump()) for s in steps]
 
 
 async def execute_plan(
