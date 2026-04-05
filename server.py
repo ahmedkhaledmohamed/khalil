@@ -1074,6 +1074,228 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
             yield result
 
 
+# ---------------------------------------------------------------------------
+# Tool-use LLM loop — the LLM picks tools, we execute them, loop until done
+# ---------------------------------------------------------------------------
+
+class _ToolCaptureContext:
+    """Fake MessageContext that captures reply text instead of sending to Telegram.
+
+    Passed to skill handlers during tool-use so their ctx.reply() calls
+    are captured as tool results instead of sent to the user.
+    """
+    def __init__(self):
+        self.captured: list[str] = []
+        self._raw_update = None
+
+    async def reply(self, text: str, **kwargs):
+        if text:
+            self.captured.append(text)
+        return None
+
+    async def reply_photo(self, *args, **kwargs):
+        return None
+
+    async def reply_voice(self, *args, **kwargs):
+        return None
+
+    async def typing(self):
+        pass
+
+    def get_result(self) -> str:
+        return "\n".join(self.captured) if self.captured else "(no output)"
+
+
+_MAX_TOOL_ITERATIONS = 5
+
+
+async def _execute_tool_call(tool_call) -> str:
+    """Execute a single tool call from the LLM and return the result text."""
+    from skills import get_registry
+    registry = get_registry()
+
+    fn_name = tool_call.function.name
+    try:
+        args = json.loads(tool_call.function.arguments)
+    except json.JSONDecodeError:
+        return f"Error: invalid JSON arguments for {fn_name}"
+
+    action = args.pop("action", fn_name)
+
+    # Look up handler from skill registry
+    handler = registry.get_handler(action)
+    if handler is None:
+        # Fallback: try the skill name as action
+        handler = registry.get_handler(fn_name)
+        if handler is None:
+            return f"Error: no handler found for tool '{fn_name}' action '{action}'"
+
+    # Execute with a capture context so replies become tool results
+    capture_ctx = _ToolCaptureContext()
+    intent = {"action": action, **args, "tool_mode": True}
+
+    try:
+        result = await asyncio.wait_for(
+            handler(action, intent, capture_ctx),
+            timeout=30,
+        )
+        return capture_ctx.get_result()
+    except asyncio.TimeoutError:
+        return f"Error: {fn_name}/{action} timed out after 30s"
+    except Exception as e:
+        return f"Error executing {fn_name}/{action}: {e}"
+
+
+def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "") -> str:
+    """Build the system prompt for tool-use calls. Shared with ask_llm."""
+    from datetime import datetime as _dt
+    import zoneinfo
+    _now = _dt.now(zoneinfo.ZoneInfo(TIMEZONE))
+    _temporal = (
+        f"CURRENT TIME: {_now.strftime('%A, %B %d, %Y at %I:%M %p %Z')} "
+        f"(Q{(_now.month - 1) // 3 + 1} {_now.year})\n\n"
+    )
+    return (
+        f"{_temporal}"
+        "You are Khalil, a personal AI assistant. "
+        "You have deep knowledge of the user's life, career, and projects. "
+        "Answer based on the provided context from their personal archives. "
+        "Be direct, specific, and personal. "
+        "If the context doesn't contain the answer, say so honestly.\n\n"
+        "You have access to tools for taking actions (calendar, email, reminders, "
+        "shell commands, Spotify, weather, etc.). Use tools when the user asks you "
+        "to DO something or CHECK something. For conversational messages, respond "
+        "without tools.\n\n"
+        "When using tools, ALWAYS use the tool result to inform your response. "
+        "Don't just say 'I checked' — tell the user what you found.\n\n"
+        f"{style_hint}"
+        f"{system_extra}"
+    )
+
+
+async def call_llm_with_tools(
+    query: str,
+    context: str,
+    chat_id: int | str,
+    progress_msg,
+    channel,
+    system_extra: str = "",
+) -> str:
+    """LLM tool-use loop: the LLM picks tools, we execute, loop until text response.
+
+    Returns the final display text. Streams the final response to Telegram.
+    """
+    from tool_catalog import generate_tool_schemas
+    from skills import get_registry
+
+    tools = generate_tool_schemas(get_registry())
+    if not tools:
+        # No tools available — fall back to plain streaming
+        stream_gen = ask_llm_stream(query, context, system_extra)
+        return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+
+    # Build system prompt
+    style_hint = ""
+    try:
+        from learning import get_active_response_preferences
+        style_hint = get_active_response_preferences()
+    except Exception:
+        pass
+
+    system = _build_system_prompt(query, style_hint, system_extra)
+    user_message = f"Context from personal archives:\n\n{context}\n\n---\n\nQuestion: {query}"
+
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user_message},
+    ]
+
+    # Model selection
+    from model_router import route_query
+    _, _routed_model = route_query(query)
+
+    # Privacy routing — force Ollama for sensitive queries
+    _force_local = any(re.search(p, query, re.IGNORECASE) for p in SENSITIVE_PATTERNS)
+    if _force_local or not _taskforce_client:
+        # Fall back to non-tool streaming for local/Ollama
+        stream_gen = ask_llm_stream(query, context, system_extra)
+        return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+
+    # Tool-use loop
+    for iteration in range(_MAX_TOOL_ITERATIONS):
+        try:
+            response = await _taskforce_client.chat.completions.create(
+                model=_routed_model,
+                max_tokens=1500,
+                messages=messages,
+                tools=tools,
+                tool_choice="auto" if iteration == 0 else "auto",
+                timeout=CLAUDE_TIMEOUT,
+            )
+        except Exception as e:
+            log.error("Tool-use LLM call failed (iteration %d): %s", iteration, e)
+            if iteration == 0:
+                # First call failed — fall back to plain streaming
+                stream_gen = ask_llm_stream(query, context, system_extra)
+                return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+            break
+
+        choice = response.choices[0]
+        msg = choice.message
+
+        # If the model returned tool calls, execute them
+        if msg.tool_calls:
+            # Append assistant message with tool calls
+            messages.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
+                    }
+                    for tc in msg.tool_calls
+                ],
+            })
+
+            # Update progress message to show what's happening
+            tool_names = [tc.function.name for tc in msg.tool_calls]
+            await _safe_edit(progress_msg, f"🔧 Using: {', '.join(tool_names)}...")
+
+            # Execute each tool call
+            for tc in msg.tool_calls:
+                log.info("Tool call: %s(%s)", tc.function.name, tc.function.arguments[:100])
+                result_text = await _execute_tool_call(tc)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": result_text[:4000],  # Truncate long results
+                })
+
+            # Continue loop — LLM will reason about tool results
+            continue
+
+        # No tool calls — this is the final text response
+        final_text = msg.content or ""
+        if final_text:
+            await _safe_edit(progress_msg, final_text[:4096])
+        return final_text
+
+    # Exhausted iterations — return whatever we have
+    log.warning("Tool-use loop exhausted %d iterations", _MAX_TOOL_ITERATIONS)
+    last_content = messages[-1].get("content", "") if messages else ""
+    return last_content
+
+
+async def _safe_edit(msg, text: str):
+    """Edit a Telegram message, ignoring failures."""
+    try:
+        await msg.edit(text[:4096])
+    except Exception:
+        pass
+
+
 async def stream_to_telegram(
     chat_id: int,
     progress_msg,
@@ -4266,167 +4488,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 pass
             break
 
-    # Try natural language action detection
-    # 0. Check if query matches an extension command — route directly
-    action_hint = _looks_like_action(query)
-    if action_hint and action_hint not in ("reminder", "email", "calendar", "shell"):
-        # Extension command — route directly to the handler
-        handled = await _try_extension_handler(action_hint, query, update, context)
-        if handled:
-            return
-
-    # 1. Direct mapping for unambiguous patterns (no LLM needed)
+    # --- Fast-path: unambiguous shell patterns (no LLM needed) ---
     direct_intent = _try_direct_shell_intent(query)
     if direct_intent:
-        direct_intent["llm_generated"] = False  # safe — pattern-matched, not LLM
+        direct_intent["llm_generated"] = False
         direct_intent["user_query"] = query
         handled = await handle_action_intent(direct_intent, ctx)
         if handled:
             return
-    # 2. Skill-pattern matching → try direct dispatch before LLM
-    if action_hint is None:
-        action_hint = _looks_like_action(query)
-    if action_hint:
-        # Try direct handler dispatch — skip LLM for pattern-matched skills
-        direct_intent = {"action": action_hint, "action_type": action_hint, "user_query": query, "llm_generated": False}
-        handled = await handle_action_intent(direct_intent, ctx)
-        if handled:
-            return
-        # Handler didn't handle it — fall through to LLM for parameter extraction
-        intent = await detect_intent(query)
-        if intent:
-            # #3: Track intent detection accuracy — pattern hint vs LLM result
-            try:
-                llm_action = intent.get("action", "unknown")
-                record_signal("intent_accuracy", {
-                    "pattern_hint": action_hint,
-                    "llm_action": llm_action,
-                    "match": action_hint == llm_action,
-                    "query": query[:100],
-                })
-            except Exception:
-                pass
-            intent["user_query"] = query
-            handled = await handle_action_intent(intent, ctx)
-            if handled:
-                return
-        else:
-            # Pattern matched but LLM failed to extract intent — record for self-healing
-            from learning import record_signal
-            record_signal("intent_detection_failure", {
-                "query": query[:200],
-                "action_hint": action_hint,
-            })
-            # Try immediate self-healing if this is a recurring failure
-            await _try_inline_healing(ctx)
 
-    # Multi-step task orchestration: if the query looks compound, try decomposing
-    from orchestrator import looks_like_multi_step, decompose_request, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
-    if looks_like_multi_step(query):
-        try:
-            ensure_plans_table()
-            steps = await decompose_request(query, "", ask_llm)
-            if len(steps) >= 2:
-                # Show plan to user
-                plan_lines = [f"I'll handle this in {len(steps)} steps:"]
-                for i, step in enumerate(steps, 1):
-                    plan_lines.append(f"{i}. {step.description}")
-                plan_text = "\n".join(plan_lines)
-
-                async def _execute_single_step(step, prior_results=None):
-                    """Execute a single TaskStep by routing through detect_intent + handle_action_intent.
-
-                    Args:
-                        step: TaskStep to execute
-                        prior_results: dict of {step_id: result_text} from completed dependencies
-                    """
-                    from orchestrator import TaskStep
-                    prior_results = prior_results or {}
-
-                    # Build context from prior step results
-                    prior_context = ""
-                    if prior_results:
-                        parts = [f"[Result from {sid}]: {text[:500]}" for sid, text in prior_results.items() if text]
-                        if parts:
-                            prior_context = "\n".join(parts)
-
-                    # Map orchestrator action types to intent dicts
-                    intent = None
-                    if step.action == "reminder":
-                        intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
-                    elif step.action == "email":
-                        intent = {"action": "email", "to": step.params.get("to", ""), "subject": step.params.get("subject", ""), "context_query": step.params.get("context_query", "")}
-                    elif step.action == "calendar":
-                        intent = {"action": "calendar"}
-                    elif step.action == "shell":
-                        intent = {"action": "shell", "command": step.params.get("command", ""), "description": step.description, "llm_generated": True}
-                    else:
-                        # Fallback: use detect_intent on the step description
-                        intent = await detect_intent(step.description)
-                    if intent:
-                        intent["user_query"] = step.description
-                        # Inject prior step results as context for downstream steps
-                        if prior_context:
-                            intent["prior_step_context"] = prior_context
-                        handled = await handle_action_intent(intent, ctx)
-                        if handled:
-                            return f"Completed: {step.description}"
-                    return f"Executed: {step.description}"
-
-                if autonomy.needs_approval("shell_write"):
-                    # GUIDED/SUPERVISED: ask for confirmation
-                    action_id = autonomy.create_pending_action(
-                        "task_plan",
-                        f"Execute {len(steps)}-step plan: {query[:100]}",
-                        {"query": query, "steps": [s.to_dict() for s in steps]},
-                    )
-                    await _reply_with_keyboard(ctx,
-            f"📋 {plan_text}\n\n{autonomy.format_level()}",
-            approve_deny_keyboard())
-                    return
-                else:
-                    # AUTONOMOUS: execute immediately
-                    await ctx.reply(f"📋 {plan_text}\n\nExecuting...")
-                    plan_result = await execute_task_plan(
-                        steps, query, channel, chat_id, _execute_single_step,
-                    )
-                    await ctx.reply(format_plan_summary(plan_result))
-                    return
-        except Exception as e:
-            log.warning("Multi-step orchestration failed, falling through: %s", e)
-
-    # Show progress indicator — uses channel abstraction
+    # --- Tool-use LLM loop: LLM picks tools, we execute, loop until done ---
     progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
-    # Search knowledge base
+    # Build context from all sources
     results = await hybrid_search(query, limit=6)
     archive_context = truncate_context(results) if results else "No relevant archive data found."
-
-    # Get relevant CONTEXT.md sections
     personal_context = get_relevant_context(query, max_chars=2000)
-
-    # Get conversation context: memories + summary + recent messages
     conversation_context = await get_conversation_context(chat_id, query)
 
-    # #67: Combine context with source citations for cross-source fusion
     full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
     if conversation_context:
         full_context = f"{conversation_context}\n\n{full_context}"
 
-    # Live state injection — real-time awareness of calendar, email, Cursor, reminders
-    live_context = ""
+    # Live state injection
     try:
         from state.collector import collect_live_state, format_for_prompt
         live = await collect_live_state()
         live_context = format_for_prompt(live)
+        if live_context:
+            full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
     except Exception as e:
         log.warning("Live state collection failed: %s", e)
 
-    # Prepend live state before archive context so LLM sees current state first
-    if live_context:
-        full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
-
-    # Voice mode: instruct LLM to keep responses short and speakable
+    # Voice mode
     voice_mode = getattr(ctx, '_voice_mode', False)
     if voice_mode:
         full_context = (
@@ -4436,145 +4530,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + full_context
         )
 
-    # Ask LLM — stream response to Telegram progressively
-    stream_gen = ask_llm_stream(query, full_context)
-    response = await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
-
-    # --- Post-processing: all modifications happen BEFORE the single final edit ---
-
-    # MCP tool call interception — if LLM wants to use an MCP tool, execute it
-    _mcp_call_re = re.compile(r'\[MCP_CALL:\s*([\w.-]+)\.([\w.-]+)\s*\|\s*(\{.*?\})\]')
-    _mcp_match = _mcp_call_re.search(response)
-    if _mcp_match:
-        mcp_server = _mcp_match.group(1)
-        mcp_tool = _mcp_match.group(2)
-        try:
-            mcp_args = json.loads(_mcp_match.group(3))
-        except json.JSONDecodeError:
-            mcp_args = {}
-        try:
-            from mcp_client import MCPClientManager
-            mcp_result = await MCPClientManager.get_instance().call_tool(
-                mcp_server, mcp_tool, mcp_args,
-            )
-            tool_context = (
-                f"{full_context}\n\n"
-                f"[MCP tool result from {mcp_server}.{mcp_tool}]\n{mcp_result}"
-            )
-            response = await ask_claude(query, tool_context)
-        except Exception as e:
-            log.warning("MCP tool call %s.%s failed: %s", mcp_server, mcp_tool, e)
-            response = _mcp_call_re.sub("", response).strip()
-
-    # Strip internal tags
-    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
-    display_response = _gap_tag_re.sub("", response).strip()
-
-    # Detect embedded shell commands — execute instead of showing raw command
-    from learning import detect_search_miss, record_signal
-    suggested_cmd = _extract_shell_from_response(response)
-    if suggested_cmd:
-        record_signal("response_suggests_manual_action", {
-            "query": query[:200], "suggested_cmd": suggested_cmd,
-        })
-        await _try_inline_healing(ctx)
-        from actions.shell import classify_command, format_output
-        classification = classify_command(suggested_cmd)
-        if classification != ActionType.DANGEROUS:
-            intent = {
-                "action": "shell",
-                "command": suggested_cmd,
-                "description": f"Extracted from LLM response",
-                "user_query": query,
-                "llm_generated": True,
-            }
-            try:
-                await progress_msg.delete()
-            except Exception:
-                pass
-            handled = await handle_action_intent(intent, ctx)
-            if handled:
-                save_message(chat_id, "assistant", display_response)
-                return
-
-    # Detect capability gaps — offer to self-extend
-    _gap_match = _gap_tag_re.search(response)
-    if _gap_match:
-        record_signal("capability_gap_detected", {"query": query[:200], "structured": True})
-        gap_groups = re.search(
-            r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]', response
-        )
-        if gap_groups:
-            spec = {
-                "name": gap_groups.group(1),
-                "command": gap_groups.group(2).lstrip("/"),
-                "description": gap_groups.group(3).strip(),
-                "original_query": query,
-            }
-            # Single edit with clean display, then handle extension
-            try:
-                await progress_msg.edit(display_response)
-            except Exception:
-                try:
-                    await progress_msg.delete()
-                except Exception:
-                    pass
-                await channel.send_message(chat_id, display_response)
-            save_message(chat_id, "assistant", display_response)
-            await _handle_self_extend_with_spec(spec, ctx)
-            return
-
-    # Phrase-based gap detection (fallback)
-    try:
-        from actions.extend import detect_capability_gap, handle_self_extend
-        if detect_capability_gap(display_response):
-            matched_action = find_matching_action(query)
-            if matched_action:
-                record_signal("intent_pattern_miss", {
-                    "query": query[:200],
-                    "matched_action": matched_action,
-                    "llm_response_snippet": display_response[:200],
-                })
-                recovery_intent = await detect_intent(query)
-                if recovery_intent and recovery_intent.get("action"):
-                    try:
-                        await progress_msg.delete()
-                    except Exception:
-                        pass
-                    save_message(chat_id, "assistant", display_response)
-                    await handle_action_intent(recovery_intent, ctx)
-                    return
-                await _try_inline_healing(ctx)
-            else:
-                record_signal("capability_gap_detected", {"query": query[:200]})
-                await _try_inline_healing(ctx)
-                await handle_self_extend(query, ctx._raw_update, ask_claude)
-    except Exception as e:
-        log.warning("Capability gap detection/self-extend failed: %s", e)
-
-    # Append skill suggestions (skip if voice mode)
-    if not voice_mode:
-        try:
-            from skills import get_registry
-            suggestions = get_registry().suggest_skills(query, max_suggestions=2)
-            if suggestions:
-                display_response += "\n\n💡 " + " | ".join(suggestions)
-        except Exception:
-            pass
-
-    # --- Single final Telegram update ---
-    # Only edit if post-processing changed the text from what streaming showed
-    if display_response != _internal_tag_re.sub("", response).strip():
-        try:
-            await progress_msg.edit(display_response[:4096])
-        except Exception:
-            pass  # Edit failed — streamed text is already showing, don't send duplicate
+    # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
+    display_response = await call_llm_with_tools(
+        query, full_context, chat_id, progress_msg, channel,
+    )
 
     # Save to conversation history
     save_message(chat_id, "assistant", display_response)
 
     # --- Analytics (non-blocking, no Telegram messages) ---
-    if detect_search_miss(response):
+    from learning import detect_search_miss, record_signal
+    if detect_search_miss(display_response):
         record_signal("search_miss", {"query": query[:200]})
 
     try:
