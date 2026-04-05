@@ -14,7 +14,7 @@ import json
 import logging
 from pathlib import Path
 
-import anthropic
+from llm_client import get_llm_client, call_llm_sync
 
 from config import (
     CLAUDE_MODEL_COMPLEX,
@@ -432,16 +432,14 @@ IMPORTS: none
 ```"""
 
         try:
-            client = anthropic.Anthropic()
-            response = client.messages.create(
-                model=CLAUDE_MODEL_COMPLEX,
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}],
-                system="You are a Python expert adding regex patterns to an intent detection function. Output ONLY the format requested.",
-            )
-            text = response.content[0].text.strip()
+            client, client_type = get_llm_client()
+            text = call_llm_sync(
+                client, client_type, CLAUDE_MODEL_COMPLEX,
+                "You are a Python expert adding regex patterns to an intent detection function. Output ONLY the format requested.",
+                prompt, max_tokens=4000,
+            ).strip()
         except Exception as e:
-            log.error("Claude API failed for pattern miss healing: %s", e)
+            log.error("LLM API failed for pattern miss healing: %s", e)
             return None
 
         explanation = ""
@@ -526,16 +524,14 @@ IMPORTS: <any new imports needed, one per line, or "none">
 ```"""
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=CLAUDE_MODEL_COMPLEX,
-            max_tokens=4000 if multi_function else 2000,
-            messages=[{"role": "user", "content": prompt}],
-            system="You are a Python expert fixing bugs in an existing codebase. Output ONLY the format requested.",
-        )
-        text = response.content[0].text.strip()
+        client, client_type = get_llm_client()
+        text = call_llm_sync(
+            client, client_type, CLAUDE_MODEL_COMPLEX,
+            "You are a Python expert fixing bugs in an existing codebase. Output ONLY the format requested.",
+            prompt, max_tokens=4000 if multi_function else 2000,
+        ).strip()
     except Exception as e:
-        log.error("Claude API failed for healing patch: %s", e)
+        log.error("LLM API failed for healing patch: %s", e)
         return None
 
     # Parse response

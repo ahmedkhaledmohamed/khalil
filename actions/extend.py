@@ -612,19 +612,12 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
     Returns:
         (module_source_code, manifest_json)
     """
-    # Check Claude API is available
+    # Get LLM client via shared factory (respects Taskforce proxy)
+    from llm_client import get_async_llm_client, call_llm_async
     try:
-        import keyring
-        api_key = keyring.get_password(KEYRING_SERVICE, "anthropic-api-key")
-    except Exception:
-        api_key = None
-
-    if not api_key:
-        import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-    if not api_key:
-        raise RuntimeError("Claude API key required for code generation. Ollama is not reliable enough.")
+        client, client_type = get_async_llm_client()
+    except RuntimeError as e:
+        raise RuntimeError("Claude API key required for code generation. Ollama is not reliable enough.") from e
 
     # Read reminders.py as a pattern reference (it's a clean, self-contained action)
     template_path = KHALIL_DIR / "actions" / "reminders.py"
@@ -669,19 +662,13 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         "Respond with ONLY the Python source code. No markdown fences, no explanation."
     )
 
-    import anthropic
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-
-    response = await client.messages.create(
-        model=CLAUDE_MODEL_COMPLEX,
-        max_tokens=4000,
-        system="You are a code generator for Khalil, a personal AI assistant. "
-               "Generate clean, production-quality Python modules that follow existing patterns exactly. "
-               "Output ONLY Python code, no markdown, no explanation.",
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    source = response.content[0].text.strip()
+    source = (await call_llm_async(
+        client, client_type, CLAUDE_MODEL_COMPLEX,
+        "You are a code generator for Khalil, a personal AI assistant. "
+        "Generate clean, production-quality Python modules that follow existing patterns exactly. "
+        "Output ONLY Python code, no markdown, no explanation.",
+        prompt, max_tokens=4000,
+    )).strip()
 
     # Strip markdown fences if present
     if source.startswith("```"):
@@ -1133,15 +1120,10 @@ async def generate_extension_tests(spec: dict, module_source: str) -> str | None
 
     Returns test source code or None on failure.
     """
+    from llm_client import get_async_llm_client, call_llm_async
     try:
-        import keyring
-        api_key = keyring.get_password(KEYRING_SERVICE, "anthropic-api-key")
-    except Exception:
-        api_key = None
-    if not api_key:
-        import os
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
+        client, client_type = get_async_llm_client()
+    except RuntimeError:
         return None
 
     # Read conftest for available fixtures
@@ -1167,16 +1149,12 @@ async def generate_extension_tests(spec: dict, module_source: str) -> str | None
         "Respond with ONLY Python source code. No markdown fences."
     )
 
-    import anthropic
-    client = anthropic.AsyncAnthropic(api_key=api_key)
     try:
-        response = await client.messages.create(
-            model=CLAUDE_MODEL_COMPLEX,
-            max_tokens=3000,
-            system="Generate clean pytest test code. Output ONLY Python code.",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        test_source = response.content[0].text.strip()
+        test_source = (await call_llm_async(
+            client, client_type, CLAUDE_MODEL_COMPLEX,
+            "Generate clean pytest test code. Output ONLY Python code.",
+            prompt, max_tokens=3000,
+        )).strip()
         # Strip markdown fences
         if test_source.startswith("```"):
             lines = test_source.split("\n")

@@ -4,8 +4,6 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-import anthropic
-
 from config import ActionType, KEYRING_SERVICE
 
 log = logging.getLogger("khalil.guardian")
@@ -111,13 +109,9 @@ async def review_tool_call(action_type: str, command: str, context: dict) -> Gua
     )
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=GUARDIAN_MODEL,
-            max_tokens=150,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text
+        from llm_client import get_llm_client, call_llm_sync
+        client, client_type = get_llm_client()
+        text = call_llm_sync(client, client_type, GUARDIAN_MODEL, "", prompt, max_tokens=150)
         result = _parse_verdict(text)
         log.info("Guardian review: %s %s — %s (%s)", action_type, command[:60], result.verdict.value, result.reason)
         return result
@@ -140,13 +134,9 @@ async def review_code_patch(diff: str, target_file: str) -> GuardianResult:
     )
 
     try:
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=GUARDIAN_MODEL,
-            max_tokens=150,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        text = response.content[0].text
+        from llm_client import get_llm_client, call_llm_sync
+        client, client_type = get_llm_client()
+        text = call_llm_sync(client, client_type, GUARDIAN_MODEL, "", prompt, max_tokens=150)
         result = _parse_verdict(text)
         log.info("Guardian code review: %s — %s (%s)", target_file, result.verdict.value, result.reason)
         return result
