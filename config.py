@@ -45,6 +45,25 @@ SIDE_PROJECT_DIRS = [
     Path.home() / "Developer" / "Personal" / "the-hub",
 ]
 
+# Work project documentation directories (Spotify repos with docs worth indexing)
+WORK_PROJECT_DOCS = [
+    # ClientMessaging platform documentation
+    (Path.home() / "Developer" / "ClientMessaging" / "documentation", "work:cm-platform"),
+    # CM Backend microservice docs (only */docs/ will be indexed)
+    (Path.home() / "Developer" / "CM_Backend", "work:cm-backend"),
+    # Orchestration Dashboard
+    (Path.home() / "Developer" / "ClientMessaging" / "orchestration-dashboard", "work:orchestration"),
+    # Bézier monorepo
+    (Path.home() / "Developer" / "Bézier" / "monorepo", "projects:bezier"),
+    # Aika pipeline
+    (Path.home() / "Developer" / "aika-knowledge-ingestion-pipeline", "projects:aika"),
+]
+
+# Standalone files worth indexing from work repos
+WORK_PROJECT_FILES = [
+    (Path.home() / "Developer" / "ClientMessaging" / "CLAUDE.md", "work:cm-repo-guide"),
+]
+
 # Google OAuth (in Personal/scripts/, shared with other tools)
 CREDENTIALS_FILE = SCRIPTS_DIR / "credentials.json"
 TOKEN_FILE = SCRIPTS_DIR / "token.json"  # gmail.readonly + drive.readonly

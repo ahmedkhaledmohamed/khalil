@@ -10,7 +10,7 @@ from pathlib import Path
 from config import (
     DB_PATH, DATA_DIR, GMAIL_DIR, DRIVE_DIR, TIMELINE_FILE, CONTEXT_FILE, EMBED_DIM,
     WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR, GOALS_DIR, LEARNING_DIR,
-    SIDE_PROJECT_DIRS, KHALIL_DIR,
+    SIDE_PROJECT_DIRS, KHALIL_DIR, WORK_PROJECT_DOCS, WORK_PROJECT_FILES,
     CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE,
 )
 from knowledge.embedder import embed_batch
@@ -648,6 +648,32 @@ async def index_all(force: bool = False):
         print(f"  khalil/capabilities: {n} entries")
         total += n
 
+    # Index work project documentation
+    _SKIP_PARTS = {'.git', '.github', 'node_modules', 'out', '__pycache__', '.next'}
+    for project_dir, category_prefix in WORK_PROJECT_DOCS:
+        if not project_dir.exists():
+            continue
+        for md_file in sorted(project_dir.rglob("*.md")):
+            if any(part in _SKIP_PARTS or part.startswith('.') for part in md_file.parts):
+                continue
+            # For CM_Backend, only index files under */docs/
+            if "CM_Backend" in str(project_dir) and "/docs/" not in str(md_file):
+                continue
+            rel = md_file.relative_to(project_dir)
+            subcategory = f"{category_prefix}:{rel.parent}" if rel.parent != Path('.') else category_prefix
+            entries = parse_markdown_file(md_file)
+            n = await index_source(conn, "work_project", subcategory, entries)
+            print(f"  work_project/{rel}: {n} entries")
+            total += n
+
+    # Index standalone work project files
+    for filepath, category in WORK_PROJECT_FILES:
+        if filepath.exists():
+            entries = parse_markdown_file(filepath)
+            n = await index_source(conn, "work_project", category, entries)
+            print(f"  work_project/{filepath.name}: {n} entries")
+            total += n
+
     # Index Cursor conversation transcripts
     if CURSOR_TRANSCRIPTS_DIR.exists():
         catalog = load_cursor_catalog(CURSOR_CATALOG_FILE)
@@ -761,6 +787,33 @@ async def index_incremental():
         n = await index_source(conn, "khalil", "khalil:capabilities", entries)
         print(f"  khalil/capabilities: {n} entries (updated)")
         total += n
+
+    # Index work project documentation (only modified files)
+    _SKIP_PARTS = {'.git', '.github', 'node_modules', 'out', '__pycache__', '.next'}
+    for project_dir, category_prefix in WORK_PROJECT_DOCS:
+        if not project_dir.exists():
+            continue
+        for md_file in sorted(project_dir.rglob("*.md")):
+            if not _should_index(md_file):
+                continue
+            if any(part in _SKIP_PARTS or part.startswith('.') for part in md_file.parts):
+                continue
+            if "CM_Backend" in str(project_dir) and "/docs/" not in str(md_file):
+                continue
+            rel = md_file.relative_to(project_dir)
+            subcategory = f"{category_prefix}:{rel.parent}" if rel.parent != Path('.') else category_prefix
+            entries = parse_markdown_file(md_file)
+            n = await index_source(conn, "work_project", subcategory, entries)
+            print(f"  work_project/{rel}: {n} entries (updated)")
+            total += n
+
+    # Index standalone work project files (only if modified)
+    for filepath, category in WORK_PROJECT_FILES:
+        if filepath.exists() and _should_index(filepath):
+            entries = parse_markdown_file(filepath)
+            n = await index_source(conn, "work_project", category, entries)
+            print(f"  work_project/{filepath.name}: {n} entries (updated)")
+            total += n
 
     # Index Cursor conversation transcripts (only modified files)
     if CURSOR_TRANSCRIPTS_DIR.exists():
