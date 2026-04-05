@@ -1079,33 +1079,42 @@ async def stream_to_telegram(
     last_edit_len = 0
     import time as _time
 
+    # Regex to strip internal tags from display (MCP calls, capability gaps)
+    _internal_tag_re = re.compile(
+        r'\[(?:MCP_CALL|CAPABILITY_GAP):[^\]]*\]'
+    )
+
     async for chunk in stream_gen:
         accumulated += chunk
         now = _time.monotonic()
-        new_chars = len(accumulated) - last_edit_len
+
+        # Strip internal tags from what the user sees
+        display_text = _internal_tag_re.sub("", accumulated).strip()
+        new_chars = len(display_text) - last_edit_len
 
         # Edit if enough time has passed AND enough new content
         if new_chars >= _STREAM_MIN_DELTA and (now - last_edit_time) >= _STREAM_EDIT_INTERVAL:
             try:
                 # Add typing cursor to show it's still generating
-                await progress_msg.edit(accumulated + " ▍")
+                await progress_msg.edit(display_text + " ▍")
                 last_edit_time = now
-                last_edit_len = len(accumulated)
+                last_edit_len = len(display_text)
             except Exception:
                 # Telegram rate limit or message unchanged — skip this edit
                 pass
 
-    # Final edit with complete text (no cursor)
-    if accumulated and len(accumulated) != last_edit_len:
+    # Final edit with complete text (no cursor), tags stripped
+    display_final = _internal_tag_re.sub("", accumulated).strip()
+    if display_final and len(display_final) != last_edit_len:
         try:
-            await progress_msg.edit(accumulated)
+            await progress_msg.edit(display_final)
         except Exception:
             # If final edit fails, delete and send fresh
             try:
                 await progress_msg.delete()
             except Exception:
                 pass
-            await channel.send_message(chat_id, accumulated)
+            await channel.send_message(chat_id, display_final)
 
     return accumulated
 
