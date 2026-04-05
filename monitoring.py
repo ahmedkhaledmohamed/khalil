@@ -110,18 +110,21 @@ def check_database() -> dict:
 async def _check_calendar() -> dict:
     """Check if Google Calendar API is reachable."""
     try:
-        from actions.calendar import get_today_events
+        from state.calendar_provider import get_today_events
         events = await get_today_events()
         return {"status": "ok", "events_today": len(events) if events else 0}
     except Exception as e:
-        return {"status": "error", "error": str(e)[:200]}
+        err = str(e)
+        if "API has not been used" in err or "is disabled" in err:
+            return {"status": "error", "error": "Calendar API not enabled. Enable at: https://console.cloud.google.com/apis/api/calendar-json.googleapis.com/overview"}
+        return {"status": "error", "error": err[:200]}
 
 
 async def _check_gmail() -> dict:
     """Check if Gmail API is reachable."""
     try:
-        from actions.gmail import check_inbox
-        result = await check_inbox(limit=1)
+        from actions.gmail import search_emails
+        result = await search_emails("in:inbox", max_results=1)
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "error": str(e)[:200]}
@@ -138,16 +141,12 @@ async def _check_spotify() -> dict:
 
 
 async def _check_claude() -> dict:
-    """Check if Claude/Anthropic API is reachable."""
+    """Check if Claude/Anthropic API is reachable via configured LLM client."""
     try:
-        import anthropic
-        client = anthropic.Anthropic()
-        # Minimal API call to verify key works
-        client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=5,
-            messages=[{"role": "user", "content": "hi"}],
-        )
+        from llm_client import get_llm_client, call_llm_sync
+        client, client_type = get_llm_client()
+        # Minimal call to verify the connection works
+        call_llm_sync(client, client_type, "claude-haiku-4-5-20251001", "", "ping", max_tokens=5)
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "error": str(e)[:200]}
