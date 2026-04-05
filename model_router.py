@@ -18,7 +18,7 @@ class ModelTier(Enum):
 
 # Default tier → model mapping
 MODEL_MAP: dict[ModelTier, str] = {
-    ModelTier.FAST: "claude-haiku-4-5-20251001",
+    ModelTier.FAST: CLAUDE_MODEL,         # Taskforce is free — use best model for all tiers
     ModelTier.STANDARD: CLAUDE_MODEL,
     ModelTier.COMPLEX: CLAUDE_MODEL_COMPLEX,
 }

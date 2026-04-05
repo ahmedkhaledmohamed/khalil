@@ -62,7 +62,7 @@ LLM_BACKEND = "claude"  # "ollama" for local, "claude" for Taskforce proxy
 OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-opus-4-20250514"
 CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
 MAX_CONTEXT_TOKENS = 8000
 # Taskforce proxy — set KHALIL_CLAUDE_BASE_URL to override the Anthropic API endpoint
