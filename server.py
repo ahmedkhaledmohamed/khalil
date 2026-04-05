@@ -138,6 +138,10 @@ class CircuitBreaker:
 _cb_gmail = CircuitBreaker("gmail")
 _cb_calendar = CircuitBreaker("calendar")
 _cb_ollama = CircuitBreaker("ollama", threshold=3, cooldown_seconds=60)
+_cb_claude = CircuitBreaker("claude", threshold=5, cooldown_seconds=120)
+
+# Error dedup — suppress identical errors within 60s window
+_last_llm_error: tuple[str, float] = ("", 0.0)
 
 
 # --- Globals ---
@@ -601,6 +605,24 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         # Fall through to Ollama path below instead of Claude
 
     if LLM_BACKEND == "claude" and (claude or _taskforce_client) and not _force_local:
+        # Circuit breaker: skip Claude if it's been failing repeatedly
+        global _last_llm_error
+        if _cb_claude.is_open():
+            log.warning("Claude circuit breaker open — trying backup providers")
+            _backup_msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+            for _bp_attr, _bp_model in _BACKUP_PROVIDERS:
+                _bp_client = globals().get(_bp_attr)
+                if not _bp_client:
+                    continue
+                try:
+                    _bp_resp = await _bp_client.chat.completions.create(
+                        model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
+                    )
+                    return _bp_resp.choices[0].message.content
+                except Exception:
+                    continue
+            return "⚠️ LLM temporarily unavailable. Try again in a few minutes."
+
         _max_retries = 3
         for _attempt in range(1, _max_retries + 1):
             try:
@@ -613,6 +635,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                         messages=_msgs,
                         timeout=CLAUDE_TIMEOUT,
                     )
+                    _cb_claude.record_success()
                     return response.choices[0].message.content
                 else:
                     # Native Anthropic API
@@ -623,8 +646,10 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                         messages=[{"role": "user", "content": user_message}],
                         timeout=CLAUDE_TIMEOUT,
                     )
+                    _cb_claude.record_success()
                     return response.content[0].text
             except Exception as e:
+                _cb_claude.record_failure()
                 _err_str = str(e).lower()
                 _is_rate_limit = "429" in _err_str or "rate" in _err_str or "overloaded" in _err_str
                 if _is_rate_limit and _attempt < _max_retries:
@@ -650,6 +675,13 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                     except Exception as _bp_e:
                         log.warning("Backup %s failed: %s", _bp_model, _bp_e)
                         continue
+                # Error dedup: suppress identical errors within 60s
+                import time as _time
+                _err_type = type(e).__name__
+                _now = _time.time()
+                if _err_type == _last_llm_error[0] and (_now - _last_llm_error[1]) < 60:
+                    return "⚠️ Still experiencing API issues. Try again shortly."
+                _last_llm_error = (_err_type, _now)
                 if _is_rate_limit:
                     return "⚠️ Rate limited across all providers. Try again in a minute."
                 return f"⚠️ LLM unavailable (all providers failed). Try again later."
