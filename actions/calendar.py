@@ -78,17 +78,30 @@ def _get_calendar_service(write: bool = False):
 
 
 def _handle_http_error(e: HttpError, write: bool = False):
-    """Handle Google API HTTP errors — invalidate token on auth failures."""
+    """Handle Google API HTTP errors — refresh token on auth failures.
+
+    On 401/403: try refreshing the token. Only delete if refresh also fails.
+    This avoids nuking valid tokens on transient Google API errors.
+    """
     status = e.resp.status if hasattr(e, "resp") else 0
     if status in (401, 403):
         token_file = TOKEN_FILE_CALENDAR_WRITE if write else TOKEN_FILE_CALENDAR
-        log.error("Calendar API returned %d — invalidating cached token %s", status, token_file.name)
-        if token_file.exists():
-            token_file.unlink()
+        log.warning("Calendar API returned %d — attempting token refresh for %s", status, token_file.name)
+        try:
+            from oauth_utils import load_credentials
+            scopes = SCOPES_WRITE if write else SCOPES_READ
+            load_credentials(token_file, scopes, allow_interactive=False)
+            # Refresh succeeded — the 403 was likely transient. Re-raise the
+            # original error so the caller can retry on next request.
+        except Exception:
+            # Refresh failed — token is truly dead. Delete it.
+            log.error("Token refresh failed for %s — deleting", token_file.name)
+            if token_file.exists():
+                token_file.unlink()
         raise RuntimeError(
-            f"Calendar access denied (HTTP {status}). Token invalidated. "
-            "Next request will attempt re-auth. If this persists, check that "
-            "Calendar API is enabled in Google Cloud Console."
+            f"Calendar access denied (HTTP {status}). "
+            "If this persists, re-authorize with: python3 -c "
+            "\"from actions.calendar import _get_credentials; _get_credentials()\""
         ) from e
     raise
 
