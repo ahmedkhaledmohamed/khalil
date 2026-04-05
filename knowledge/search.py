@@ -201,6 +201,37 @@ async def hybrid_search(query: str, limit: int = 8, category: str | None = None)
     return merged[:limit]
 
 
+async def search_memories(query: str, limit: int = 5) -> list[dict]:
+    """Search extracted conversation memories by semantic similarity.
+
+    Returns active memories most relevant to the query.
+    """
+    query_embedding = await embed_text(query)
+    if query_embedding is None:
+        return []
+
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT m.id, m.memory_type, m.content, m.source_context, m.created_at,
+                   e.distance
+            FROM memory_embeddings e
+            JOIN memories m ON m.id = e.id
+            WHERE e.embedding MATCH ? AND k = ?
+              AND m.status = 'active'
+            ORDER BY e.distance
+            """,
+            (serialize_float32(query_embedding), limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        log.debug("Memory search failed (table may not exist yet): %s", e)
+        return []
+    finally:
+        conn.close()
+
+
 def detect_knowledge_gaps(conn: sqlite3.Connection, days: int = 7, max_gaps: int = 5) -> list[dict]:
     """Detect recent queries where knowledge was lacking.
 

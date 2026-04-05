@@ -182,11 +182,41 @@ def init_db() -> sqlite3.Connection:
 
         CREATE INDEX IF NOT EXISTS idx_follow_ups_status ON follow_ups(status);
         CREATE INDEX IF NOT EXISTS idx_follow_ups_at ON follow_ups(follow_up_at);
+
+        -- Conversation memory: rolling summaries for context continuity
+        CREATE TABLE IF NOT EXISTS conversation_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            summary TEXT NOT NULL,
+            message_range_start INTEGER NOT NULL,
+            message_range_end INTEGER NOT NULL,
+            message_count INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conv_summaries_chat
+            ON conversation_summaries(chat_id, created_at);
+
+        -- Conversation memory: extracted facts, decisions, action items, preferences
+        CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER,
+            memory_type TEXT NOT NULL,
+            content TEXT NOT NULL,
+            source_context TEXT,
+            status TEXT DEFAULT 'active',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type, status);
     """)
 
-    # Create virtual table for vector search
+    # Create virtual tables for vector search
     conn.execute(
         f"CREATE VIRTUAL TABLE IF NOT EXISTS document_embeddings USING vec0(id INTEGER PRIMARY KEY, embedding float[{EMBED_DIM}])"
+    )
+    conn.execute(
+        f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(id INTEGER PRIMARY KEY, embedding float[{EMBED_DIM}])"
     )
 
     conn.commit()
