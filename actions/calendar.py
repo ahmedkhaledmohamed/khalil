@@ -36,8 +36,22 @@ SKILL = {
     ],
     "actions": [
         {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
+        {"type": "calendar_create", "handler": "handle_intent", "keywords": "schedule book block create event meeting",
+         "description": "Create a calendar event",
+         "parameters": {
+             "summary": {"type": "string", "description": "Event title/summary"},
+             "start_time": {"type": "string", "description": "Start time in ISO 8601 format (e.g., 2026-04-07T14:00:00)"},
+             "end_time": {"type": "string", "description": "End time in ISO 8601 (defaults to 1 hour after start)"},
+             "description": {"type": "string", "description": "Event description/notes"},
+             "location": {"type": "string", "description": "Event location"},
+         }},
+        {"type": "calendar_upcoming", "handler": "handle_intent", "keywords": "calendar week upcoming next days schedule",
+         "description": "Check upcoming events for next N days",
+         "parameters": {
+             "days": {"type": "integer", "description": "Number of days to look ahead (default 7)"},
+         }},
     ],
-    "examples": ["What's on my calendar today?", "Any meetings this afternoon?"],
+    "examples": ["What's on my calendar today?", "Schedule a meeting tomorrow at 2pm", "Any meetings this week?"],
     "sensor": {"function": "sense_calendar", "interval_min": 5, "identify_opportunities": "identify_calendar_opportunities"},
 }
 
@@ -340,4 +354,61 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
             from resilience import format_user_error
             await ctx.reply(format_user_error(e, skill_name="Calendar"))
         return True
+
+    elif action == "calendar_upcoming":
+        try:
+            days = int(intent.get("days", 7))
+            events = await get_upcoming_events(days=days)
+            if not events:
+                await ctx.reply(f"No events in the next {days} days.")
+            else:
+                await ctx.reply(f"📅 Next {days} days:\n\n{format_events_text(events)}")
+        except Exception as e:
+            from resilience import format_user_error
+            await ctx.reply(format_user_error(e, skill_name="Calendar"))
+        return True
+
+    elif action == "calendar_create":
+        try:
+            summary = intent.get("summary", "")
+            start_str = intent.get("start_time", "")
+            end_str = intent.get("end_time", "")
+
+            if not summary or not start_str:
+                await ctx.reply("I need at least a title and start time to create an event.")
+                return True
+
+            tz = ZoneInfo(TIMEZONE)
+            start_time = datetime.fromisoformat(start_str)
+            if not start_time.tzinfo:
+                start_time = start_time.replace(tzinfo=tz)
+
+            end_time = None
+            if end_str:
+                end_time = datetime.fromisoformat(end_str)
+                if not end_time.tzinfo:
+                    end_time = end_time.replace(tzinfo=tz)
+
+            result = await create_event(
+                summary=summary,
+                start_time=start_time,
+                end_time=end_time,
+                description=intent.get("description", ""),
+                location=intent.get("location", ""),
+            )
+            start_display = start_time.strftime("%A %b %d at %I:%M %p")
+            await ctx.reply(
+                f"✅ Created: **{result['summary']}**\n"
+                f"📅 {start_display}\n"
+                f"🔗 {result.get('link', '')}"
+            )
+        except RuntimeError as e:
+            await ctx.reply(f"⚠️ {e}")
+        except (ValueError, TypeError) as e:
+            await ctx.reply(f"⚠️ Couldn't parse the time: {e}")
+        except Exception as e:
+            from resilience import format_user_error
+            await ctx.reply(format_user_error(e, skill_name="Calendar"))
+        return True
+
     return False
