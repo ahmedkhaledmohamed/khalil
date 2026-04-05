@@ -628,6 +628,26 @@ async def index_all(force: bool = False):
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries")
             total += n
 
+    # Index side project READMEs
+    for project_dir in SIDE_PROJECT_DIRS:
+        if not project_dir.exists():
+            continue
+        readme = project_dir / "README.md"
+        if readme.exists():
+            entries = parse_markdown_file(readme)
+            proj_name = project_dir.name.lower()
+            n = await index_source(conn, "side_project", f"projects:{proj_name}", entries)
+            print(f"  side_project/{proj_name}: {n} entries")
+            total += n
+
+    # Index Khalil's own capabilities
+    khalil_readme = KHALIL_DIR / "README.md"
+    if khalil_readme.exists():
+        entries = parse_markdown_file(khalil_readme)
+        n = await index_source(conn, "khalil", "khalil:capabilities", entries)
+        print(f"  khalil/capabilities: {n} entries")
+        total += n
+
     # Index Cursor conversation transcripts
     if CURSOR_TRANSCRIPTS_DIR.exists():
         catalog = load_cursor_catalog(CURSOR_CATALOG_FILE)
@@ -721,6 +741,26 @@ async def index_incremental():
             n = await index_source(conn, dirname, "work:planning", entries)
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries (updated)")
             total += n
+
+    # Index side project READMEs (only modified)
+    for project_dir in SIDE_PROJECT_DIRS:
+        if not project_dir.exists():
+            continue
+        readme = project_dir / "README.md"
+        if readme.exists() and _should_index(readme):
+            entries = parse_markdown_file(readme)
+            proj_name = project_dir.name.lower()
+            n = await index_source(conn, "side_project", f"projects:{proj_name}", entries)
+            print(f"  side_project/{proj_name}: {n} entries (updated)")
+            total += n
+
+    # Index Khalil capabilities (only if modified)
+    khalil_readme = KHALIL_DIR / "README.md"
+    if khalil_readme.exists() and _should_index(khalil_readme):
+        entries = parse_markdown_file(khalil_readme)
+        n = await index_source(conn, "khalil", "khalil:capabilities", entries)
+        print(f"  khalil/capabilities: {n} entries (updated)")
+        total += n
 
     # Index Cursor conversation transcripts (only modified files)
     if CURSOR_TRANSCRIPTS_DIR.exists():
