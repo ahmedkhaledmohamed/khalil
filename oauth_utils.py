@@ -16,6 +16,7 @@ from google.oauth2.credentials import Credentials
 
 from config import (
     CREDENTIALS_FILE,
+    CREDENTIALS_FILE_PERSONAL,
     TOKEN_FILE,
     TOKEN_FILE_COMPOSE,
     TOKEN_FILE_CALENDAR,
@@ -25,6 +26,7 @@ from config import (
     TOKEN_FILE_DRIVE_WRITE,
     TOKEN_FILE_WORK,
     TOKEN_FILE_YOUTUBE,
+    TOKEN_FILE_PERSONAL2,
 )
 
 log = logging.getLogger("khalil.oauth")
@@ -40,6 +42,12 @@ TOKEN_FILES = {
     "drive_write": TOKEN_FILE_DRIVE_WRITE,
     "work_gmail": TOKEN_FILE_WORK,
     "youtube": TOKEN_FILE_YOUTUBE,
+    "personal2_gmail": TOKEN_FILE_PERSONAL2,
+}
+
+# Tokens that use a different credentials file than the default
+TOKEN_CREDENTIALS_MAP: dict[Path, Path] = {
+    TOKEN_FILE_PERSONAL2: CREDENTIALS_FILE_PERSONAL,
 }
 
 
@@ -85,6 +93,7 @@ def load_credentials(
     token_file: Path,
     scopes: list[str],
     allow_interactive: bool = True,
+    credentials_file: Path | None = None,
 ) -> Credentials:
     """Load, refresh, or create OAuth credentials.
 
@@ -92,6 +101,7 @@ def load_credentials(
         token_file: Path to the token JSON file.
         scopes: OAuth scopes required.
         allow_interactive: If True, can open browser for re-auth. Set False for daemon context.
+        credentials_file: OAuth client secrets file. Defaults to CREDENTIALS_FILE.
 
     Returns:
         Valid Credentials object.
@@ -100,6 +110,8 @@ def load_credentials(
         RuntimeError: If credentials are unavailable and interactive auth is disabled.
         FileNotFoundError: If credentials.json is missing and re-auth is needed.
     """
+    creds_file = credentials_file or TOKEN_CREDENTIALS_MAP.get(token_file, CREDENTIALS_FILE)
+
     creds = _safe_load_token(token_file, scopes)
 
     if creds and creds.valid:
@@ -123,14 +135,14 @@ def load_credentials(
             "Run interactive auth first (e.g. python3 actions/gmail.py --reauth)"
         )
 
-    if not CREDENTIALS_FILE.exists():
+    if not creds_file.exists():
         raise FileNotFoundError(
-            f"Missing {CREDENTIALS_FILE}. "
+            f"Missing {creds_file}. "
             "Download from Google Cloud Console → APIs → Credentials → OAuth 2.0"
         )
 
     from google_auth_oauthlib.flow import InstalledAppFlow
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), scopes)
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_file), scopes)
     creds = flow.run_local_server(port=0)
     _atomic_write_token(token_file, creds)
     return creds
