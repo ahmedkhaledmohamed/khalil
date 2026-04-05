@@ -76,6 +76,7 @@ TOKEN_FILE_DRIVE_WRITE = SCRIPTS_DIR / "token_drive_write.json"  # drive.file fo
 TOKEN_FILE_WORK = SCRIPTS_DIR / "token_work.json"  # gmail.readonly for work account (#55)
 TOKEN_FILE_SPOTIFY = SCRIPTS_DIR / "token_spotify.json"  # Spotify OAuth token cache
 TOKEN_FILE_YOUTUBE = SCRIPTS_DIR / "token_youtube.json"  # youtube.readonly for YouTube Data API
+TOKEN_FILE_PERSONAL2 = SCRIPTS_DIR / "token_personal2.json"  # gmail.readonly for second personal email
 
 # App Store Connect (Zia app ID — set after configuring ASC API key)
 ZIA_APP_ID = ""

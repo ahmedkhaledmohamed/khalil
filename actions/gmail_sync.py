@@ -15,11 +15,21 @@ from config import DB_PATH, DATA_DIR
 log = logging.getLogger("khalil.actions.gmail_sync")
 
 
-def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50) -> list[dict]:
-    """Fetch emails from Gmail newer than after_timestamp. Runs in thread."""
-    from actions.gmail import _get_gmail_service
+def _get_gmail_service_for_token(token_file=None):
+    """Get Gmail readonly service for a specific token file."""
+    if token_file is None:
+        from actions.gmail import _get_gmail_service
+        return _get_gmail_service(write=False)
+    from googleapiclient.discovery import build
+    from oauth_utils import load_credentials
+    scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+    creds = load_credentials(token_file, scopes, allow_interactive=False)
+    return build("gmail", "v1", credentials=creds)
 
-    service = _get_gmail_service(write=False)
+
+def _fetch_new_emails_sync(after_timestamp: str | None, max_results: int = 50, token_file=None) -> list[dict]:
+    """Fetch emails from Gmail newer than after_timestamp. Runs in thread."""
+    service = _get_gmail_service_for_token(token_file)
 
     # Build Gmail query — 'after:' uses epoch seconds
     query = ""
@@ -142,56 +152,69 @@ def categorize_email(email_dict: dict) -> str:
     return best_category
 
 
-async def sync_new_emails() -> dict:
+async def sync_new_emails(
+    conn=None,
+    after_timestamp: str | None = None,
+    token_file=None,
+    source_prefix: str = "gmail_sync",
+    category_prefix: str = "email",
+) -> int | dict:
     """Fetch new emails since last sync and index them into the knowledge base.
 
-    Returns dict with counts: {"fetched": N, "indexed": N}.
+    Args:
+        conn: Database connection. If None, creates one (legacy behavior).
+        after_timestamp: Override for last sync timestamp (ISO format).
+        token_file: OAuth token file for the Gmail account. None = personal default.
+        source_prefix: Source name for knowledge base entries.
+        category_prefix: Category prefix (e.g. "email" or "email:work").
+
+    Returns:
+        int (count) when called with conn, or dict with counts for legacy callers.
     """
     from knowledge.indexer import init_db, index_source
 
-    conn = init_db()
+    legacy_mode = conn is None
+    if legacy_mode:
+        conn = init_db()
 
-    # Get last sync timestamp
-    row = conn.execute("SELECT value FROM settings WHERE key = 'last_email_sync'").fetchone()
-    last_sync = row[0] if row else None
+    # Get last sync timestamp (use provided or look up from settings)
+    if after_timestamp is None:
+        setting_key = f"last_{source_prefix.replace('gmail_sync', 'email')}_sync"
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (setting_key,)).fetchone()
+        after_timestamp = row[0] if row else None
 
-    log.info("Email sync starting (last sync: %s)", last_sync or "never")
+    log.info("%s sync starting (last sync: %s)", source_prefix, after_timestamp or "never")
 
     # Fetch new emails
-    emails = await asyncio.to_thread(_fetch_new_emails_sync, last_sync)
+    emails = await asyncio.to_thread(_fetch_new_emails_sync, after_timestamp, token_file=token_file)
 
     if not emails:
-        log.info("No new emails to sync")
-        # Still update timestamp
-        _update_sync_timestamp(conn)
-        return {"fetched": 0, "indexed": 0}
+        log.info("No new emails to sync for %s", source_prefix)
+        if legacy_mode:
+            _update_sync_timestamp(conn)
+            return {"fetched": 0, "indexed": 0}
+        return 0
 
-    log.info("Fetched %d new emails", len(emails))
+    log.info("Fetched %d new emails for %s", len(emails), source_prefix)
 
-    # Convert to indexer entry format (same as parse_email_file output)
-    # #47: Auto-categorize each email during sync
-    entries = []
+    # Convert to indexer entry format + auto-categorize
+    indexed = 0
     for e in emails:
         category = categorize_email(e)
         content = f"From: {e['from']}\nDate: {e['date']}\n{e['subject']}\n{e['body'][:1000] or e['snippet']}"
-        entries.append({
+        entry = {
             "title": e["subject"],
             "content": content,
             "metadata": f"from={e['from']}; date={e['date']}; gmail_id={e['id']}",
-            "category": f"email:{category}",
-        })
+        }
+        indexed += await index_source(conn, source_prefix, f"{category_prefix}:{category}", [entry])
 
-    # Index into knowledge base (use per-email category)
-    indexed = 0
-    for entry in entries:
-        cat = entry.pop("category")
-        indexed += await index_source(conn, "gmail_sync", cat, [entry])
+    if legacy_mode:
+        _update_sync_timestamp(conn)
+        log.info("Email sync complete: %d fetched, %d indexed", len(emails), indexed)
+        return {"fetched": len(emails), "indexed": indexed}
 
-    # Update sync timestamp
-    _update_sync_timestamp(conn)
-
-    log.info("Email sync complete: %d fetched, %d indexed", len(emails), indexed)
-    return {"fetched": len(emails), "indexed": indexed}
+    return indexed
 
 
 def _update_sync_timestamp(conn):
