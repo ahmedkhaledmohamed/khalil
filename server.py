@@ -142,6 +142,7 @@ scheduler = AsyncIOScheduler()
 db_conn = None
 autonomy: AutonomyController = None
 claude: anthropic.AsyncAnthropic = None
+_taskforce_client = None  # OpenAI-compatible client for Taskforce proxy
 telegram_app: Application | None = None
 channel: Channel | None = None  # Primary channel instance (set during bot startup)
 OWNER_CHAT_ID: int | None = None  # Loaded from DB on startup, updated on first message
@@ -420,31 +421,40 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
     if kimi_result:
         return kimi_result
 
-    client = claude
+    # Use Taskforce client if available, else native Anthropic
+    _use_taskforce = _taskforce_client is not None
+    client = _taskforce_client or claude
     if not client:
         api_key = get_secret("anthropic-api-key")
         if not api_key:
             return _get_cached_response(query)
         try:
-            _kwargs = {"api_key": api_key}
             if CLAUDE_BASE_URL:
-                _kwargs["base_url"] = CLAUDE_BASE_URL
-            if CLAUDE_API_KEY_HEADER:
-                _kwargs["default_headers"] = {CLAUDE_API_KEY_HEADER: api_key}
-            client = anthropic.AsyncAnthropic(**_kwargs)
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(
+                    api_key=api_key, base_url=CLAUDE_BASE_URL,
+                    default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+                )
+                _use_taskforce = True
+            else:
+                client = anthropic.AsyncAnthropic(api_key=api_key)
         except Exception:
             return _get_cached_response(query)
 
     for model in _FALLBACK_MODELS:
         try:
-            response = await client.messages.create(
-                model=model,
-                max_tokens=1500,
-                system=system,
-                messages=[{"role": "user", "content": user_message}],
-                timeout=CLAUDE_TIMEOUT,
-            )
-            text = response.content[0].text
+            if _use_taskforce:
+                _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+                response = await client.chat.completions.create(
+                    model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+                )
+                text = response.choices[0].message.content
+            else:
+                response = await client.messages.create(
+                    model=model, max_tokens=1500, system=system,
+                    messages=[{"role": "user", "content": user_message}], timeout=CLAUDE_TIMEOUT,
+                )
+                text = response.content[0].text
             log.info("Fell back to %s (Ollama unavailable)", model)
             return text
         except Exception as e:
@@ -560,18 +570,30 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         log.info("Privacy routing: sensitive query forced to local Ollama")
         # Fall through to Ollama path below instead of Claude
 
-    if LLM_BACKEND == "claude" and claude and not _force_local:
+    if LLM_BACKEND == "claude" and (claude or _taskforce_client) and not _force_local:
         _max_retries = 3
         for _attempt in range(1, _max_retries + 1):
             try:
-                response = await claude.messages.create(
-                    model=_selected_model,
-                    max_tokens=1500,
-                    system=system,
-                    messages=[{"role": "user", "content": user_message}],
-                    timeout=CLAUDE_TIMEOUT,
-                )
-                return response.content[0].text
+                if _taskforce_client:
+                    # Taskforce proxy: OpenAI-compatible API
+                    _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+                    response = await _taskforce_client.chat.completions.create(
+                        model=_selected_model,
+                        max_tokens=1500,
+                        messages=_msgs,
+                        timeout=CLAUDE_TIMEOUT,
+                    )
+                    return response.choices[0].message.content
+                else:
+                    # Native Anthropic API
+                    response = await claude.messages.create(
+                        model=_selected_model,
+                        max_tokens=1500,
+                        system=system,
+                        messages=[{"role": "user", "content": user_message}],
+                        timeout=CLAUDE_TIMEOUT,
+                    )
+                    return response.content[0].text
             except Exception as e:
                 _err_str = str(e).lower()
                 _is_rate_limit = "429" in _err_str or "rate" in _err_str or "overloaded" in _err_str
@@ -5122,14 +5144,19 @@ async def startup():
                 "  Or switch to Ollama: set LLM_BACKEND = 'ollama' in config.py"
             )
             return
-        _claude_kwargs = {"api_key": api_key}
+        global _taskforce_client
         if CLAUDE_BASE_URL:
-            _claude_kwargs["base_url"] = CLAUDE_BASE_URL
-        if CLAUDE_API_KEY_HEADER:
-            _claude_kwargs["default_headers"] = {CLAUDE_API_KEY_HEADER: api_key}
-        claude = anthropic.AsyncAnthropic(**_claude_kwargs)
-        _url_info = f" via {CLAUDE_BASE_URL}" if CLAUDE_BASE_URL else ""
-        log.info(f"LLM backend: Claude ({CLAUDE_MODEL}){_url_info}")
+            # Taskforce proxy uses OpenAI-compatible API
+            from openai import AsyncOpenAI
+            _taskforce_client = AsyncOpenAI(
+                api_key=api_key,
+                base_url=CLAUDE_BASE_URL,
+                default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+            )
+            log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via Taskforce {CLAUDE_BASE_URL}")
+        else:
+            claude = anthropic.AsyncAnthropic(api_key=api_key)
+            log.info(f"LLM backend: Claude ({CLAUDE_MODEL})")
     else:
         log.info(f"LLM backend: Ollama ({OLLAMA_LLM_MODEL})")
         # Health check: verify Ollama is reachable
