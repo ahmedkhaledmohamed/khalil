@@ -25,7 +25,8 @@ SKILL = {
     ],
     "actions": [
         {"type": "weather", "handler": "handle_intent", "keywords": "weather temperature outside today toronto", "description": "Current weather"},
-        {"type": "weather_forecast", "handler": "handle_intent", "keywords": "weather forecast days week ahead", "description": "Multi-day forecast"},
+        {"type": "weather_forecast", "handler": "handle_intent", "keywords": "weather forecast days week ahead", "description": "Multi-day forecast",
+         "parameters": {"days": {"type": "integer", "description": "Number of forecast days (default 5)"}}},
     ],
     "examples": ["What's the weather in Toronto?", "5-day forecast"],
     "voice": {"response_style": "brief"},
