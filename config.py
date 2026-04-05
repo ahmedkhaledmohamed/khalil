@@ -67,9 +67,9 @@ CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
 MAX_CONTEXT_TOKENS = 8000
 # Taskforce proxy — set KHALIL_CLAUDE_BASE_URL to override the Anthropic API endpoint
 # e.g. "https://hendrix-genai.spotify.net/taskforce/anthropic"
-CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL")
+CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/anthropic/v1")
 # Taskforce uses "apikey" header instead of "x-api-key". Set to override.
-CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER")
+CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER", "apikey")
 
 # Owner identity (for personalized prompts)
 OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
