@@ -225,15 +225,123 @@ async def _reply_with_keyboard(ctx: MessageContext, text: str, reply_markup, par
 
 CONVERSATION_CONTEXT_WINDOW = 10  # max messages sent to LLM for context
 CONVERSATION_MIN_WINDOW = 4      # minimum messages to include
+SUMMARIZE_THRESHOLD = 15         # unsummarized messages before triggering summary
+SESSION_GAP_SECONDS = 7200       # 2 hours = new session
 
 
 def save_message(chat_id: int, role: str, content: str):
     """Save a message to conversation history. All messages are kept for reflection analysis."""
+    # Session boundary detection: if gap > 2h, summarize the previous session
+    last_msg = db_conn.execute(
+        "SELECT id, timestamp FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+        (chat_id,),
+    ).fetchone()
+    if last_msg and last_msg[1]:
+        try:
+            from datetime import datetime, timedelta
+            last_time = datetime.strptime(last_msg[1], "%Y-%m-%d %H:%M:%S")
+            gap = (datetime.utcnow() - last_time).total_seconds()
+            if gap > SESSION_GAP_SECONDS:
+                # New session — summarize previous session in background
+                asyncio.get_event_loop().call_soon(
+                    lambda cid=chat_id: asyncio.ensure_future(_summarize_session(cid))
+                )
+        except Exception:
+            pass  # Don't block message saving on session detection
+
     db_conn.execute(
         "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
         (chat_id, role, content),
     )
     db_conn.commit()
+
+    # Rolling summarization: trigger if unsummarized messages exceed threshold
+    _check_summarization_needed(chat_id)
+
+
+def _check_summarization_needed(chat_id: int):
+    """Check if we have enough unsummarized messages to trigger a summary."""
+    try:
+        # Find the last summarized message ID for this chat
+        last_summary = db_conn.execute(
+            "SELECT message_range_end FROM conversation_summaries WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+        last_summarized_id = last_summary[0] if last_summary else 0
+
+        # Count unsummarized messages
+        unsummarized = db_conn.execute(
+            "SELECT COUNT(*) FROM conversations WHERE chat_id = ? AND id > ?",
+            (chat_id, last_summarized_id),
+        ).fetchone()[0]
+
+        if unsummarized >= SUMMARIZE_THRESHOLD:
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_run_summarization(chat_id, last_summarized_id))
+            except RuntimeError:
+                pass  # No event loop — skip async summarization
+    except Exception as e:
+        log.debug("Summarization check failed: %s", e)
+
+
+async def _run_summarization(chat_id: int, after_id: int):
+    """Summarize unsummarized messages for a chat and extract memories."""
+    try:
+        rows = db_conn.execute(
+            "SELECT id, role, content FROM conversations WHERE chat_id = ? AND id > ? ORDER BY id ASC LIMIT 50",
+            (chat_id, after_id),
+        ).fetchall()
+        if not rows:
+            return
+
+        conv_text = "\n".join(f"{r[1].title()}: {r[2][:300]}" for r in rows)
+        summary = await ask_llm(
+            f"Summarize this conversation. Preserve: key decisions made, action items, "
+            f"facts mentioned, user preferences expressed, and the current topic. Under 400 words.\n\n{conv_text}",
+            "",
+            system_extra="You are summarizing a conversation for future context. Be concise but complete.",
+        )
+        if not summary or summary.startswith("⚠️"):
+            return
+
+        msg_start = rows[0][0]
+        msg_end = rows[-1][0]
+        db_conn.execute(
+            "INSERT INTO conversation_summaries (chat_id, summary, message_range_start, message_range_end, message_count) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (chat_id, summary, msg_start, msg_end, len(rows)),
+        )
+        db_conn.commit()
+        log.info("Summarized %d messages for chat %d (ids %d-%d)", len(rows), chat_id, msg_start, msg_end)
+
+        # Extract memories from the summary
+        try:
+            from learning import extract_memories
+            await extract_memories(chat_id, summary, ask_llm)
+        except Exception as e:
+            log.warning("Memory extraction failed: %s", e)
+
+    except Exception as e:
+        log.warning("Conversation summarization failed for chat %d: %s", chat_id, e)
+
+
+async def _summarize_session(chat_id: int):
+    """Summarize a completed session (triggered by session gap detection)."""
+    last_summary = db_conn.execute(
+        "SELECT message_range_end FROM conversation_summaries WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+        (chat_id,),
+    ).fetchone()
+    last_summarized_id = last_summary[0] if last_summary else 0
+
+    # Only summarize if there are 5+ unsummarized messages
+    count = db_conn.execute(
+        "SELECT COUNT(*) FROM conversations WHERE chat_id = ? AND id > ?",
+        (chat_id, last_summarized_id),
+    ).fetchone()[0]
+
+    if count >= 5:
+        await _run_summarization(chat_id, last_summarized_id)
 
 
 def _compute_topic_similarity(text_a: str, text_b: str) -> float:
