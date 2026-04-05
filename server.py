@@ -59,6 +59,9 @@ from autonomy import AutonomyController
 
 import re as _re_module
 
+# Regex to strip internal tags from display (MCP calls, capability gaps)
+_internal_tag_re = re.compile(r'\[(?:MCP_CALL|CAPABILITY_GAP):[^\]]*\]')
+
 # #72: Compile redaction patterns once at module load
 _REDACT_PATTERNS = [_re_module.compile(p, _re_module.IGNORECASE) for p in SENSITIVE_PATTERNS]
 
@@ -1086,11 +1089,6 @@ async def stream_to_telegram(
     last_edit_time = 0.0
     last_edit_len = 0
     import time as _time
-
-    # Regex to strip internal tags from display (MCP calls, capability gaps)
-    _internal_tag_re = re.compile(
-        r'\[(?:MCP_CALL|CAPABILITY_GAP):[^\]]*\]'
-    )
 
     async for chunk in stream_gen:
         accumulated += chunk
@@ -4442,6 +4440,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stream_gen = ask_llm_stream(query, full_context)
     response = await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
+    # --- Post-processing: all modifications happen BEFORE the single final edit ---
+
     # MCP tool call interception — if LLM wants to use an MCP tool, execute it
     _mcp_call_re = re.compile(r'\[MCP_CALL:\s*([\w.-]+)\.([\w.-]+)\s*\|\s*(\{.*?\})\]')
     _mcp_match = _mcp_call_re.search(response)
@@ -4457,7 +4457,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mcp_result = await MCPClientManager.get_instance().call_tool(
                 mcp_server, mcp_tool, mcp_args,
             )
-            # Re-query LLM with the tool result appended
             tool_context = (
                 f"{full_context}\n\n"
                 f"[MCP tool result from {mcp_server}.{mcp_tool}]\n{mcp_result}"
@@ -4467,36 +4466,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.warning("MCP tool call %s.%s failed: %s", mcp_server, mcp_tool, e)
             response = _mcp_call_re.sub("", response).strip()
 
-    # Always strip CAPABILITY_GAP tags before user-facing display
+    # Strip internal tags
     _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
-    _gap_match = _gap_tag_re.search(response)
-    display_response = _gap_tag_re.sub("", response).strip() if _gap_match else response
+    display_response = _gap_tag_re.sub("", response).strip()
 
-    # Save assistant response to conversation history (with tag stripped)
-    save_message(chat_id, "assistant", display_response)
-
-    # Track search misses for self-improvement
+    # Detect embedded shell commands — execute instead of showing raw command
     from learning import detect_search_miss, record_signal
-    if detect_search_miss(response):
-        record_signal("search_miss", {"query": query[:200]})
-
-    # Track digest engagement — if user message arrived shortly after a digest
-    try:
-        last_digest = db_conn.execute(
-            "SELECT created_at FROM interaction_signals WHERE signal_type = 'digest_sent' ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        if last_digest:
-            from datetime import datetime, timedelta
-            digest_time = datetime.strptime(last_digest[0], "%Y-%m-%d %H:%M:%S")
-            if datetime.utcnow() - digest_time < timedelta(minutes=30):
-                record_signal("digest_engaged", {"digest_time": last_digest[0]})
-    except Exception:
-        pass  # Non-critical
-
-    # Detect embedded shell commands — LLM suggests running them instead of executing
     suggested_cmd = _extract_shell_from_response(response)
     if suggested_cmd:
-        # Record signal + trigger healing immediately — this is deterministic, don't wait for nightly
         record_signal("response_suggests_manual_action", {
             "query": query[:200], "suggested_cmd": suggested_cmd,
         })
@@ -4511,17 +4488,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "user_query": query,
                 "llm_generated": True,
             }
-            await progress_msg.delete()
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
             handled = await handle_action_intent(intent, ctx)
             if handled:
+                save_message(chat_id, "assistant", display_response)
                 return
 
     # Detect capability gaps — offer to self-extend
-    # 1. Check for structured [CAPABILITY_GAP: ...] tag first
-    gap_match = re.search(
-        r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]',
-        response,
-    )
+    _gap_match = _gap_tag_re.search(response)
     if _gap_match:
         record_signal("capability_gap_detected", {"query": query[:200], "structured": True})
         gap_groups = re.search(
@@ -4534,18 +4511,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "description": gap_groups.group(3).strip(),
                 "original_query": query,
             }
+            # Single edit with clean display, then handle extension
             try:
                 await progress_msg.edit(display_response)
             except Exception:
-                await progress_msg.delete()
+                try:
+                    await progress_msg.delete()
+                except Exception:
+                    pass
                 await channel.send_message(chat_id, display_response)
+            save_message(chat_id, "assistant", display_response)
             await _handle_self_extend_with_spec(spec, ctx)
             return
-    # 2. Fallback: phrase-based detection
+
+    # Phrase-based gap detection (fallback)
     try:
         from actions.extend import detect_capability_gap, handle_self_extend
         if detect_capability_gap(display_response):
-            # Cross-check: is this a pattern miss for an existing action?
             matched_action = find_matching_action(query)
             if matched_action:
                 record_signal("intent_pattern_miss", {
@@ -4553,32 +4535,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "matched_action": matched_action,
                     "llm_response_snippet": display_response[:200],
                 })
-                log.info("Intent pattern miss: query=%r matched=%s", query[:80], matched_action)
-                # LLM said "I can't" but an existing skill could handle it.
-                # Try LLM intent detection to generate a concrete action.
                 recovery_intent = await detect_intent(query)
                 if recovery_intent and recovery_intent.get("action"):
-                    log.info("Gap recovery: LLM generated intent %s for query=%r", recovery_intent["action"], query[:80])
                     try:
                         await progress_msg.delete()
                     except Exception:
                         pass
+                    save_message(chat_id, "assistant", display_response)
                     await handle_action_intent(recovery_intent, ctx)
                     return
                 await _try_inline_healing(ctx)
-                # Skip self-extension — this is a pattern miss, not a capability gap
             else:
                 record_signal("capability_gap_detected", {"query": query[:200]})
                 await _try_inline_healing(ctx)
                 await handle_self_extend(query, ctx._raw_update, ask_claude)
     except Exception as e:
         log.warning("Capability gap detection/self-extend failed: %s", e)
-        try:
-            await ctx.reply("I noticed a capability gap but couldn't process it — try again or ask me to build this feature.")
-        except Exception:
-            pass
 
-    # Append contextual skill suggestions (skip if voice mode)
+    # Append skill suggestions (skip if voice mode)
     if not voice_mode:
         try:
             from skills import get_registry
@@ -4588,17 +4562,32 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # Final update — streaming already edited progressively, do a clean final edit
-    # only if post-processing changed the response (tags stripped, suggestions added)
-    if display_response != response:
+    # --- Single final Telegram update ---
+    # Only edit if post-processing changed the text from what streaming showed
+    if display_response != _internal_tag_re.sub("", response).strip():
         try:
-            await progress_msg.edit(display_response)
+            await progress_msg.edit(display_response[:4096])
         except Exception:
-            try:
-                await progress_msg.delete()
-            except Exception:
-                pass
-            await channel.send_message(chat_id, display_response)
+            pass  # Edit failed — streamed text is already showing, don't send duplicate
+
+    # Save to conversation history
+    save_message(chat_id, "assistant", display_response)
+
+    # --- Analytics (non-blocking, no Telegram messages) ---
+    if detect_search_miss(response):
+        record_signal("search_miss", {"query": query[:200]})
+
+    try:
+        last_digest = db_conn.execute(
+            "SELECT created_at FROM interaction_signals WHERE signal_type = 'digest_sent' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if last_digest:
+            from datetime import datetime, timedelta
+            digest_time = datetime.strptime(last_digest[0], "%Y-%m-%d %H:%M:%S")
+            if datetime.utcnow() - digest_time < timedelta(minutes=30):
+                record_signal("digest_engaged", {"digest_time": last_digest[0]})
+    except Exception:
+        pass
 
     # #2: Record response latency
     _latency_ms = (_time.monotonic() - _msg_start) * 1000
