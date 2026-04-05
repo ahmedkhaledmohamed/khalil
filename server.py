@@ -2176,7 +2176,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 steps = [TaskStep.from_dict(s) for s in payload.get("steps", [])]
                 original_query = payload.get("query", "")
 
-                async def _execute_single_step(step):
+                async def _execute_single_step(step, prior_results=None):
                     intent = None
                     if step.action == "reminder":
                         intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
@@ -2190,6 +2190,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         intent = await detect_intent(step.description)
                     if intent:
                         intent["user_query"] = step.description
+                        if prior_results:
+                            intent["context"] = "\n".join(f"{k}: {v}" for k, v in prior_results.items())
                         handled = await handle_action_intent(intent, ctx)
                         if handled:
                             return f"Completed: {step.description}"
