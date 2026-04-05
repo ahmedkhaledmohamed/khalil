@@ -5380,6 +5380,24 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Live source indexing — Notion, Readwise, Google Tasks, work email
+    async def _live_source_indexing_job():
+        try:
+            from knowledge.live_sources import index_all_live_sources
+            results = await index_all_live_sources(db_conn)
+            total = sum(results.values())
+            log.info("Live source indexing complete: %s (total: %d)", results, total)
+        except Exception as e:
+            log.warning("Live source indexing failed: %s", e)
+
+    scheduler.add_job(
+        _live_source_indexing_job,
+        CronTrigger(hour=2, minute=30, timezone=TIMEZONE),
+        id="live_source_indexing",
+        name="Live Source Indexing",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
