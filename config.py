@@ -34,6 +34,16 @@ CAREER_DIR = PERSONAL_REPO_PATH / "career"
 FINANCE_DIR = PERSONAL_REPO_PATH / "finance"
 PROJECTS_DIR = PERSONAL_REPO_PATH / "projects"
 GOALS_DIR = PERSONAL_REPO_PATH / "goals"
+LEARNING_DIR = PERSONAL_REPO_PATH / "learning"
+
+# Side project repos with useful READMEs
+SIDE_PROJECT_DIRS = [
+    Path.home() / "Developer" / "PM-AI-Partner-Framework",
+    Path.home() / "Developer" / "llm-toolkit",
+    Path.home() / "Developer" / "ParentingAssistantBackend",
+    Path.home() / "Developer" / "compass-AI",
+    Path.home() / "Developer" / "Personal" / "the-hub",
+]
 
 # Google OAuth (in Personal/scripts/, shared with other tools)
 CREDENTIALS_FILE = SCRIPTS_DIR / "credentials.json"

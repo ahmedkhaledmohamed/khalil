@@ -9,7 +9,8 @@ from pathlib import Path
 
 from config import (
     DB_PATH, DATA_DIR, GMAIL_DIR, DRIVE_DIR, TIMELINE_FILE, CONTEXT_FILE, EMBED_DIM,
-    WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR,
+    WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR, GOALS_DIR, LEARNING_DIR,
+    SIDE_PROJECT_DIRS, KHALIL_DIR,
     CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE,
 )
 from knowledge.embedder import embed_batch
@@ -364,6 +365,8 @@ _REPO_DIRS = {
     "career": CAREER_DIR,
     "finance": FINANCE_DIR,
     "projects": PROJECTS_DIR,
+    "goals": GOALS_DIR,
+    "learning": LEARNING_DIR,
 }
 
 
@@ -371,7 +374,7 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
     """Determine (source, category) for a repo content file based on its path."""
     parts = filepath.parts
     # Find which top-level directory this belongs to
-    for dirname in ("work", "career", "finance", "projects"):
+    for dirname in ("work", "career", "finance", "projects", "goals", "learning"):
         if dirname in parts:
             break
     else:
@@ -405,6 +408,10 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
         elif "tiny" in name or "tiny-grounds" in str(filepath):
             return "projects", "projects:tiny-grounds"
         return "projects", f"projects:{name}"
+    elif dirname == "goals":
+        return "goals", "goals:annual"
+    elif dirname == "learning":
+        return "learning", f"learning:{name}"
 
     return "repo", f"repo:{dirname}"
 
@@ -621,6 +628,26 @@ async def index_all(force: bool = False):
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries")
             total += n
 
+    # Index side project READMEs
+    for project_dir in SIDE_PROJECT_DIRS:
+        if not project_dir.exists():
+            continue
+        readme = project_dir / "README.md"
+        if readme.exists():
+            entries = parse_markdown_file(readme)
+            proj_name = project_dir.name.lower()
+            n = await index_source(conn, "side_project", f"projects:{proj_name}", entries)
+            print(f"  side_project/{proj_name}: {n} entries")
+            total += n
+
+    # Index Khalil's own capabilities
+    khalil_readme = KHALIL_DIR / "README.md"
+    if khalil_readme.exists():
+        entries = parse_markdown_file(khalil_readme)
+        n = await index_source(conn, "khalil", "khalil:capabilities", entries)
+        print(f"  khalil/capabilities: {n} entries")
+        total += n
+
     # Index Cursor conversation transcripts
     if CURSOR_TRANSCRIPTS_DIR.exists():
         catalog = load_cursor_catalog(CURSOR_CATALOG_FILE)
@@ -714,6 +741,26 @@ async def index_incremental():
             n = await index_source(conn, dirname, "work:planning", entries)
             print(f"  {dirname}/{csv_file.name} (csv): {n} entries (updated)")
             total += n
+
+    # Index side project READMEs (only modified)
+    for project_dir in SIDE_PROJECT_DIRS:
+        if not project_dir.exists():
+            continue
+        readme = project_dir / "README.md"
+        if readme.exists() and _should_index(readme):
+            entries = parse_markdown_file(readme)
+            proj_name = project_dir.name.lower()
+            n = await index_source(conn, "side_project", f"projects:{proj_name}", entries)
+            print(f"  side_project/{proj_name}: {n} entries (updated)")
+            total += n
+
+    # Index Khalil capabilities (only if modified)
+    khalil_readme = KHALIL_DIR / "README.md"
+    if khalil_readme.exists() and _should_index(khalil_readme):
+        entries = parse_markdown_file(khalil_readme)
+        n = await index_source(conn, "khalil", "khalil:capabilities", entries)
+        print(f"  khalil/capabilities: {n} entries (updated)")
+        total += n
 
     # Index Cursor conversation transcripts (only modified files)
     if CURSOR_TRANSCRIPTS_DIR.exists():
