@@ -916,12 +916,28 @@ async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[di
             )
             if summary and not summary.startswith("⚠️"):
                 # Store in documents table for knowledge base
-                conn.execute(
+                cursor = conn.execute(
                     "INSERT INTO documents (source, category, title, content) VALUES (?, ?, ?, ?)",
                     ("conversation_summary", "conversation",
                      f"Conversation summary ({messages[0][2][:10]})", summary),
                 )
+                doc_id = cursor.lastrowid
                 conn.commit()
+
+                # Embed the summary so it's discoverable via vector search
+                try:
+                    from knowledge.embedder import embed_text
+                    from knowledge.indexer import serialize_float32
+                    embedding = await embed_text(summary)
+                    if embedding:
+                        conn.execute(
+                            "INSERT INTO document_embeddings (id, embedding) VALUES (?, ?)",
+                            (doc_id, serialize_float32(embedding)),
+                        )
+                        conn.commit()
+                except Exception as e:
+                    log.debug("Summary embedding failed: %s", e)
+
                 summaries.append({"chat_id": chat_id, "message_count": len(messages), "summary": summary[:200]})
                 log.info("Summarized conversation for chat %d (%d messages)", chat_id, len(messages))
         except Exception as e:

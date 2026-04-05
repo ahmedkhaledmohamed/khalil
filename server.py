@@ -393,6 +393,50 @@ def get_conversation_history(chat_id: int) -> str:
     return "Recent conversation:\n" + "\n".join(lines)
 
 
+async def get_conversation_context(chat_id: int, query: str) -> str:
+    """Build rich conversation context: memories + summary + recent messages.
+
+    Three-tier context:
+    1. Long-term memories (semantic search over extracted facts/decisions/preferences)
+    2. Session summary (latest conversation_summary for this chat)
+    3. Recent raw messages (last 8 for immediate context)
+    """
+    parts = []
+
+    # 1. Search conversation memories relevant to this query
+    try:
+        from knowledge.search import search_memories
+        memories = await search_memories(query, limit=5)
+        if memories:
+            memory_lines = [f"- [{m['memory_type']}] {m['content']}" for m in memories]
+            parts.append("[Source: conversation memories]\n" + "\n".join(memory_lines))
+    except Exception as e:
+        log.debug("Memory search unavailable: %s", e)
+
+    # 2. Get latest conversation summary for session context
+    try:
+        summary_row = db_conn.execute(
+            "SELECT summary FROM conversation_summaries WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+        if summary_row:
+            parts.append(f"[Source: previous conversation summary]\n{summary_row[0]}")
+    except Exception:
+        pass  # Table may not exist yet
+
+    # 3. Recent raw messages (last 8)
+    rows = db_conn.execute(
+        "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 8",
+        (chat_id,),
+    ).fetchall()
+    if rows:
+        rows = list(reversed(rows))
+        lines = [f"{r[0].title()}: {r[1]}" for r in rows]
+        parts.append("[Source: recent messages]\n" + "\n".join(lines))
+
+    return "\n\n".join(parts)
+
+
 def clear_conversation(chat_id: int):
     """Clear conversation history for a chat."""
     db_conn.execute("DELETE FROM conversations WHERE chat_id = ?", (chat_id,))
@@ -4100,13 +4144,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Get relevant CONTEXT.md sections
     personal_context = get_relevant_context(query, max_chars=2000)
 
-    # Get conversation history for multi-turn context
-    conversation = get_conversation_history(chat_id)
+    # Get conversation context: memories + summary + recent messages
+    conversation_context = await get_conversation_context(chat_id, query)
 
     # #67: Combine context with source citations for cross-source fusion
     full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
-    if conversation:
-        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+    if conversation_context:
+        full_context = f"{conversation_context}\n\n{full_context}"
 
     # Live state injection — real-time awareness of calendar, email, Cursor, reminders
     live_context = ""
@@ -4378,11 +4422,11 @@ async def handle_message_generic(ctx: MessageContext):
     results = await hybrid_search(query, limit=6)
     archive_context = truncate_context(results) if results else "No relevant archive data found."
     personal_context = get_relevant_context(query, max_chars=2000)
-    conversation = get_conversation_history(chat_id)
+    conversation_context = await get_conversation_context(chat_id, query)
 
     full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
-    if conversation:
-        full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+    if conversation_context:
+        full_context = f"{conversation_context}\n\n{full_context}"
 
     live_context = ""
     try:
@@ -5619,11 +5663,11 @@ async def _process_whatsapp_message(ctx: MessageContext):
         results = await hybrid_search(query, limit=6)
         archive_context = truncate_context(results) if results else "No relevant archive data found."
         personal_context = get_relevant_context(query, max_chars=2000)
-        conversation = get_conversation_history(chat_id)
+        conversation_context = await get_conversation_context(chat_id, query)
 
         full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
-        if conversation:
-            full_context = f"[Source: conversation history]\n{conversation}\n\n{full_context}"
+        if conversation_context:
+            full_context = f"{conversation_context}\n\n{full_context}"
 
         response = await ask_claude(query, full_context)
 
