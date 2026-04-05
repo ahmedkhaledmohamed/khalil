@@ -915,6 +915,201 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
 ask_claude = ask_llm
 
 
+# --- Streaming LLM ---
+
+# Minimum interval between Telegram message edits (Telegram rate-limits edits)
+_STREAM_EDIT_INTERVAL = 0.8  # seconds
+# Minimum new characters before triggering an edit (avoid edits for tiny chunks)
+_STREAM_MIN_DELTA = 40
+
+
+async def ask_llm_stream(query: str, context: str, system_extra: str = "", model: str | None = None):
+    """Streaming version of ask_llm. Yields text chunks as they arrive.
+
+    Falls back to non-streaming ask_llm if streaming isn't supported by the backend.
+    Yields the full accumulated text at the end if no chunks were yielded.
+    """
+    # Build system prompt (same logic as ask_llm)
+    style_hint = ""
+    try:
+        from learning import get_active_response_preferences
+        style_hint = get_active_response_preferences()
+    except Exception:
+        pass
+
+    from datetime import datetime as _dt
+    import zoneinfo
+    _now = _dt.now(zoneinfo.ZoneInfo(TIMEZONE))
+    _temporal = (
+        f"CURRENT TIME: {_now.strftime('%A, %B %d, %Y at %I:%M %p %Z')} "
+        f"(Q{(_now.month - 1) // 3 + 1} {_now.year})\n\n"
+    )
+
+    try:
+        from skills import get_registry
+        _skill_context = get_registry().get_context_for_intent(query)
+    except Exception:
+        _skill_context = ""
+
+    system = (
+        f"{_temporal}"
+        "You are Khalil, a personal AI assistant. "
+        "You have deep knowledge of the user's life, career, and projects. "
+        "Answer based on the provided context from their personal archives. "
+        "Be direct, specific, and personal. "
+        "If the context doesn't contain the answer, say so honestly.\n\n"
+        "CAPABILITIES: You run on the user's Mac and can execute macOS shell commands "
+        "and access many services through your action system.\n"
+        f"{_skill_context}\n\n"
+        "If the user asks about their machine state, DO NOT suggest they run a command "
+        "— just tell them you'll check. Actions execute automatically.\n\n"
+        f"{_get_mcp_tools_text()}"
+        "IMPORTANT: If the user asks you to DO something that you cannot execute "
+        "AND no skill or extension covers it, "
+        "include this exact tag in your response:\n"
+        "[CAPABILITY_GAP: short_name | /command_name | one-line description]\n"
+        "Example: [CAPABILITY_GAP: slack_reader | /slack | Read and search Slack messages]\n"
+        "Still respond naturally to the user — the tag is for internal processing.\n\n"
+        f"{style_hint}"
+        f"{system_extra}"
+    )
+
+    user_message = f"Context from personal archives:\n\n{context}\n\n---\n\nQuestion: {query}"
+
+    from model_router import route_query
+    _routed_tier, _routed_model = route_query(query)
+    _selected_model = model or _routed_model
+
+    # Privacy routing
+    import re as _re
+    _force_local = any(_re.search(p, query, _re.IGNORECASE) for p in SENSITIVE_PATTERNS)
+
+    if LLM_BACKEND == "claude" and (_taskforce_client or claude) and not _force_local:
+        if _cb_claude.is_open():
+            # Circuit breaker open — fall back to non-streaming
+            result = await ask_llm(query, context, system_extra, model)
+            yield result
+            return
+
+        try:
+            if _taskforce_client:
+                # Taskforce proxy (OpenAI-compatible): streaming
+                _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+                stream = await _taskforce_client.chat.completions.create(
+                    model=_selected_model,
+                    max_tokens=1500,
+                    messages=_msgs,
+                    timeout=CLAUDE_TIMEOUT,
+                    stream=True,
+                )
+                async for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if delta and delta.content:
+                        yield delta.content
+                _cb_claude.record_success()
+            else:
+                # Native Anthropic: streaming
+                async with claude.messages.stream(
+                    model=_selected_model,
+                    max_tokens=1500,
+                    system=system,
+                    messages=[{"role": "user", "content": user_message}],
+                ) as stream:
+                    async for text in stream.text_stream:
+                        yield text
+                _cb_claude.record_success()
+        except Exception as e:
+            _cb_claude.record_failure()
+            log.error("Streaming LLM failed: %s — falling back to non-streaming", e)
+            result = await ask_llm(query, context, system_extra, model)
+            yield result
+            return
+    else:
+        # Ollama: stream via /api/chat with stream=true
+        _routed_tier_o, _ = route_query(query)
+        _ollama_system = system
+        if _routed_tier_o.value != "complex" and "qwen3" in OLLAMA_LLM_MODEL:
+            _ollama_system = system + "\n\n/no_think"
+
+        try:
+            async with httpx.AsyncClient(timeout=LLM_TIMEOUT) as client:
+                async with client.stream(
+                    "POST",
+                    f"{OLLAMA_URL}/api/chat",
+                    json={
+                        "model": OLLAMA_LLM_MODEL,
+                        "messages": [
+                            {"role": "system", "content": _ollama_system},
+                            {"role": "user", "content": user_message},
+                        ],
+                        "stream": True,
+                    },
+                ) as resp:
+                    resp.raise_for_status()
+                    import json as _json
+                    async for line in resp.aiter_lines():
+                        if not line.strip():
+                            continue
+                        try:
+                            data = _json.loads(line)
+                            content = data.get("message", {}).get("content", "")
+                            if content:
+                                yield content
+                        except _json.JSONDecodeError:
+                            continue
+        except Exception as e:
+            log.warning("Ollama streaming failed: %s — falling back", e)
+            result = await ask_llm(query, context, system_extra, model)
+            yield result
+
+
+async def stream_to_telegram(
+    chat_id: int,
+    progress_msg,
+    stream_gen,
+    channel,
+) -> str:
+    """Consume a streaming LLM generator and progressively update a Telegram message.
+
+    Edits the progress_msg with accumulated text at controlled intervals to avoid
+    hitting Telegram's rate limits. Returns the final complete text.
+    """
+    accumulated = ""
+    last_edit_time = 0.0
+    last_edit_len = 0
+    import time as _time
+
+    async for chunk in stream_gen:
+        accumulated += chunk
+        now = _time.monotonic()
+        new_chars = len(accumulated) - last_edit_len
+
+        # Edit if enough time has passed AND enough new content
+        if new_chars >= _STREAM_MIN_DELTA and (now - last_edit_time) >= _STREAM_EDIT_INTERVAL:
+            try:
+                # Add typing cursor to show it's still generating
+                await progress_msg.edit(accumulated + " ▍")
+                last_edit_time = now
+                last_edit_len = len(accumulated)
+            except Exception:
+                # Telegram rate limit or message unchanged — skip this edit
+                pass
+
+    # Final edit with complete text (no cursor)
+    if accumulated and len(accumulated) != last_edit_len:
+        try:
+            await progress_msg.edit(accumulated)
+        except Exception:
+            # If final edit fails, delete and send fresh
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+            await channel.send_message(chat_id, accumulated)
+
+    return accumulated
+
+
 # --- Intent Detection ---
 
 # Patterns that suggest actionable intent (cheap pre-filter before LLM call)
@@ -4198,8 +4393,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             + full_context
         )
 
-    # Ask LLM
-    response = await ask_claude(query, full_context)
+    # Ask LLM — stream response to Telegram progressively
+    stream_gen = ask_llm_stream(query, full_context)
+    response = await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
     # MCP tool call interception — if LLM wants to use an MCP tool, execute it
     _mcp_call_re = re.compile(r'\[MCP_CALL:\s*([\w.-]+)\.([\w.-]+)\s*\|\s*(\{.*?\})\]')
@@ -4347,13 +4543,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    # Replace progress message with response (tag already stripped)
-    try:
-        await progress_msg.edit(display_response)
-    except Exception:
-        # If edit fails (e.g., message too long), send as new message
-        await progress_msg.delete()
-        await channel.send_message(chat_id, display_response)
+    # Final update — streaming already edited progressively, do a clean final edit
+    # only if post-processing changed the response (tags stripped, suggestions added)
+    if display_response != response:
+        try:
+            await progress_msg.edit(display_response)
+        except Exception:
+            try:
+                await progress_msg.delete()
+            except Exception:
+                pass
+            await channel.send_message(chat_id, display_response)
 
     # #2: Record response latency
     _latency_ms = (_time.monotonic() - _msg_start) * 1000
