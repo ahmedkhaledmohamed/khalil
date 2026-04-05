@@ -1748,6 +1748,43 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
     except Exception:
         pass
 
+    # --- Informational query redirect ---
+    # When the user asks a question that triggers terminal_exec, redirect to
+    # shell execution so we capture output instead of fire-and-forget to iTerm.
+    if action == "terminal_exec" and intent.get("command"):
+        user_query = intent.get("user_query", "")
+        _q = user_query.lower().strip()
+        _is_question = (
+            "?" in _q
+            or _q.startswith(("what", "how", "which", "list", "find", "show", "check", "any", "is ", "are ", "do "))
+            or _re_module.search(r"\b(what|how many|where|which)\b", _q)
+        )
+        if _is_question:
+            cmd = intent["command"]
+            from actions.shell import execute_shell, classify_command, format_output
+            classification = classify_command(cmd)
+            if classification.name in ("READ", "WRITE"):
+                try:
+                    result = await asyncio.to_thread(execute_shell, cmd)
+                    if result["returncode"] == 0:
+                        # Interpret output as natural language answer
+                        interpretation = await _interpret_shell_output(user_query, cmd, result)
+                        if interpretation:
+                            await ctx.reply(interpretation)
+                        else:
+                            await ctx.reply(f"```\n{format_output(result, cmd)}\n```", parse_mode="Markdown")
+                        # Save to conversation context for follow-up queries
+                        chat_id = ctx._raw_update.effective_chat.id if ctx._raw_update else None
+                        if chat_id:
+                            save_message(chat_id, "assistant", f"[Executed: {cmd}]\n{result['stdout'][:500]}")
+                        return True
+                    else:
+                        await ctx.reply(f"```\n{format_output(result, cmd)}\n```", parse_mode="Markdown")
+                        return True
+                except Exception as e:
+                    log.warning("Shell capture failed for informational query: %s", e)
+                    # Fall through to normal terminal_exec handler
+
     # --- Skill registry dispatch ---
     # Try skill handlers first (from SKILL dicts in action modules).
     # If a handler exists and returns True, we're done.
@@ -1844,6 +1881,10 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
                         "stderr": result["stderr"][:200],
                     })
                     await _try_inline_healing(ctx)
+                # Save to conversation context for follow-up queries
+                chat_id = ctx._raw_update.effective_chat.id if ctx._raw_update else None
+                if chat_id and result["stdout"]:
+                    save_message(chat_id, "assistant", f"[Executed: {final_cmd}]\n{result['stdout'][:500]}")
                 # Interpret output as natural language answer when triggered by a user question
                 if result["returncode"] == 0 and user_query:
                     interpretation = await _interpret_shell_output(user_query, final_cmd, result)
