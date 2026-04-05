@@ -71,6 +71,12 @@ CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL", "https://hendrix-genai.spo
 # Taskforce uses "apikey" header instead of "x-api-key". Set to override.
 CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER", "apikey")
 
+# Backup LLM providers via Taskforce (fallback: Claude → OpenAI → Google)
+OPENAI_BASE_URL = os.getenv("KHALIL_OPENAI_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/openai/v1")
+OPENAI_MODEL = "gpt-5.2"
+GOOGLE_BASE_URL = os.getenv("KHALIL_GOOGLE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/google/v1")
+GOOGLE_MODEL = "gemini-2.5-flash"
+
 # Owner identity (for personalized prompts)
 OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
 

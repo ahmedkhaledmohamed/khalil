@@ -40,11 +40,15 @@ from config import (
     CLAUDE_MODEL,
     CLAUDE_BASE_URL,
     CLAUDE_API_KEY_HEADER,
+    GOOGLE_BASE_URL,
+    GOOGLE_MODEL,
     KEYRING_SERVICE,
     LLM_BACKEND,
     MAX_CONTEXT_TOKENS,
     OLLAMA_LLM_MODEL,
     OLLAMA_URL,
+    OPENAI_BASE_URL,
+    OPENAI_MODEL,
     SENSITIVE_PATTERNS,
     TIMEZONE,
 )
@@ -142,7 +146,9 @@ scheduler = AsyncIOScheduler()
 db_conn = None
 autonomy: AutonomyController = None
 claude: anthropic.AsyncAnthropic = None
-_taskforce_client = None  # OpenAI-compatible client for Taskforce proxy
+_taskforce_client = None  # OpenAI-compatible client for Taskforce proxy (Anthropic)
+_openai_client = None     # OpenAI-compatible client for Taskforce proxy (OpenAI)
+_google_client = None     # OpenAI-compatible client for Taskforce proxy (Google)
 telegram_app: Application | None = None
 channel: Channel | None = None  # Primary channel instance (set during bot startup)
 OWNER_CHAT_ID: int | None = None  # Loaded from DB on startup, updated on first message
@@ -380,9 +386,16 @@ async def _try_recover_ollama() -> bool:
     return False
 
 
-# #18: Graceful degradation chain — Ollama local → Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → cached
+# #18: Graceful degradation chain — Ollama local → Ollama cloud (kimi) → Claude → OpenAI → Google → cached
 _OLLAMA_CLOUD_FALLBACK = "kimi-k2.5:cloud"
 _FALLBACK_MODELS = [CLAUDE_MODEL, "claude-haiku-4-5-20251001"]
+
+# Backup provider fallback chain (tried after all Claude models fail)
+_BACKUP_PROVIDERS: list[tuple[str, str]] = [
+    # (client_attr, model) — client_attr is the name of the global variable
+    ("_openai_client", OPENAI_MODEL),
+    ("_google_client", GOOGLE_MODEL),
+]
 
 
 async def _fallback_to_ollama_cloud(query: str, context: str, system: str, user_message: str) -> str | None:
@@ -412,9 +425,9 @@ async def _fallback_to_ollama_cloud(query: str, context: str, system: str, user_
 
 
 async def _fallback_to_claude(query: str, context: str, system: str, user_message: str) -> str | None:
-    """Fall back through Claude model chain when Ollama is down.
+    """Fall back through LLM provider chain when primary is down.
 
-    Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → last cached response.
+    Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → GPT-5.2 → Gemini 2.5 Flash → cached.
     """
     # Try Ollama cloud model first (free, no API key needed)
     kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
@@ -441,10 +454,11 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
         except Exception:
             return _get_cached_response(query)
 
+    _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+
     for model in _FALLBACK_MODELS:
         try:
             if _use_taskforce:
-                _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
                 response = await client.chat.completions.create(
                     model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
                 )
@@ -459,6 +473,22 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
             return text
         except Exception as e:
             log.warning("Fallback model %s failed: %s", model, e)
+            continue
+
+    # Try backup providers (OpenAI, Google) via Taskforce
+    for client_attr, model in _BACKUP_PROVIDERS:
+        backup_client = globals().get(client_attr)
+        if not backup_client:
+            continue
+        try:
+            response = await backup_client.chat.completions.create(
+                model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+            )
+            text = response.choices[0].message.content
+            log.info("Fell back to backup provider %s (%s)", model, client_attr)
+            return text
+        except Exception as e:
+            log.warning("Backup provider %s (%s) failed: %s", model, client_attr, e)
             continue
 
     # All models failed — try cached response
@@ -605,9 +635,24 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                 log.error("Claude API call failed: %s", e)
                 from learning import record_signal
                 record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
+                # Try backup providers before giving up
+                _backup_msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+                for _bp_attr, _bp_model in _BACKUP_PROVIDERS:
+                    _bp_client = globals().get(_bp_attr)
+                    if not _bp_client:
+                        continue
+                    try:
+                        _bp_resp = await _bp_client.chat.completions.create(
+                            model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
+                        )
+                        log.info("Claude failed, fell back to %s (%s)", _bp_model, _bp_attr)
+                        return _bp_resp.choices[0].message.content
+                    except Exception as _bp_e:
+                        log.warning("Backup %s failed: %s", _bp_model, _bp_e)
+                        continue
                 if _is_rate_limit:
-                    return "⚠️ Rate limited. Try again in a minute."
-                return f"⚠️ LLM unavailable (Claude error: {type(e).__name__}). Try again later."
+                    return "⚠️ Rate limited across all providers. Try again in a minute."
+                return f"⚠️ LLM unavailable (all providers failed). Try again later."
 
     # Default: Ollama local LLM
     # #20: Circuit breaker — skip Ollama if circuit is open
@@ -5154,6 +5199,20 @@ async def startup():
                 default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
             )
             log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via Taskforce {CLAUDE_BASE_URL}")
+            # Initialize backup provider clients (OpenAI, Google) via Taskforce
+            global _openai_client, _google_client
+            if OPENAI_BASE_URL:
+                _openai_client = AsyncOpenAI(
+                    api_key=api_key, base_url=OPENAI_BASE_URL,
+                    default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+                )
+                log.info(f"Backup LLM: OpenAI ({OPENAI_MODEL}) via {OPENAI_BASE_URL}")
+            if GOOGLE_BASE_URL:
+                _google_client = AsyncOpenAI(
+                    api_key=api_key, base_url=GOOGLE_BASE_URL,
+                    default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+                )
+                log.info(f"Backup LLM: Google ({GOOGLE_MODEL}) via {GOOGLE_BASE_URL}")
         else:
             claude = anthropic.AsyncAnthropic(api_key=api_key)
             log.info(f"LLM backend: Claude ({CLAUDE_MODEL})")
