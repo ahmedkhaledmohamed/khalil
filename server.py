@@ -38,6 +38,8 @@ from config import (
     ActionType,
     AutonomyLevel,
     CLAUDE_MODEL,
+    CLAUDE_BASE_URL,
+    CLAUDE_API_KEY_HEADER,
     KEYRING_SERVICE,
     LLM_BACKEND,
     MAX_CONTEXT_TOKENS,
@@ -424,7 +426,12 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
         if not api_key:
             return _get_cached_response(query)
         try:
-            client = anthropic.AsyncAnthropic(api_key=api_key)
+            _kwargs = {"api_key": api_key}
+            if CLAUDE_BASE_URL:
+                _kwargs["base_url"] = CLAUDE_BASE_URL
+            if CLAUDE_API_KEY_HEADER:
+                _kwargs["default_headers"] = {CLAUDE_API_KEY_HEADER: api_key}
+            client = anthropic.AsyncAnthropic(**_kwargs)
         except Exception:
             return _get_cached_response(query)
 
@@ -5115,8 +5122,14 @@ async def startup():
                 "  Or switch to Ollama: set LLM_BACKEND = 'ollama' in config.py"
             )
             return
-        claude = anthropic.AsyncAnthropic(api_key=api_key)
-        log.info(f"LLM backend: Claude ({CLAUDE_MODEL})")
+        _claude_kwargs = {"api_key": api_key}
+        if CLAUDE_BASE_URL:
+            _claude_kwargs["base_url"] = CLAUDE_BASE_URL
+        if CLAUDE_API_KEY_HEADER:
+            _claude_kwargs["default_headers"] = {CLAUDE_API_KEY_HEADER: api_key}
+        claude = anthropic.AsyncAnthropic(**_claude_kwargs)
+        _url_info = f" via {CLAUDE_BASE_URL}" if CLAUDE_BASE_URL else ""
+        log.info(f"LLM backend: Claude ({CLAUDE_MODEL}){_url_info}")
     else:
         log.info(f"LLM backend: Ollama ({OLLAMA_LLM_MODEL})")
         # Health check: verify Ollama is reachable
