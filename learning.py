@@ -930,6 +930,101 @@ async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[di
     return summaries
 
 
+# --- Conversation Memory Extraction ---
+
+async def extract_memories(chat_id: int, summary_text: str, ask_llm_fn) -> list[dict]:
+    """Extract key memories (facts, decisions, action items, preferences) from a conversation summary.
+
+    Stores them in the memories table with embeddings for future semantic retrieval.
+    """
+    conn = _get_conn()
+
+    prompt = (
+        "Extract key memories from this conversation summary. Return ONLY a JSON array "
+        "(no markdown, no explanation) where each item has:\n"
+        '- "type": one of "fact", "decision", "action_item", "preference"\n'
+        '- "content": the memory in one clear sentence\n\n'
+        "Only extract things worth remembering long-term. Max 5 items.\n\n"
+        f"Summary:\n{summary_text}"
+    )
+
+    try:
+        result = await ask_llm_fn(prompt, "", system_extra="You extract structured memories from conversations. Return only valid JSON.")
+        if not result or result.startswith("⚠️"):
+            return []
+
+        # Parse JSON — handle markdown code fences
+        import json as _json
+        text = result.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+            text = text.rsplit("```", 1)[0]
+        memories = _json.loads(text)
+        if not isinstance(memories, list):
+            return []
+
+        stored = []
+        for mem in memories[:5]:
+            mem_type = mem.get("type", "fact")
+            content = mem.get("content", "").strip()
+            if not content or mem_type not in ("fact", "decision", "action_item", "preference"):
+                continue
+
+            # Dedup: check for similar existing memories
+            existing = conn.execute(
+                "SELECT content FROM memories WHERE memory_type = ? AND status = 'active' "
+                "ORDER BY id DESC LIMIT 20",
+                (mem_type,),
+            ).fetchall()
+            if any(_word_overlap(content, row[0]) > 0.8 for row in existing):
+                log.debug("Skipping duplicate memory: %s", content[:60])
+                continue
+
+            cursor = conn.execute(
+                "INSERT INTO memories (chat_id, memory_type, content, source_context) VALUES (?, ?, ?, ?)",
+                (chat_id, mem_type, content, summary_text[:200]),
+            )
+            mem_id = cursor.lastrowid
+            stored.append({"id": mem_id, "type": mem_type, "content": content})
+
+        conn.commit()
+
+        # Generate embeddings for new memories
+        if stored:
+            try:
+                from knowledge.embedder import embed_batch
+                from knowledge.indexer import serialize_float32
+                texts = [m["content"] for m in stored]
+                embeddings = await embed_batch(texts)
+                for mem, emb in zip(stored, embeddings):
+                    if emb:
+                        conn.execute(
+                            "INSERT INTO memory_embeddings (id, embedding) VALUES (?, ?)",
+                            (mem["id"], serialize_float32(emb)),
+                        )
+                conn.commit()
+            except Exception as e:
+                log.warning("Memory embedding failed: %s", e)
+
+        log.info("Extracted %d memories from chat %d", len(stored), chat_id)
+        return stored
+
+    except Exception as e:
+        log.warning("Memory extraction failed for chat %d: %s", chat_id, e)
+        return []
+
+
+def _word_overlap(a: str, b: str) -> float:
+    """Simple word overlap ratio between two strings. Returns 0.0-1.0."""
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union) if union else 0.0
+
+
 # --- #1: Conversation Success Scoring ---
 
 def get_conversation_scores(days: int = 7) -> dict:
