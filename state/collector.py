@@ -40,6 +40,7 @@ _TTL = {
     "unread_count": 180,      # 3 min
     "needs_reply": 300,       # 5 min
     "frontmost_app": 30,      # 30s — app focus changes frequently
+    "pending_tasks": 300,     # 5 min — tasks don't change often
 }
 
 
@@ -53,6 +54,7 @@ class LiveState:
     collected_at: str = ""
     calendar: dict = field(default_factory=dict)
     email: dict = field(default_factory=dict)
+    tasks: list = field(default_factory=list)
     frontmost_app: str | None = None
 
 
@@ -167,6 +169,22 @@ async def _collect_macos() -> dict:
     return result
 
 
+async def _collect_tasks() -> list:
+    """Collect pending tasks from Google Tasks."""
+    cached = _get_cached("pending_tasks")
+    if cached is not None:
+        return cached
+
+    try:
+        from state.tasks_provider import get_pending_tasks
+        tasks = await get_pending_tasks()
+        _set_cached("pending_tasks", tasks)
+        return tasks
+    except Exception as e:
+        log.warning("Tasks collection failed: %s", e)
+        return []
+
+
 # ---------------------------------------------------------------------------
 # Main collector
 # ---------------------------------------------------------------------------
@@ -180,9 +198,10 @@ async def collect_live_state() -> dict:
     calendar_task = asyncio.create_task(_collect_calendar())
     email_task = asyncio.create_task(_collect_email())
     macos_task = asyncio.create_task(_collect_macos())
+    tasks_task = asyncio.create_task(_collect_tasks())
 
-    calendar_state, email_state, macos_state = await asyncio.gather(
-        calendar_task, email_task, macos_task, return_exceptions=True
+    calendar_state, email_state, macos_state, tasks_state = await asyncio.gather(
+        calendar_task, email_task, macos_task, tasks_task, return_exceptions=True
     )
 
     state = {"collected_at": datetime.now(ZoneInfo(TIMEZONE)).isoformat()}
@@ -198,6 +217,12 @@ async def collect_live_state() -> dict:
     else:
         log.warning("Email collection returned exception: %s", email_state)
         state["email"] = {"unread_count": None, "needs_reply": []}
+
+    if isinstance(tasks_state, list):
+        state["tasks"] = tasks_state
+    else:
+        log.warning("Tasks collection returned exception: %s", tasks_state)
+        state["tasks"] = []
 
     if isinstance(macos_state, dict):
         state["frontmost_app"] = macos_state.get("frontmost_app")
@@ -253,6 +278,15 @@ def format_for_prompt(state: dict) -> str:
         lines.append(f"Needs reply ({len(needs_reply)}):")
         for em in needs_reply[:5]:
             lines.append(f"  - From {em['from']}: {em['subject']}")
+
+    # Tasks
+    tasks = state.get("tasks", [])
+    if tasks:
+        lines.append(f"\nPending tasks ({len(tasks)}):")
+        for t in tasks[:10]:  # cap at 10 to save tokens
+            due = f" (due: {t['due'][:10]})" if t.get("due") else ""
+            list_name = f" [{t['list_name']}]" if t.get("list_name") != "Tasks" else ""
+            lines.append(f"  - {t['title']}{due}{list_name}")
 
     # macOS
     frontmost = state.get("frontmost_app")
