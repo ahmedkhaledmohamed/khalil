@@ -1722,12 +1722,33 @@ def _try_direct_shell_intent(text: str) -> dict | None:
         if reminder_text:
             return {"action": "icloud_reminder_create", "text": reminder_text, "description": f"Create Apple Reminder: {reminder_text}"}
 
-    # #40: Spotlight file search — "find file X", "locate my .py files"
-    # Route to the Spotlight skill handler (macos.py) instead of raw shell mdfind
-    m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
-    if m:
-        search_term = m.group(1).strip()
-        if search_term:
+    # #40: Spotlight file search — "find file X", "locate my .py files", "find the me repo"
+    # Route to the Spotlight skill handler (macos.py) which strips filler words
+    _file_search_m = re.search(
+        r"\b(?:find|search\s+for|locate)\s+"
+        r"(?:me\s+)?(?:a\s+|the\s+|my\s+|all\s+)?"
+        r"(?:file\s+(?:named?|called)\s+|files?\s+(?:named?|called)\s+)?"
+        r"['\"\u201c]([^'\"\u201c\u201d]+)['\"\u201d]",  # quoted: "me", 'resume'
+        text_lower,
+    )
+    if not _file_search_m:
+        # Unquoted: "find file config.py", "locate my resume", "find the me repo"
+        _file_search_m = re.search(
+            r"\b(?:find|search\s+for|locate)\s+"
+            r"(?:me\s+)?(?:a\s+|the\s+|my\s+|all\s+)?"
+            r"(?:file\s+(?:named?|called)\s+|files?\s+(?:named?|called)\s+)"
+            r"(\S+(?:\.\w+)?)",  # single token after "file named/called"
+            text_lower,
+        )
+    if not _file_search_m:
+        # Pattern with explicit "file/files/repo" keyword: "find my python files", "find the me repo"
+        _file_search_m = re.search(
+            r"\b(?:find|search\s+for|locate)\s+(?:me\s+)?(?:a\s+|the\s+|my\s+|all\s+)?(\S+)\s+(?:files?|repos?|folder|directory|documents?)\b",
+            text_lower,
+        )
+    if _file_search_m:
+        search_term = _file_search_m.group(1).strip().strip("'\"")
+        if search_term and len(search_term) > 1:
             return {"action": "spotlight", "query": search_term, "user_query": text, "description": f"Search for file: {search_term}"}
 
     # #53: GitHub PR status — "check my PRs", "PR status"
@@ -1883,11 +1904,17 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:system\s+info|system\s+status|mac\s+(?:info|status|health))\b", text_lower):
         return {"action": "macos_system_info", "description": "Show system information"}
 
-    # Spotlight file search
+    # Spotlight file search — "find a file called X", "locate the document about Y"
     if re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\b", text_lower):
-        query_match = re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\s+(?:called|named|about)?\s*(.+)$", text_lower)
-        search_q = query_match.group(1).strip() if query_match else text_stripped
-        return {"action": "spotlight", "query": search_q, "description": f"Search files: {search_q}"}
+        query_match = re.search(r"\b(?:file|document|pdf|image|photo|spreadsheet|presentation)\s+(?:called|named|about)\s+(.+)$", text_lower)
+        if query_match:
+            search_q = query_match.group(1).strip()
+        else:
+            # Strip common filler words and pass remainder as query
+            search_q = re.sub(r"\b(?:find|locate|search\s+for|a|an|the|that|my|on\s+my\s+machine|please)\b", "", text_lower).strip()
+            search_q = re.sub(r"\b(?:file|document|pdf|image|photo|spreadsheet|presentation)s?\b", "", search_q).strip()
+        if search_q:
+            return {"action": "spotlight", "query": search_q, "user_query": text, "description": f"Search files: {search_q}"}
 
     # Browser tabs
     if re.search(r"\b(?:what\s+tabs?|open\s+tabs?|browser\s+tabs?|safari\s+tabs?|chrome\s+tabs?)\b", text_lower):
