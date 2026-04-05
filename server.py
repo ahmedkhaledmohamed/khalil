@@ -2105,7 +2105,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/drive — Search Google Drive\n"
         "/remind — Set/list reminders\n"
         "/stats — Knowledge base stats\n"
-        "/sync — Sync new emails\n"
+        "/sync — Sync all live sources (email, Notion, Readwise, Tasks)\n"
         "/jobs — Check for new job matches\n"
         "/calendar — Today's calendar events\n"
         "/finance — Financial dashboard\n"
@@ -2935,16 +2935,39 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_sync(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
-    await ctx.reply("📧 Syncing emails...")
-    try:
-        from actions.gmail_sync import sync_new_emails
-        result = await sync_new_emails()
-        await ctx.reply(
-            f"✅ Email sync complete: {result['fetched']} fetched, {result['indexed']} indexed."
-        )
-    except Exception as e:
-        log.error("Email sync failed: %s", e)
-        await ctx.reply(f"❌ Email sync failed: {e}")
+    target = context.args[0].lower() if context.args else "all"
+
+    if target == "email":
+        await ctx.reply("📧 Syncing emails...")
+        try:
+            from actions.gmail_sync import sync_new_emails
+            result = await sync_new_emails()
+            await ctx.reply(
+                f"✅ Email sync complete: {result['fetched']} fetched, {result['indexed']} indexed."
+            )
+        except Exception as e:
+            log.error("Email sync failed: %s", e)
+            await ctx.reply(f"❌ Email sync failed: {e}")
+    elif target == "all":
+        await ctx.reply("🔄 Syncing all live sources (email, Notion, Readwise, Tasks, work email)...")
+        try:
+            from knowledge.live_sources import index_all_live_sources
+            results = await index_all_live_sources(db_conn)
+            # Also sync personal email
+            from actions.gmail_sync import sync_new_emails
+            email_result = await sync_new_emails()
+            lines = []
+            for src, count in results.items():
+                status = f"✅ {count}" if count > 0 else "⚠️ 0"
+                lines.append(f"  {src}: {status}")
+            lines.append(f"  personal_email: ✅ {email_result['indexed']}")
+            total = sum(results.values()) + email_result["indexed"]
+            await ctx.reply(f"🔄 Sync complete — {total} items indexed:\n" + "\n".join(lines))
+        except Exception as e:
+            log.error("Full sync failed: %s", e)
+            await ctx.reply(f"❌ Sync failed: {e}")
+    else:
+        await ctx.reply("Usage: /sync [all|email]\nDefault: /sync all")
 
 
 async def cmd_enrich(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4887,7 +4910,7 @@ async def start_telegram_bot():
         BotCommand("remind", "Set/list reminders"),
         BotCommand("stats", "Knowledge base stats"),
         BotCommand("audit", "View recent actions"),
-        BotCommand("sync", "Sync new emails"),
+        BotCommand("sync", "Sync all sources (email, Notion, Readwise, Tasks)"),
         BotCommand("jobs", "Check for new job matches"),
         BotCommand("calendar", "Today's calendar events"),
         BotCommand("finance", "Financial dashboard"),

@@ -22,10 +22,24 @@ def _get_tasks_service():
 
 def _fetch_all_tasks_sync(include_completed: bool = True) -> list[dict]:
     """Fetch tasks from all task lists (sync, runs in thread)."""
-    service = _get_tasks_service()
+    try:
+        service = _get_tasks_service()
+    except Exception as e:
+        log.warning("Google Tasks auth failed — run OAuth flow for tasks scope: %s", e)
+        return []
 
-    # Get all task lists
-    lists_result = service.tasklists().list(maxResults=100).execute()
+    try:
+        lists_result = service.tasklists().list(maxResults=100).execute()
+    except Exception as e:
+        err = str(e)
+        if "API has not been used" in err or "is disabled" in err:
+            log.warning(
+                "Google Tasks API not enabled. Enable it at: "
+                "https://console.cloud.google.com/apis/api/tasks.googleapis.com/overview"
+            )
+        else:
+            log.warning("Google Tasks API error: %s", e)
+        return []
     task_lists = lists_result.get("items", [])
 
     all_tasks = []

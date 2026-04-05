@@ -216,6 +216,32 @@ async def index_work_email(conn: sqlite3.Connection) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Second Personal Email
+# ---------------------------------------------------------------------------
+
+async def index_personal_email2(conn: sqlite3.Connection) -> int:
+    """Sync second personal Gmail account into knowledge base."""
+    from config import TOKEN_FILE_PERSONAL2
+    from actions.gmail_sync import sync_new_emails
+
+    if not TOKEN_FILE_PERSONAL2.exists():
+        log.debug("Second personal email token not configured, skipping")
+        return 0
+
+    last_sync = _get_setting(conn, "last_personal2_email_sync")
+    n = await sync_new_emails(
+        conn,
+        after_timestamp=last_sync,
+        token_file=TOKEN_FILE_PERSONAL2,
+        source_prefix="gmail_sync_personal2",
+        category_prefix="email:personal2",
+    )
+    _set_setting(conn, "last_personal2_email_sync", datetime.now(timezone.utc).isoformat())
+    log.info("Indexed %d second personal emails", n)
+    return n
+
+
+# ---------------------------------------------------------------------------
 # Coordinator
 # ---------------------------------------------------------------------------
 
@@ -227,6 +253,7 @@ async def index_all_live_sources(conn: sqlite3.Connection) -> dict[str, int]:
         ("readwise", index_readwise),
         ("google_tasks", index_google_tasks),
         ("work_email", index_work_email),
+        ("personal_email2", index_personal_email2),
     ]:
         try:
             n = await fn(conn)
