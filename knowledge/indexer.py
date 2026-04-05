@@ -88,6 +88,8 @@ def init_db() -> sqlite3.Connection:
             chat_id INTEGER NOT NULL,
             role TEXT NOT NULL,
             content TEXT NOT NULL,
+            message_type TEXT DEFAULT 'text',
+            metadata TEXT,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -219,6 +221,13 @@ def init_db() -> sqlite3.Connection:
     conn.execute(
         f"CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(id INTEGER PRIMARY KEY, embedding float[{EMBED_DIM}])"
     )
+
+    # Migrations for existing databases
+    try:
+        conn.execute("SELECT message_type FROM conversations LIMIT 0")
+    except Exception:
+        conn.execute("ALTER TABLE conversations ADD COLUMN message_type TEXT DEFAULT 'text'")
+        conn.execute("ALTER TABLE conversations ADD COLUMN metadata TEXT")
 
     conn.commit()
     return conn

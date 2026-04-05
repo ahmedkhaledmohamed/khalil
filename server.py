@@ -240,8 +240,14 @@ SUMMARIZE_THRESHOLD = 15         # unsummarized messages before triggering summa
 SESSION_GAP_SECONDS = 7200       # 2 hours = new session
 
 
-def save_message(chat_id: int, role: str, content: str):
-    """Save a message to conversation history. All messages are kept for reflection analysis."""
+def save_message(chat_id: int, role: str, content: str,
+                 message_type: str = "text", metadata: str | None = None):
+    """Save a message to conversation history.
+
+    Args:
+        message_type: "text" (default), "tool_call", or "tool_result"
+        metadata: JSON string with structured data (tool name, call ID, etc.)
+    """
     # Session boundary detection: if gap > 2h, summarize the previous session
     last_msg = db_conn.execute(
         "SELECT id, timestamp FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
@@ -253,16 +259,15 @@ def save_message(chat_id: int, role: str, content: str):
             last_time = datetime.strptime(last_msg[1], "%Y-%m-%d %H:%M:%S")
             gap = (datetime.utcnow() - last_time).total_seconds()
             if gap > SESSION_GAP_SECONDS:
-                # New session — summarize previous session in background
                 asyncio.get_event_loop().call_soon(
                     lambda cid=chat_id: asyncio.ensure_future(_summarize_session(cid))
                 )
         except Exception:
-            pass  # Don't block message saving on session detection
+            pass
 
     db_conn.execute(
-        "INSERT INTO conversations (chat_id, role, content) VALUES (?, ?, ?)",
-        (chat_id, role, content),
+        "INSERT INTO conversations (chat_id, role, content, message_type, metadata) VALUES (?, ?, ?, ?, ?)",
+        (chat_id, role, content, message_type, metadata),
     )
     db_conn.commit()
 
@@ -435,14 +440,34 @@ async def get_conversation_context(chat_id: int, query: str) -> str:
     except Exception:
         pass  # Table may not exist yet
 
-    # 3. Recent raw messages (last 8)
+    # 3. Recent messages (last 16 raw rows — tool exchanges use multiple rows)
     rows = db_conn.execute(
-        "SELECT role, content FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 8",
+        "SELECT role, content, message_type, metadata FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 16",
         (chat_id,),
     ).fetchall()
     if rows:
         rows = list(reversed(rows))
-        lines = [f"{r[0].title()}: {r[1]}" for r in rows]
+        lines = []
+        for r in rows:
+            role, content, msg_type, meta = r[0], r[1], r[2] or "text", r[3]
+            if msg_type == "tool_call":
+                # Show tool calls compactly
+                try:
+                    info = json.loads(meta) if meta else {}
+                    tool_name = info.get("tool_name", "tool")
+                    lines.append(f"Assistant: [Called tool: {tool_name}]")
+                except Exception:
+                    lines.append(f"Assistant: [Tool call]")
+            elif msg_type == "tool_result":
+                # Show tool results truncated
+                try:
+                    info = json.loads(meta) if meta else {}
+                    tool_name = info.get("tool_name", "tool")
+                    lines.append(f"Tool ({tool_name}): {content[:500]}")
+                except Exception:
+                    lines.append(f"Tool: {content[:500]}")
+            else:
+                lines.append(f"{role.title()}: {content}")
         parts.append("[Source: recent messages]\n" + "\n".join(lines))
 
     return "\n\n".join(parts)
@@ -1263,14 +1288,28 @@ async def call_llm_with_tools(
             tool_names = [tc.function.name for tc in msg.tool_calls]
             await _safe_edit(progress_msg, f"🔧 Using: {', '.join(tool_names)}...")
 
-            # Execute each tool call
+            # Execute each tool call and save to conversation history
             for tc in msg.tool_calls:
                 log.info("Tool call: %s(%s)", tc.function.name, tc.function.arguments[:100])
+
+                # Save tool call to DB
+                save_message(chat_id, "assistant", tc.function.arguments[:2000],
+                             message_type="tool_call",
+                             metadata=json.dumps({"tool_name": tc.function.name,
+                                                  "tool_call_id": tc.id}))
+
                 result_text = await _execute_tool_call(tc)
+
+                # Save tool result to DB
+                save_message(chat_id, "tool", result_text[:2000],
+                             message_type="tool_result",
+                             metadata=json.dumps({"tool_name": tc.function.name,
+                                                  "tool_call_id": tc.id}))
+
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result_text[:4000],  # Truncate long results
+                    "content": result_text[:4000],
                 })
 
             # Continue loop — LLM will reason about tool results
