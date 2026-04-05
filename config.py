@@ -58,7 +58,7 @@ EMBED_DIM = 768  # nomic-embed-text dimension
 EMBED_PROVIDER = "ollama"  # #68: "ollama" (default) — abstraction for future providers
 
 # LLM config — "ollama" (free, local) or "claude" (paid, cloud)
-LLM_BACKEND = "ollama"  # switch to "claude" if you have an API key
+LLM_BACKEND = "claude"  # "ollama" for local, "claude" for Taskforce proxy
 OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
