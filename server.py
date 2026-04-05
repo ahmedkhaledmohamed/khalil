@@ -1723,11 +1723,12 @@ def _try_direct_shell_intent(text: str) -> dict | None:
             return {"action": "icloud_reminder_create", "text": reminder_text, "description": f"Create Apple Reminder: {reminder_text}"}
 
     # #40: Spotlight file search — "find file X", "locate my .py files"
+    # Route to the Spotlight skill handler (macos.py) instead of raw shell mdfind
     m = re.search(r"\b(?:find|search\s+for|locate)\s+(?:a\s+)?(?:file\s+(?:named?\s+)?|files?\s+)?['\"]?([^'\"]+?)['\"]?\s*$", text_lower)
     if m:
         search_term = m.group(1).strip()
         if search_term:
-            return {"action": "shell", "command": f"mdfind 'kMDItemFSName == \"{search_term}\"'", "description": f"Search for file: {search_term}"}
+            return {"action": "spotlight", "query": search_term, "user_query": text, "description": f"Search for file: {search_term}"}
 
     # #53: GitHub PR status — "check my PRs", "PR status"
     if re.search(r"\b(?:check\s+(?:my\s+)?(?:pull\s+requests?|prs?)|(?:pr|pull\s+request)\s+status|list\s+(?:my\s+)?(?:open\s+)?(?:pull\s+requests?|prs?))\b", text_lower):
@@ -1886,7 +1887,7 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     if re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\b", text_lower):
         query_match = re.search(r"\b(?:find|locate|search\s+for)\s+(?:a\s+|that\s+|the\s+)?(?:file|document|pdf|image|photo|spreadsheet|presentation)\s+(?:called|named|about)?\s*(.+)$", text_lower)
         search_q = query_match.group(1).strip() if query_match else text_stripped
-        return {"action": "macos_spotlight", "query": search_q, "description": f"Search files: {search_q}"}
+        return {"action": "spotlight", "query": search_q, "description": f"Search files: {search_q}"}
 
     # Browser tabs
     if re.search(r"\b(?:what\s+tabs?|open\s+tabs?|browser\s+tabs?|safari\s+tabs?|chrome\s+tabs?)\b", text_lower):
