@@ -9,7 +9,8 @@ from pathlib import Path
 
 from config import (
     DB_PATH, DATA_DIR, GMAIL_DIR, DRIVE_DIR, TIMELINE_FILE, CONTEXT_FILE, EMBED_DIM,
-    WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR,
+    WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR, GOALS_DIR, LEARNING_DIR,
+    SIDE_PROJECT_DIRS, KHALIL_DIR,
     CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE,
 )
 from knowledge.embedder import embed_batch
@@ -364,6 +365,8 @@ _REPO_DIRS = {
     "career": CAREER_DIR,
     "finance": FINANCE_DIR,
     "projects": PROJECTS_DIR,
+    "goals": GOALS_DIR,
+    "learning": LEARNING_DIR,
 }
 
 
@@ -371,7 +374,7 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
     """Determine (source, category) for a repo content file based on its path."""
     parts = filepath.parts
     # Find which top-level directory this belongs to
-    for dirname in ("work", "career", "finance", "projects"):
+    for dirname in ("work", "career", "finance", "projects", "goals", "learning"):
         if dirname in parts:
             break
     else:
@@ -405,6 +408,10 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
         elif "tiny" in name or "tiny-grounds" in str(filepath):
             return "projects", "projects:tiny-grounds"
         return "projects", f"projects:{name}"
+    elif dirname == "goals":
+        return "goals", "goals:annual"
+    elif dirname == "learning":
+        return "learning", f"learning:{name}"
 
     return "repo", f"repo:{dirname}"
 
