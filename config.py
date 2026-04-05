@@ -62,7 +62,7 @@ LLM_BACKEND = "claude"  # "ollama" for local, "claude" for Taskforce proxy
 OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+CLAUDE_MODEL = "claude-opus-4-20250514"
 CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
 MAX_CONTEXT_TOKENS = 8000
 # Taskforce proxy — set KHALIL_CLAUDE_BASE_URL to override the Anthropic API endpoint
@@ -70,6 +70,12 @@ MAX_CONTEXT_TOKENS = 8000
 CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/anthropic/v1")
 # Taskforce uses "apikey" header instead of "x-api-key". Set to override.
 CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER", "apikey")
+
+# Backup LLM providers via Taskforce (fallback: Claude → OpenAI → Google)
+OPENAI_BASE_URL = os.getenv("KHALIL_OPENAI_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/openai/v1")
+OPENAI_MODEL = "gpt-5.2"
+GOOGLE_BASE_URL = os.getenv("KHALIL_GOOGLE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/google/v1")
+GOOGLE_MODEL = "gemini-2.5-pro"
 
 # Owner identity (for personalized prompts)
 OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
