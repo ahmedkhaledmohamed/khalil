@@ -212,6 +212,8 @@ def _ctx_from_update(update: Update) -> MessageContext:
         user_id=update.effective_user.id if update.effective_user else None,
         incoming=incoming,
         _raw_update=update,
+        auto_save_replies=True,
+        _save_fn=save_message,
     )
 
 
@@ -219,6 +221,12 @@ async def _reply_with_keyboard(ctx: MessageContext, text: str, reply_markup, par
     """Reply with Telegram-specific keyboard markup. Falls back to plain text on other channels."""
     if ctx._raw_update and ctx._raw_update.message:
         await ctx._raw_update.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+        # Auto-save keyboard replies to conversation history too
+        if ctx.auto_save_replies and ctx._save_fn and text:
+            try:
+                ctx._save_fn(ctx.chat_id, "assistant", text[:4000])
+            except Exception:
+                pass
     else:
         await ctx.reply(text, parse_mode=parse_mode)
 
@@ -4624,6 +4632,9 @@ async def handle_message_generic(ctx: MessageContext):
         return
 
     chat_id = ctx.chat_id
+    # Enable auto-save so action handler replies are recorded in conversation history
+    ctx.auto_save_replies = True
+    ctx._save_fn = save_message
 
     if contains_sensitive_data(query):
         await ctx.reply(

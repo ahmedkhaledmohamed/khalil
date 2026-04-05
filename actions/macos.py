@@ -41,8 +41,10 @@ SKILL = {
         {"type": "macos_frontmost", "handler": "handle_intent", "keywords": "frontmost active focused app window", "description": "Get frontmost app and window"},
         {"type": "macos_system_info", "handler": "handle_intent", "keywords": "battery cpu memory ram storage system info status", "description": "System info (battery, storage, CPU)"},
         {"type": "screenshot", "handler": "handle_intent", "keywords": "screenshot capture screen window", "description": "Take a screenshot"},
-        {"type": "spotlight", "handler": "handle_intent", "keywords": "find search locate file spotlight", "description": "Search files via Spotlight"},
-        {"type": "macos_browser_tabs", "handler": "handle_intent", "keywords": "browser tabs safari chrome open list", "description": "List browser tabs"},
+        {"type": "spotlight", "handler": "handle_intent", "keywords": "find search locate file spotlight", "description": "Search files via Spotlight",
+         "parameters": {"query": {"type": "string", "description": "File name or content to search for"}}},
+        {"type": "macos_browser_tabs", "handler": "handle_intent", "keywords": "browser tabs safari chrome open list", "description": "List browser tabs",
+         "parameters": {"browser": {"type": "string", "description": "Browser name", "enum": ["Safari", "Google Chrome"]}}},
     ],
     "examples": ["What apps are running?", "Take a screenshot", "Find my resume file"],
 }

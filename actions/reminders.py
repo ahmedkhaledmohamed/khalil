@@ -26,7 +26,8 @@ SKILL = {
         (r"\bdon'?t\s+(?:let\s+me\s+)?forget\b", "reminder"),
     ],
     "actions": [
-        {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder"},
+        {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder",
+         "parameters": {"text": {"type": "string", "description": "What to be reminded about"}, "time": {"type": "string", "description": "When to remind (e.g., 'in 2 hours', 'tomorrow 9am')"}}},
         {"type": "reminder_list", "handler": "handle_intent", "keywords": "show list reminders upcoming pending active what", "description": "List active reminders"},
     ],
     "examples": ["Remind me to call Sarah in 2 hours", "What are my reminders?", "Show my reminders"],

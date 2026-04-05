@@ -311,10 +311,13 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         atype = action_def.get("type")
         handler_name = action_def.get("handler")
         handler = getattr(mod, handler_name, None) if handler_name else None
-        actions[atype] = {
+        action_info = {
             "handler": handler,
             "description": action_def.get("description", ""),
         }
+        if "parameters" in action_def:
+            action_info["parameters"] = action_def["parameters"]
+        actions[atype] = action_info
 
     keywords = {}
     for action_def in raw.get("actions", []):
