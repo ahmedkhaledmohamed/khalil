@@ -4156,7 +4156,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await _try_inline_healing(ctx)
                 await handle_self_extend(query, ctx._raw_update, ask_claude)
     except Exception as e:
-        log.debug("Capability gap detection failed: %s", e)
+        log.warning("Capability gap detection/self-extend failed: %s", e)
+        try:
+            await ctx.reply("I noticed a capability gap but couldn't process it — try again or ask me to build this feature.")
+        except Exception:
+            pass
 
     # Append contextual skill suggestions (skip if voice mode)
     if not voice_mode:
