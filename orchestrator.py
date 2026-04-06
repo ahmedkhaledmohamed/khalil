@@ -27,12 +27,15 @@ class TaskStep:
     description: str                 # human-readable ("Draft email to Sarah about sprint")
     params: dict                     # action-specific parameters
     depends_on: list[str] = field(default_factory=list)  # step IDs this depends on
-    status: str = "pending"          # pending, running, completed, failed, blocked
+    status: str = "pending"          # pending, running, completed, failed, blocked, skipped
     result: str | None = None        # output from execution
     error: str | None = None         # error message if failed
+    # M2: Conditional execution — skip step without LLM call when condition not met
+    condition: dict | None = None    # {"if": "step_1.result contains 'no events'", "then": "skip"}
+    replan_count: int = 0            # number of re-plans attempted for this step
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "action": self.action,
             "description": self.description,
@@ -42,6 +45,9 @@ class TaskStep:
             "result": self.result,
             "error": self.error,
         }
+        if self.condition:
+            d["condition"] = self.condition
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "TaskStep":
@@ -54,6 +60,7 @@ class TaskStep:
             status=d.get("status", "pending"),
             result=d.get("result"),
             error=d.get("error"),
+            condition=d.get("condition"),
         )
 
 
@@ -157,12 +164,126 @@ async def decompose_request(query: str, context: str, ask_llm_fn) -> list[TaskSt
     return [TaskStep.from_dict(s.model_dump()) for s in steps]
 
 
+MAX_REPLANS = 2  # maximum re-plan attempts per step
+
+
+def evaluate_step_condition(step: TaskStep, step_results: dict[str, str]) -> bool:
+    """Evaluate a step's condition against prior results.
+
+    Returns True if the step should execute, False if it should be skipped.
+    Condition format: {"if": "step_1.result contains 'no events'", "then": "skip"}
+    """
+    if not step.condition:
+        return True  # No condition = always execute
+
+    condition_expr = step.condition.get("if", "")
+    action_on_match = step.condition.get("then", "skip")
+
+    if not condition_expr:
+        return True
+
+    # Parse "step_X.result contains 'value'" pattern
+    import re as _re
+    m = _re.match(r"(\w+)\.result\s+contains\s+'([^']*)'", condition_expr)
+    if m:
+        ref_step_id, search_text = m.groups()
+        ref_result = step_results.get(ref_step_id, "")
+        condition_met = search_text.lower() in ref_result.lower()
+
+        if condition_met and action_on_match == "skip":
+            return False  # Condition met + skip = don't execute
+        if not condition_met and action_on_match == "execute":
+            return False  # Condition not met + execute-only = don't execute
+        return True
+
+    # Parse "step_X.result is empty" pattern
+    m = _re.match(r"(\w+)\.result\s+is\s+empty", condition_expr)
+    if m:
+        ref_step_id = m.group(1)
+        ref_result = step_results.get(ref_step_id, "")
+        is_empty = not ref_result.strip()
+        if is_empty and action_on_match == "skip":
+            return False
+        return True
+
+    log.warning("Unparseable condition: %s", condition_expr)
+    return True  # Execute by default on unparseable conditions
+
+
+def substitute_step_params(step: TaskStep, step_results: dict[str, str]):
+    """Inject prior step results into downstream step descriptions and params.
+
+    Template syntax: {step_1.result} in description or param values.
+    """
+    import re as _re
+    pattern = r"\{(\w+)\.result\}"
+
+    def _replace(match):
+        ref_id = match.group(1)
+        return step_results.get(ref_id, f"[{ref_id} result unavailable]")
+
+    step.description = _re.sub(pattern, _replace, step.description)
+    for k, v in step.params.items():
+        if isinstance(v, str):
+            step.params[k] = _re.sub(pattern, _replace, v)
+
+
+async def replan_on_failure(
+    failed_step: TaskStep,
+    remaining_steps: list[TaskStep],
+    step_results: dict[str, str],
+    query: str,
+    ask_llm_fn,
+) -> str:
+    """Ask LLM how to handle a step failure: retry, skip, adapt, or abort.
+
+    Returns one of: "retry", "skip", "adapt", "abort"
+    If "adapt", modifies remaining_steps in place with adapted descriptions.
+    """
+    if not ask_llm_fn:
+        return "abort"
+
+    remaining_desc = "\n".join(
+        f"  - {s.id}: {s.description}" for s in remaining_steps if s.status == "pending"
+    )
+    prior_desc = "\n".join(
+        f"  - {sid}: {result[:200]}" for sid, result in step_results.items()
+    )
+
+    prompt = (
+        f"A multi-step plan encountered a failure. Decide what to do.\n\n"
+        f"Original request: {query}\n\n"
+        f"Failed step: {failed_step.id} — {failed_step.description}\n"
+        f"Error: {failed_step.error}\n\n"
+        f"Completed step results:\n{prior_desc or '  (none)'}\n\n"
+        f"Remaining steps:\n{remaining_desc or '  (none)'}\n\n"
+        f"Choose ONE action and respond with ONLY that word:\n"
+        f"- retry: Retry the failed step (e.g., transient error)\n"
+        f"- skip: Skip this step and continue with remaining steps\n"
+        f"- adapt: Modify remaining steps to work without this step's output\n"
+        f"- abort: Stop the entire plan\n\n"
+        f"Decision:"
+    )
+
+    try:
+        response = await ask_llm_fn(prompt, "", "Respond with exactly one word: retry, skip, adapt, or abort.")
+        decision = response.strip().lower().split()[0] if response else "abort"
+        if decision not in ("retry", "skip", "adapt", "abort"):
+            decision = "abort"
+        log.info("Replan decision for %s: %s", failed_step.id, decision)
+        return decision
+    except Exception as e:
+        log.warning("Replan LLM call failed: %s — defaulting to abort", e)
+        return "abort"
+
+
 async def execute_plan(
     steps: list[TaskStep],
     query: str,
     channel,
     chat_id: int,
     execute_step_fn,
+    ask_llm_fn=None,
 ) -> PlanResult:
     """Execute a plan of TaskSteps respecting dependencies.
 
@@ -237,6 +358,21 @@ async def execute_plan(
                 step.status = "running"
                 # Gather results from this step's dependencies
                 prior = {dep_id: step_results.get(dep_id, "") for dep_id in step.depends_on}
+
+                # M2: Evaluate condition before execution
+                if not evaluate_step_condition(step, step_results):
+                    step.status = "skipped"
+                    step.result = f"Skipped: condition not met ({step.condition})"
+                    step_results[step.id] = step.result
+                    result.completed_count += 1  # Count skipped as completed for flow
+                    await channel.send_message(
+                        chat_id, f"⏭ Step {step_num}/{total}: {step.description} (skipped)"
+                    )
+                    return
+
+                # M2: Template substitution — inject prior results into params
+                substitute_step_params(step, step_results)
+
                 try:
                     await channel.send_message(
                         chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
@@ -252,11 +388,41 @@ async def execute_plan(
                 except Exception as e:
                     step.status = "failed"
                     step.error = str(e)[:500]
-                    result.failed_count += 1
                     await channel.send_message(
                         chat_id, f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}"
                     )
-                    # Block all downstream steps
+
+                    # M2: Re-plan on failure instead of immediately blocking
+                    remaining = [s for s in steps if s.status == "pending"]
+                    if remaining and step.replan_count < MAX_REPLANS and ask_llm_fn:
+                        decision = await replan_on_failure(
+                            step, remaining, step_results, query, ask_llm_fn,
+                        )
+                        if decision == "retry":
+                            step.status = "pending"
+                            step.error = None
+                            step.replan_count += 1
+                            await channel.send_message(
+                                chat_id, f"🔄 Retrying step {step_num}..."
+                            )
+                            return  # Will be picked up in next iteration
+                        elif decision == "skip":
+                            step_results[step.id] = f"[skipped due to error: {step.error}]"
+                            result.failed_count += 1
+                            await channel.send_message(
+                                chat_id, f"⏭ Skipping step {step_num}, continuing plan..."
+                            )
+                            return  # Don't block downstream
+                        elif decision == "adapt":
+                            step_results[step.id] = f"[failed: {step.error}]"
+                            result.failed_count += 1
+                            await channel.send_message(
+                                chat_id, f"🔧 Adapting remaining steps..."
+                            )
+                            return  # Don't block downstream, adapted params via template subst
+                        # "abort" falls through to block
+
+                    result.failed_count += 1
                     _block_downstream(step.id, step_map, pending_deps, result)
 
             tasks = [_run_step(s) for s in ready]

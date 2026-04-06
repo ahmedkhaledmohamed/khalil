@@ -393,7 +393,10 @@ class WorkflowEngine:
         return results
 
     async def _execute_single_step(self, wf: Workflow, step: WorkflowStep, context: dict) -> Any:
-        """Execute a single workflow step."""
+        """Execute a single workflow step.
+
+        Routes through the execution bus when available, falls back to legacy dispatch.
+        """
         action = step.action
         params = dict(step.params)
 
@@ -403,6 +406,27 @@ class WorkflowEngine:
                 for ctx_key, ctx_val in context.get("context", {}).items():
                     v = v.replace(f"{{{ctx_key}}}", str(ctx_val))
                 params[k] = v
+
+        # Try execution bus for non-special actions
+        if action not in ("notify", "llm_summarize"):
+            try:
+                from execution import get_execution_bus, ExecutionContext, ExecutionSource
+                bus = get_execution_bus()
+                if bus:
+                    exec_ctx = ExecutionContext(
+                        source=ExecutionSource.WORKFLOW,
+                        autonomy_override=wf.autonomy_override if hasattr(wf, 'autonomy_override') and wf.autonomy_override else None,
+                        chat_id=self._chat_id,
+                        trigger_id=wf.id,
+                    )
+                    result = await bus.execute(action, params, exec_ctx)
+                    if result.success:
+                        return result.output or "ok"
+                    if result.error and "No handler" not in (result.error or ""):
+                        raise RuntimeError(result.error)
+                    # Fall through to legacy dispatch if no handler found
+            except ImportError:
+                pass  # execution module not yet available
 
         # Special actions
         if action == "notify":

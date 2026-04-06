@@ -263,6 +263,18 @@ class AutonomyController:
             except Exception:
                 pass  # Table may not exist yet
 
+        # M12: Per-context graduation check
+        if needs and reason not in ("hard_guardrail", "dangerous_action"):
+            try:
+                from learning import is_graduated, extract_context_key
+                ctx_key = extract_context_key(action_name, payload)
+                if is_graduated(action_name, ctx_key):
+                    needs = False
+                    reason = f"graduated:{ctx_key}"
+                    log.info("Auto-approved via graduation: %s in %s", action_name, ctx_key)
+            except Exception:
+                pass
+
         # #8: Decision journal — log every autonomy decision with reasoning
         try:
             self.conn.execute(
@@ -325,9 +337,12 @@ class AutonomyController:
         self.log_audit(action["action_type"], action["description"], action.get("payload"), "approved")
         # Record signal for self-improvement reflection
         try:
-            from learning import record_signal, record_approval_pattern
+            from learning import record_signal, record_approval_pattern, record_graduation_event, extract_context_key
             record_signal("action_decision", {"action_type": action["action_type"], "decision": "approved"}, value=1.0)
             record_approval_pattern(action["action_type"], action.get("payload"), approved=True)
+            # M12: Track per-context graduation
+            ctx_key = extract_context_key(action["action_type"], action.get("payload"))
+            record_graduation_event(action["action_type"], ctx_key, approved=True, success=True)
         except Exception:
             pass
         return action

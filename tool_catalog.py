@@ -296,6 +296,15 @@ def filter_tools_for_query(query: str, registry, all_tools: list[dict]) -> list[
             if score > 0:
                 scored.append((score, action_type))
 
+    # M6: Apply learned tool preference overrides (corrections + failure penalties)
+    try:
+        from learning import get_tool_preference_overrides
+        overrides = get_tool_preference_overrides()
+        if overrides:
+            scored = [(score + overrides.get(action, 0), action) for score, action in scored]
+    except Exception:
+        pass
+
     # Sort by score descending
     scored.sort(key=lambda x: x[0], reverse=True)
 

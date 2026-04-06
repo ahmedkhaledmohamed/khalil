@@ -117,6 +117,146 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
         except Exception:
             pass  # Hooks must not break signal recording
 
+    # M6: Closed-loop learning — check if signal triggers a behavior change
+    try:
+        _process_signal_action(signal_type, context)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# M6: Signal → Action Map (Closed-Loop Learning)
+# ---------------------------------------------------------------------------
+
+SIGNAL_ACTION_MAP = {
+    "user_correction": {
+        "threshold": 2,
+        "window_hours": 168,  # 1 week
+        "action": "adjust_tool_preference",
+    },
+    "search_miss": {
+        "threshold": 3,
+        "window_hours": 168,
+        "action": "propose_reindex",
+    },
+    "tool_failure": {
+        "threshold": 5,
+        "window_hours": 24,
+        "action": "penalize_tool_ranking",
+    },
+    "daily_plan_dismissed": {
+        "threshold": 3,
+        "window_hours": 168,
+        "action": "adjust_plan_style",
+    },
+}
+
+
+def _ensure_tool_preferences_table():
+    """Create tool_preference_overrides table if not exists."""
+    conn = _get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tool_preference_overrides (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query_pattern TEXT NOT NULL,
+            tool_name TEXT NOT NULL,
+            weight_delta REAL NOT NULL DEFAULT 0,
+            reason TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(query_pattern, tool_name)
+        )
+    """)
+    conn.commit()
+
+
+def _process_signal_action(signal_type: str, context: dict | None):
+    """Check if a signal's threshold is crossed and trigger corresponding action."""
+    config = SIGNAL_ACTION_MAP.get(signal_type)
+    if not config:
+        return
+
+    conn = _get_conn()
+    window_hours = config["window_hours"]
+    threshold = config["threshold"]
+    cutoff = (datetime.utcnow() - timedelta(hours=window_hours)).strftime("%Y-%m-%d %H:%M:%S")
+
+    count = conn.execute(
+        "SELECT COUNT(*) FROM interaction_signals WHERE signal_type = ? AND created_at > ?",
+        (signal_type, cutoff),
+    ).fetchone()[0]
+
+    if count < threshold:
+        return
+
+    action = config["action"]
+
+    if action == "adjust_tool_preference" and context:
+        _ensure_tool_preferences_table()
+        tool_name = context.get("tool", context.get("action", ""))
+        if tool_name:
+            conn.execute(
+                "INSERT OR REPLACE INTO tool_preference_overrides "
+                "(query_pattern, tool_name, weight_delta, reason) "
+                "VALUES (?, ?, ?, ?)",
+                ("*", tool_name, -2.0, f"user_correction x{count}"),
+            )
+            conn.commit()
+            log.info("M6: Penalized tool '%s' due to %d corrections", tool_name, count)
+
+    elif action == "penalize_tool_ranking" and context:
+        _ensure_tool_preferences_table()
+        tool_name = context.get("tool", context.get("action", ""))
+        if tool_name:
+            # Calculate failure rate penalty
+            total = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type IN ('tool_failure', 'execution_bus') "
+                "AND context LIKE ? AND created_at > ?",
+                (f"%{tool_name}%", cutoff),
+            ).fetchone()[0]
+            success = conn.execute(
+                "SELECT COUNT(*) FROM interaction_signals "
+                "WHERE signal_type = 'execution_bus' "
+                "AND context LIKE ? AND context LIKE '%true%' AND created_at > ?",
+                (f"%{tool_name}%", cutoff),
+            ).fetchone()[0]
+            failure_rate = 1 - (success / max(total, 1))
+            penalty = -failure_rate * 3.0  # scale penalty by failure rate
+            conn.execute(
+                "INSERT OR REPLACE INTO tool_preference_overrides "
+                "(query_pattern, tool_name, weight_delta, reason) "
+                "VALUES (?, ?, ?, ?)",
+                ("*", tool_name, penalty, f"failure_rate={failure_rate:.2f} ({count} failures)"),
+            )
+            conn.commit()
+            log.info("M6: Penalized tool '%s' by %.1f (failure rate %.0f%%)", tool_name, penalty, failure_rate * 100)
+
+    elif action == "propose_reindex" and context:
+        # Surface to user via follow-up
+        query_text = context.get("query", "")[:80]
+        log.info("M6: Search miss threshold crossed for topic: %s", query_text)
+        record_signal("reindex_suggestion", {"topic": query_text, "miss_count": count})
+
+    elif action == "adjust_plan_style":
+        log.info("M6: Daily plan dismissed %d times — flagging for style adjustment", count)
+        record_signal("plan_style_adjustment_needed", {"dismiss_count": count})
+
+
+def get_tool_preference_overrides() -> dict[str, float]:
+    """Get tool preference overrides for filter_tools_for_query().
+
+    Returns dict of tool_name -> weight_delta.
+    """
+    try:
+        _ensure_tool_preferences_table()
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT tool_name, weight_delta FROM tool_preference_overrides"
+        ).fetchall()
+        return {row[0]: row[1] for row in rows}
+    except Exception:
+        return {}
+
 
 # --- Goal Progress Signals (M12) ---
 
@@ -163,6 +303,59 @@ def get_weekly_goal_progress(days: int = 7) -> list[dict]:
                 "count": row[1],
             })
     return results
+
+
+def get_stale_goals(days: int = 7) -> list[dict]:
+    """M5: Find goals with no progress signals in the last N days.
+
+    Returns list of dicts: {"text": str, "category": str, "days_stale": int}
+    """
+    try:
+        from actions.goals import GOALS_FILE, _parse_goals, _current_quarter
+        if not GOALS_FILE.exists():
+            return []
+
+        content = GOALS_FILE.read_text(encoding="utf-8")
+        goals = _parse_goals(content)
+        quarter = _current_quarter()
+        q_goals = goals.get(quarter, {})
+
+        conn = _get_conn()
+        cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+        stale = []
+        for category, items in q_goals.items():
+            for item in items:
+                if item["done"]:
+                    continue
+                goal_text = item["text"]
+                # Check if any progress signal exists in the window
+                row = conn.execute(
+                    "SELECT MAX(created_at) FROM interaction_signals "
+                    "WHERE signal_type = 'goal_progress' AND context LIKE ?",
+                    (f"%{goal_text[:40]}%",),
+                ).fetchone()
+                last_progress = row[0] if row and row[0] else None
+                if last_progress:
+                    last_dt = datetime.strptime(last_progress, "%Y-%m-%d %H:%M:%S")
+                    days_since = (datetime.utcnow() - last_dt).days
+                    if days_since >= days:
+                        stale.append({
+                            "text": goal_text,
+                            "category": category,
+                            "days_stale": days_since,
+                        })
+                else:
+                    # Never had progress — stale since creation
+                    stale.append({
+                        "text": goal_text,
+                        "category": category,
+                        "days_stale": days + 1,
+                    })
+        return stale
+    except Exception as e:
+        log.debug("get_stale_goals failed: %s", e)
+        return []
 
 
 def check_goal_relevance(action_text: str) -> str | None:
@@ -2230,6 +2423,159 @@ def get_approval_patterns(limit: int = 20) -> list[dict]:
     return result
 
 
+# ---------------------------------------------------------------------------
+# M12: Progressive Autonomy Graduation (per-context trust)
+# ---------------------------------------------------------------------------
+
+GRADUATION_REQUIRED_APPROVALS = 5
+GRADUATION_REQUIRED_SUCCESS_RATE = 0.95
+
+
+def _ensure_graduation_table():
+    """Create graduation_policies table if not exists."""
+    conn = _get_conn()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS graduation_policies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action_type TEXT NOT NULL,
+            context_key TEXT NOT NULL,
+            required_approvals INTEGER NOT NULL DEFAULT 5,
+            required_success_rate REAL NOT NULL DEFAULT 0.95,
+            current_approvals INTEGER NOT NULL DEFAULT 0,
+            current_successes INTEGER NOT NULL DEFAULT 0,
+            current_total INTEGER NOT NULL DEFAULT 0,
+            graduated INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(action_type, context_key)
+        )
+    """)
+    conn.commit()
+
+
+def record_graduation_event(action_type: str, context_key: str, approved: bool, success: bool):
+    """Record an approval + execution event for per-context graduation tracking.
+
+    context_key examples: "repo:khalil", "recipient:team@", "time:work_hours"
+    """
+    _ensure_graduation_table()
+    conn = _get_conn()
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Upsert
+    conn.execute(
+        "INSERT INTO graduation_policies (action_type, context_key, current_approvals, "
+        "current_successes, current_total, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 1, ?, ?) "
+        "ON CONFLICT(action_type, context_key) DO UPDATE SET "
+        "current_approvals = current_approvals + ?, "
+        "current_successes = current_successes + ?, "
+        "current_total = current_total + 1, "
+        "updated_at = ?",
+        (action_type, context_key,
+         1 if approved else 0, 1 if success else 0, now, now,
+         1 if approved else 0, 1 if success else 0, now),
+    )
+
+    # Check if graduated
+    row = conn.execute(
+        "SELECT current_approvals, current_successes, current_total FROM graduation_policies "
+        "WHERE action_type = ? AND context_key = ?",
+        (action_type, context_key),
+    ).fetchone()
+    if row:
+        approvals, successes, total = row
+        success_rate = successes / max(total, 1)
+        if approvals >= GRADUATION_REQUIRED_APPROVALS and success_rate >= GRADUATION_REQUIRED_SUCCESS_RATE:
+            conn.execute(
+                "UPDATE graduation_policies SET graduated = 1, updated_at = ? "
+                "WHERE action_type = ? AND context_key = ?",
+                (now, action_type, context_key),
+            )
+            log.info("M12: Graduated! %s in context '%s' (approvals=%d, success=%.0f%%)",
+                     action_type, context_key, approvals, success_rate * 100)
+
+    conn.commit()
+
+
+def is_graduated(action_type: str, context_key: str) -> bool:
+    """Check if an action+context pair has graduated to auto-approval."""
+    try:
+        _ensure_graduation_table()
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT graduated FROM graduation_policies WHERE action_type = ? AND context_key = ?",
+            (action_type, context_key),
+        ).fetchone()
+        return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def get_graduation_status() -> list[dict]:
+    """Get all graduation policies for /trust display."""
+    try:
+        _ensure_graduation_table()
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT action_type, context_key, required_approvals, current_approvals, "
+            "current_successes, current_total, graduated, updated_at "
+            "FROM graduation_policies ORDER BY graduated DESC, current_approvals DESC"
+        ).fetchall()
+        return [
+            {
+                "action_type": r[0], "context_key": r[1],
+                "required": r[2], "current": r[3],
+                "successes": r[4], "total": r[5],
+                "graduated": bool(r[6]),
+                "success_rate": r[4] / max(r[5], 1),
+                "updated_at": r[7],
+            }
+            for r in rows
+        ]
+    except Exception:
+        return []
+
+
+def extract_context_key(action_type: str, payload: dict | None) -> str:
+    """Extract a context key from an action's payload for graduation tracking.
+
+    Examples:
+    - shell_write in khalil repo → "repo:khalil"
+    - email to team@ → "recipient:team@"
+    - any action during work hours → "time:work_hours"
+    """
+    if not payload:
+        return "global"
+
+    # Repo context
+    cmd = payload.get("command", "")
+    if cmd and "khalil" in cmd.lower():
+        return "repo:khalil"
+    if cmd and "personal" in cmd.lower():
+        return "repo:personal"
+
+    # Recipient context
+    to = payload.get("to", "")
+    if to and "@" in to:
+        domain = to.split("@")[-1]
+        return f"recipient:{domain}"
+
+    # Time context
+    try:
+        from datetime import datetime
+        import zoneinfo
+        from config import TIMEZONE
+        now = datetime.now(zoneinfo.ZoneInfo(TIMEZONE))
+        if now.weekday() < 5 and 8 <= now.hour < 18:
+            return "time:work_hours"
+        return "time:off_hours"
+    except Exception:
+        pass
+
+    return "global"
+
+
 # --- M9: Confidence Decay (Task 9.4) ---
 
 CONFIDENCE_DECAY_PER_WEEK = 0.05
@@ -2453,6 +2799,41 @@ def auto_extract_preferences() -> list[dict]:
 
 
 # --- Routine Drift Detection ---
+
+def get_recent_user_intents(hours: int = 24) -> list[str]:
+    """M3: Get recent user intent descriptions for LLM reasoning context.
+
+    Returns a list of human-readable strings describing what the user has been doing.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        rows = conn.execute(
+            "SELECT signal_type, context, timestamp FROM interaction_signals "
+            "WHERE timestamp > ? AND signal_type IN ('capability_usage', 'intent_detection_success', 'task_orchestrated') "
+            "ORDER BY timestamp DESC LIMIT 20",
+            (cutoff,),
+        ).fetchall()
+        intents = []
+        for signal_type, context_json, ts in rows:
+            try:
+                ctx = json.loads(context_json) if context_json else {}
+                if signal_type == "capability_usage":
+                    action = ctx.get("action", "unknown")
+                    intents.append(f"Used {action} at {ts}")
+                elif signal_type == "intent_detection_success":
+                    desc = ctx.get("query", "")[:80] or ctx.get("action", "unknown")
+                    intents.append(f"Query: {desc}")
+                elif signal_type == "task_orchestrated":
+                    steps = ctx.get("step_count", "?")
+                    intents.append(f"Multi-step plan ({steps} steps)")
+            except Exception:
+                continue
+        return intents
+    except Exception as e:
+        log.debug("get_recent_user_intents failed: %s", e)
+        return []
+
 
 def detect_routine_drift() -> list[dict]:
     """Detect breaks in the user's routine by comparing today's activity to the 14-day average.

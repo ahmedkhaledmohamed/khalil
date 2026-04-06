@@ -217,7 +217,26 @@ def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> l
             except Exception as e:
                 log.debug("EOD reminder sweep failed: %s", e)
 
-    # --- 5. Evolution cycle readiness ---
+    # --- 5. Stale goals (M5: Goal-Aware Agent) ---
+    if not _on_cooldown("stale_goals_check", cooldowns, now, hours=168):  # weekly
+        try:
+            from learning import get_stale_goals
+            stale = get_stale_goals(days=7)
+            if stale:
+                names = ", ".join(g["text"][:40] for g in stale[:3])
+                suffix = f" (+{len(stale) - 3} more)" if len(stale) > 3 else ""
+                opps.append(Opportunity(
+                    id="stale_goals_check",
+                    source="goals",
+                    summary=f"🎯 {len(stale)} goal(s) with no progress in 7+ days: {names}{suffix}",
+                    urgency=Urgency.LOW,
+                    action_type=None,  # alert only
+                    payload={"stale_goals": stale},
+                ))
+        except Exception as e:
+            log.debug("Stale goals check failed: %s", e)
+
+    # --- 6. Evolution cycle readiness ---
     evo = state.get("evolution", {})
     pending = evo.get("pending_signals", 0)
     last_cycle = evo.get("last_cycle")
@@ -241,6 +260,78 @@ def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> l
         ))
 
     return opps
+
+
+async def _identify_opportunities_llm(
+    state: dict, snapshot, ask_llm_fn, cooldowns: dict,
+) -> list[Opportunity]:
+    """M3: LLM-powered opportunity detection for novel patterns heuristics can't cover.
+
+    Runs every 3rd tick (~15 min) in background. Falls back to empty list on failure.
+    Prefers READ-only suggestions (conservative).
+    """
+    if not ask_llm_fn or not snapshot:
+        return []
+
+    try:
+        from synthesis.aggregator import snapshot_to_text
+        state_text = snapshot_to_text(snapshot)
+    except Exception:
+        state_text = json.dumps({k: str(v)[:200] for k, v in state.items()})
+
+    # Get recent user intents for context
+    recent_intents = ""
+    try:
+        from learning import get_recent_user_intents
+        intents = get_recent_user_intents(hours=24)
+        if intents:
+            recent_intents = "\n".join(f"  - {i}" for i in intents[:10])
+    except Exception:
+        pass
+
+    prompt = (
+        "Given the user's current state, identify 0-3 actionable opportunities "
+        "that a simple heuristic system would miss. Be conservative — prefer READ "
+        "actions (check, review, surface) over WRITE actions (send, create, modify).\n\n"
+        f"Current state:\n{state_text[:2000]}\n\n"
+    )
+    if recent_intents:
+        prompt += f"Recent activity (last 24h):\n{recent_intents}\n\n"
+    prompt += (
+        "Respond with a JSON array (or empty array [] if nothing notable):\n"
+        '[{"id": "unique_key", "summary": "human-readable description", '
+        '"urgency": 1, "action_type": null}]\n\n'
+        "urgency: 1=low, 2=medium, 3=high. action_type: null for alert-only."
+    )
+
+    try:
+        response = await ask_llm_fn(
+            prompt, "",
+            "Respond with ONLY a JSON array. No markdown fences, no explanation.",
+        )
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+        items = json.loads(response) if response and response.startswith("[") else []
+        opps = []
+        now = time.monotonic()
+        for item in items[:3]:
+            opp_id = f"llm_{item.get('id', 'unknown')}"
+            if not _on_cooldown(opp_id, cooldowns, now, hours=4):
+                opps.append(Opportunity(
+                    id=opp_id,
+                    source="llm_reasoning",
+                    summary=item.get("summary", ""),
+                    urgency=Urgency(min(item.get("urgency", 1), 3)),
+                    action_type=item.get("action_type"),
+                    payload=item.get("payload", {}),
+                    requires_llm=True,
+                ))
+        return opps
+    except Exception as e:
+        log.debug("LLM opportunity detection failed: %s", e)
+        return []
 
 
 def acknowledge_follow_ups(source: str | None = None):
@@ -427,6 +518,72 @@ class AgentLoop:
             except Exception as e:
                 log.debug("Cross-domain synthesis failed: %s", e)
 
+        # M11: Check background agents
+        try:
+            from agents.coordinator import get_background_agents, run_background_agent, update_background_agent
+            running_agents = get_background_agents(status="running")
+            for agent_data in running_agents:
+                # Check if expired
+                created = agent_data.get("created_at", "")
+                if created:
+                    from datetime import datetime as _dt
+                    try:
+                        created_dt = _dt.fromisoformat(created.replace("Z", "+00:00"))
+                        elapsed = (_dt.now(timezone.utc) - created_dt).total_seconds()
+                        if elapsed > 3600:  # 1 hour default max
+                            update_background_agent(agent_data["id"], status="expired",
+                                                     final_result="Expired: exceeded max duration")
+                            continue
+                    except Exception:
+                        pass
+                # Run the agent
+                try:
+                    result = await run_background_agent(agent_data["id"], self.ask_llm)
+                    if result:
+                        opportunities.append(Opportunity(
+                            id=f"bg_agent_{agent_data['id']}",
+                            source="background_agent",
+                            summary=f"🤖 Background task completed: {agent_data['task'][:60]}",
+                            urgency=Urgency.MEDIUM,
+                            action_type=None,
+                            payload={"result": result[:500]},
+                        ))
+                except Exception as e:
+                    log.debug("Background agent check failed for %s: %s", agent_data["id"], e)
+        except Exception as e:
+            log.debug("Background agents check failed: %s", e)
+
+        # M9: Check temporal tasks every tick
+        try:
+            from temporal import check_temporal_tasks
+            triggered = await check_temporal_tasks(ask_llm_fn=self.ask_llm)
+            for task, reason in triggered:
+                opp_id = f"temporal_{task.id}"
+                if not _on_cooldown(opp_id, self._cooldowns, time.monotonic(), hours=0.5):
+                    opportunities.append(Opportunity(
+                        id=opp_id,
+                        source="temporal",
+                        summary=f"⏰ {task.description} — {reason}",
+                        urgency=Urgency.MEDIUM,
+                        action_type=task.action or None,
+                        payload=task.params,
+                    ))
+        except Exception as e:
+            log.debug("Temporal task check failed: %s", e)
+
+        # M3: LLM-powered opportunity detection every 3rd tick (~15 min)
+        if self._tick_count % 3 == 0 and self.ask_llm:
+            try:
+                snapshot = self._snapshot_cache[1] if self._snapshot_cache else None
+                llm_opps = await _identify_opportunities_llm(
+                    state, snapshot, self.ask_llm, self._cooldowns,
+                )
+                if llm_opps:
+                    opportunities.extend(llm_opps)
+                    log.info("LLM reasoning found %d opportunities", len(llm_opps))
+            except Exception as e:
+                log.debug("LLM opportunity detection failed: %s", e)
+
         if not opportunities:
             return  # nothing to do
 
@@ -487,7 +644,27 @@ class AgentLoop:
         )
 
     async def _execute_action(self, opp: Opportunity) -> str:
-        """Execute an action for an opportunity. Returns summary string."""
+        """Execute an action for an opportunity. Routes through execution bus when available."""
+        # Try execution bus first
+        try:
+            from execution import get_execution_bus, ExecutionContext, ExecutionSource
+            bus = get_execution_bus()
+            if bus and opp.action_type:
+                exec_ctx = ExecutionContext(
+                    source=ExecutionSource.AGENT_LOOP,
+                    chat_id=self.chat_id if isinstance(self.chat_id, int) else None,
+                )
+                result = bus_result = await bus.execute(
+                    opp.action_type, opp.payload, exec_ctx,
+                )
+                if result.success:
+                    return result.output or f"Completed: {opp.action_type}"
+                if result.error and "No handler" not in (result.error or ""):
+                    return f"{opp.action_type} failed: {result.error}"
+                # Fall through to legacy handlers if no bus handler
+        except ImportError:
+            pass
+
         if opp.action_type == "meeting_prep" and self.ask_llm:
             event = opp.payload.get("event", {})
             title = event.get("summary", "meeting")
