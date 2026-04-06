@@ -226,8 +226,26 @@ def parse_iterm_sessions(raw: str) -> list[dict]:
     return sessions
 
 
+async def _is_iterm_running() -> bool:
+    """Check if iTerm2 is running without triggering AppleScript errors."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep", "-x", "iTerm2",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=5)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 async def get_iterm_sessions() -> list[dict]:
     """Get all iTerm2 sessions via AppleScript."""
+    # Guard: skip AppleScript entirely if iTerm2 isn't running
+    if not await _is_iterm_running():
+        return []
+
     try:
         proc = await asyncio.create_subprocess_exec(
             "osascript", "-e", _ITERM_SESSIONS_SCRIPT,
@@ -571,6 +589,10 @@ async def send_to_iterm(command: str, session_tty: str = "current") -> dict:
 
     Returns: {success: bool, error: str | None}
     """
+    # Guard: skip if iTerm2 isn't running
+    if not await _is_iterm_running():
+        return {"success": False, "error": "iTerm2 is not running"}
+
     # Sanitize command using shell.py's sanitizer
     from actions.shell import sanitize_command
     sanitized, reason = sanitize_command(command)

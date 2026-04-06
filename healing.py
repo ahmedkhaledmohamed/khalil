@@ -36,6 +36,17 @@ FAILURE_CODE_MAP = {
     "action_execution_failure:email": [("actions/gmail.py", "draft_email"), ("actions/gmail.py", "send_draft")],
     "response_suggests_manual_action": [("server.py", "_try_direct_shell_intent"), ("server.py", "detect_intent")],
     "intent_pattern_miss": [("server.py", "_try_direct_shell_intent")],
+    # Fallback mappings for generic/unknown fingerprints
+    "capability_gap_detected:unknown": [("server.py", "call_llm_with_tools"), ("tool_catalog.py", "generate_tool_schemas")],
+    "user_correction:unknown": [("server.py", "call_llm_with_tools"), ("server.py", "_build_system_prompt")],
+}
+
+# Prefix-based fallback: if exact fingerprint not found, try signal_type prefix
+_FALLBACK_CODE_MAP = {
+    "capability_gap_detected": [("server.py", "call_llm_with_tools"), ("tool_catalog.py", "filter_tools_for_query")],
+    "user_correction": [("server.py", "call_llm_with_tools"), ("server.py", "_build_system_prompt")],
+    "action_execution_failure": [("server.py", "_execute_tool_call")],
+    "intent_detection_failure": [("server.py", "detect_intent")],
 }
 
 # Errors that are deterministic — trigger healing after just 1 occurrence
@@ -308,18 +319,23 @@ def build_diagnosis(trigger: dict) -> dict | None:
     fingerprint = trigger["fingerprint"]
     signals = trigger["sample_signals"]
 
-    # Find relevant source files
+    # Find relevant source files (3-tier lookup)
     code_targets = FAILURE_CODE_MAP.get(fingerprint)
+
     if not code_targets:
-        # Try partial match on signal type
+        # Tier 2: prefix-based fallback (e.g., "capability_gap_detected" for any hint)
         signal_type = fingerprint.split(":")[0]
+        code_targets = _FALLBACK_CODE_MAP.get(signal_type)
+
+    if not code_targets:
+        # Tier 3: partial match on signal type in FAILURE_CODE_MAP
         for key, targets in FAILURE_CODE_MAP.items():
             if key.startswith(signal_type):
                 code_targets = targets
                 break
 
     if not code_targets:
-        # Dynamic fallback: extract file/function from traceback in signal context
+        # Tier 4: extract file/function from traceback in signal context
         code_targets = _extract_targets_from_traceback(signals)
         if not code_targets:
             log.warning("No code mapping for fingerprint: %s", fingerprint)
