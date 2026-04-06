@@ -1148,13 +1148,17 @@ async def _execute_tool_call(tool_call) -> str:
         args = json.loads(tool_call.function.arguments)
     except json.JSONDecodeError:
         _record_tool_analytics(fn_name, "", False, 0, error="invalid_json")
-        return f"Error: invalid JSON arguments for {fn_name}"
+        return json.dumps({"error": True, "type": "invalid_input",
+                           "message": f"Invalid JSON arguments for {fn_name}",
+                           "suggestion": "Check parameter format and try again"})
 
     # Validate required parameters before dispatch
     _missing = _check_required_params(fn_name, args)
     if _missing:
         _record_tool_analytics(fn_name, json.dumps(args), False, 0, error="missing_params")
-        return f"Error: {fn_name} requires parameters: {', '.join(_missing)}"
+        return json.dumps({"error": True, "type": "missing_params",
+                           "message": f"{fn_name} requires: {', '.join(_missing)}",
+                           "suggestion": f"Call {fn_name} again with the required parameters"})
 
     # New: tool name IS the action (one-tool-per-action)
     action = fn_name
@@ -1170,7 +1174,9 @@ async def _execute_tool_call(tool_call) -> str:
         handler = registry.get_handler(fn_name)
         if handler is None:
             _record_tool_analytics(fn_name, json.dumps(args), False, 0, error="no_handler")
-            return f"Error: no handler found for tool '{fn_name}'"
+            return json.dumps({"error": True, "type": "unknown_tool",
+                               "message": f"No handler found for '{fn_name}'",
+                               "suggestion": "This tool may not be available. Try a different approach."})
 
     # Execute with a capture context so replies become tool results
     capture_ctx = _ToolCaptureContext()
@@ -1189,11 +1195,15 @@ async def _execute_tool_call(tool_call) -> str:
     except asyncio.TimeoutError:
         elapsed = _time.monotonic() - t0
         _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error="timeout")
-        return f"Error: {fn_name} timed out after 60s"
+        return json.dumps({"error": True, "type": "timeout",
+                           "message": f"{fn_name} timed out after 60s",
+                           "suggestion": "The operation took too long. Try a simpler request."})
     except Exception as e:
         elapsed = _time.monotonic() - t0
         _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=str(e)[:200])
-        return f"Error executing {fn_name}: {e}"
+        return json.dumps({"error": True, "type": "execution_error",
+                           "message": f"{fn_name} failed: {str(e)[:200]}",
+                           "suggestion": "Check the parameters and try again, or use an alternative approach."})
 
 
 def _check_required_params(tool_name: str, args: dict) -> list[str]:
@@ -1243,14 +1253,22 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "Be direct, specific, and personal. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
         "TOOL USE RULES:\n"
-        "- Each tool is a single action. Call the tool directly — no need to specify an 'action' parameter.\n"
+        "- Each tool is a single action. Call the tool directly — no 'action' parameter needed.\n"
         "- Use tools when the user asks you to DO something (create event, send email, set reminder, "
         "run command) or CHECK something specific (calendar, weather, disk space, terminal output).\n"
         "- DO NOT use tools for: greetings, opinions, general chat, questions answerable from context, "
         "follow-ups, or thank-yous.\n"
-        "- For multi-step tasks, call tools sequentially: observe each result before deciding the next step.\n"
         "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
         "- Summarize tool results in natural language. Don't dump raw output.\n\n"
+        "MULTI-STEP REASONING (ReAct):\n"
+        "For complex requests, follow this cycle:\n"
+        "1. THINK: What do I need to find out or do? Which tool helps?\n"
+        "2. ACT: Call the most relevant tool with correct parameters.\n"
+        "3. OBSERVE: Read the tool result carefully.\n"
+        "4. REPEAT or RESPOND: If more steps are needed, go to step 1. "
+        "Otherwise, synthesize all results into a clear response.\n"
+        "Example: 'Prep me for my next meeting' → "
+        "calendar() → observe events → meeting_prep(meeting_title=...) → respond with brief.\n\n"
         f"{style_hint}"
         f"{system_extra}"
     )
@@ -1269,7 +1287,7 @@ async def call_llm_with_tools(
     Returns the final display text. Streams the final response to Telegram.
     """
     log.info("call_llm_with_tools called: query=%s", query[:80])
-    from tool_catalog import generate_tool_schemas
+    from tool_catalog import generate_tool_schemas, filter_tools_for_query
     from skills import get_registry
 
     # Skip tools only for pure conversational messages (exact match only).
@@ -1286,11 +1304,15 @@ async def call_llm_with_tools(
         log.info("Conversational response: %d chars", len(result))
         return result
 
-    tools = generate_tool_schemas(get_registry())
-    if not tools:
+    registry = get_registry()
+    all_tools = generate_tool_schemas(registry)
+    if not all_tools:
         # No tools available — fall back to plain streaming
         stream_gen = ask_llm_stream(query, context, system_extra)
         return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+
+    # Dynamic tool filtering: expose only relevant tools per query (#62)
+    tools = filter_tools_for_query(query, registry, all_tools)
 
     # Build system prompt
     style_hint = ""
