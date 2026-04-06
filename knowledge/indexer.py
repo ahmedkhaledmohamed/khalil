@@ -212,6 +212,20 @@ def init_db() -> sqlite3.Connection:
         );
 
         CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type, status);
+
+        -- Tool analytics: track tool usage, success rates, latency (#54)
+        CREATE TABLE IF NOT EXISTS tool_analytics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tool_name TEXT NOT NULL,
+            params TEXT,
+            success BOOLEAN NOT NULL,
+            latency_s REAL,
+            error TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_tool_analytics_name ON tool_analytics(tool_name, created_at);
+        CREATE INDEX IF NOT EXISTS idx_tool_analytics_success ON tool_analytics(success, created_at);
     """)
 
     # Create virtual tables for vector search
