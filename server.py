@@ -4768,6 +4768,13 @@ async def handle_message_generic(ctx: MessageContext):
     except Exception:
         pass
 
+    # Post-interaction evolution signal collection (fire-and-forget, no LLM)
+    try:
+        from evolution import post_interaction_check
+        asyncio.create_task(post_interaction_check(query, display_response, _latency_ms))
+    except Exception:
+        pass
+
 
 async def cmd_feedback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """#1: Record explicit user feedback on conversation quality."""
@@ -5536,6 +5543,32 @@ def _setup_scheduler():
         minutes=30,
         id="state_alerts",
         name="M8.5: State-Aware Alerts",
+        replace_existing=True,
+    )
+
+    # Agentic Evolution Cycle — 4x/day (3 AM, 9 AM, 3 PM, 9 PM)
+    async def _evolution_cycle_job():
+        if not _can_send():
+            return
+        try:
+            from evolution import execute_evolution_cycle
+            result = await execute_evolution_cycle(channel, OWNER_CHAT_ID, ask_claude, autonomy)
+            if result.prs_created:
+                await channel.send_message(
+                    OWNER_CHAT_ID,
+                    f"**Evolution cycle**: {result.executed} improvements executed\n"
+                    f"PRs: {', '.join(result.prs_created)}",
+                )
+            elif result.candidates_found:
+                log.info("Evolution cycle: %d candidates, %d executed, no PRs", result.candidates_found, result.executed)
+        except Exception as e:
+            log.warning("Evolution cycle job failed: %s", e)
+
+    scheduler.add_job(
+        _evolution_cycle_job,
+        CronTrigger(hour="3,9,15,21", minute=0, timezone=TIMEZONE),
+        id="evolution_cycle",
+        name="Agentic Evolution Cycle",
         replace_existing=True,
     )
 
