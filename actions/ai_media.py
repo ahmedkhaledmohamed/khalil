@@ -142,8 +142,9 @@ def _extract_prompt(query: str, media_type: str) -> str:
 async def handle_media_intent(query: str, ctx, *, action_type: str = "generate_image", **kwargs):
     """Handle media generation requests."""
     media_type = _ACTION_TO_MEDIA.get(action_type, "image")
+    from actions.ai_media_providers import LOCAL_MODELS
+
     label = _MEDIA_TYPE_LABELS[media_type]
-    model = DEFAULT_MODELS[media_type]
 
     # Extract the prompt — use the query directly, stripping the command prefix
     prompt = _extract_prompt(query, media_type)
@@ -151,8 +152,14 @@ async def handle_media_intent(query: str, ctx, *, action_type: str = "generate_i
         await ctx.reply(f"Please provide a description for the {label} you want to generate.")
         return
 
+    # Resolve display model name
+    if MEDIA_PROVIDER == "local":
+        model_name = LOCAL_MODELS.get(media_type, "local")
+    else:
+        model_name = DEFAULT_MODELS.get(media_type, "unknown")
+
     # Send progress message
-    progress = await ctx.reply(f"Generating {label}... (model: {model.split('/')[-1]})")
+    progress = await ctx.reply(f"Generating {label}... (model: {model_name.split('/')[-1]})")
 
     try:
         provider = get_provider(MEDIA_PROVIDER)
