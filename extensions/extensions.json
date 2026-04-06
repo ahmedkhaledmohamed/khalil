@@ -53,6 +53,24 @@
             "created_at": "2026-03-28T18:00:00",
             "source_pr": null,
             "description": "Restart Khalil or the host machine"
+        },
+        "gmail_manager": {
+            "enabled": false,
+            "version": "1.0",
+            "action_type": "gmail",
+            "intent_patterns": [],
+            "created_at": "2026-04-05T03:49:30.161861+00:00",
+            "source_pr": "https://github.com/ahmedkhaledmohamed/khalil/pull/142",
+            "description": "Manage Gmail labels, filters, and bulk actions"
+        },
+        "git_operations": {
+            "enabled": true,
+            "version": "1.0",
+            "action_type": "git",
+            "intent_patterns": [],
+            "created_at": "2026-04-05T12:00:00",
+            "source_pr": null,
+            "description": "Create branches, commits, and pull requests"
         }
     }
 }
