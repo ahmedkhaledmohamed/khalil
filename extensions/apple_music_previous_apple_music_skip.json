@@ -1,0 +1,9 @@
+{
+    "name": "apple_music_previous_apple_music_skip",
+    "command": "track",
+    "description": "Actions 'apple_music_previous' and 'apple_music_skip' used together 40x — integration opportunity",
+    "action_module": "actions.apple_music_previous_apple_music_skip",
+    "handler_function": "handle_track",
+    "generated_at": "2026-04-06T12:00:00",
+    "generated_for": "Actions 'apple_music_previous' and 'apple_music_skip' used together 40x — integration opportunity"
+}
