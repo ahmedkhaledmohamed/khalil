@@ -1,0 +1,9 @@
+{
+    "name": "apple_music_queue_apple_music_recent",
+    "command": "musicoverview",
+    "description": "Actions 'apple_music_queue' and 'apple_music_recent' used together 39x — integration opportunity",
+    "action_module": "actions.apple_music_queue_apple_music_recent",
+    "handler_function": "handle_music_overview",
+    "generated_at": "2026-04-06T12:00:00",
+    "generated_for": "Actions 'apple_music_queue' and 'apple_music_recent' used together 39x — integration opportunity"
+}
