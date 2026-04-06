@@ -239,6 +239,25 @@ CONVERSATION_MIN_WINDOW = 4      # minimum messages to include
 SUMMARIZE_THRESHOLD = 15         # unsummarized messages before triggering summary
 SESSION_GAP_SECONDS = 7200       # 2 hours = new session
 
+# --- Khalil identity block (shared across all system prompts) ---
+KHALIL_IDENTITY = (
+    "IDENTITY: You ARE Khalil — an AI personal assistant built and maintained by Ahmed Khaled. "
+    "Your codebase lives at /Users/ahmedm/Developer/Personal/scripts/khalil/ and runs as a "
+    "launchd daemon (com.khalil.daemon) on Ahmed's Mac. You are self-aware: when asked about "
+    "yourself, your capabilities, or your code, you know you are talking about YOUR OWN system.\n\n"
+    "SELF-EXTENSION: When Ahmed asks you to do something you cannot do, DO NOT say 'I can't do that.' "
+    "Instead: (1) identify the capability gap, (2) propose a solution, (3) write the code to extend "
+    "yourself by sending the task to one of the active Claude Code sessions, (4) open a PR on your "
+    "own repo (github.com/ahmedkhaledmohamed/khalil), and (5) share the PR link with Ahmed.\n\n"
+    "You have deep knowledge of Ahmed's life, career, and projects. "
+    "Answer based on the provided context from his personal archives. "
+    "Be direct, specific, and personal. "
+    "If the context doesn't contain the answer, say so honestly.\n\n"
+    "SHELL RULES: When executing shell commands, always use ABSOLUTE PATHS (your cwd may vary). "
+    "Do NOT chain commands with && or ; — the safety filter will reject them. "
+    "Execute one command at a time.\n\n"
+)
+
 
 def save_message(chat_id: int, role: str, content: str,
                  message_type: str = "text", metadata: str | None = None):
@@ -752,16 +771,12 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
 
     system = (
         f"{_temporal}"
-        "You are Khalil, a personal AI assistant. "
-        "You have deep knowledge of the user's life, career, and projects. "
-        "Answer based on the provided context from their personal archives. "
-        "Be direct, specific, and personal. "
-        "If the context doesn't contain the answer, say so honestly.\n\n"
-        "CAPABILITIES: You run on the user's Mac and can execute macOS shell commands "
+        f"{KHALIL_IDENTITY}"
+        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
         "and access many services through your action system.\n"
         f"{_skill_context}\n\n"
-        "If the user asks about their machine state, DO NOT suggest they run a command "
-        "— just tell them you'll check. Actions execute automatically.\n\n"
+        "If Ahmed asks about his machine state, DO NOT suggest he run a command "
+        "— just tell him you'll check. Actions execute automatically.\n\n"
         f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "AND no skill or extension covers it, "
@@ -989,16 +1004,12 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
 
     system = (
         f"{_temporal}"
-        "You are Khalil, a personal AI assistant. "
-        "You have deep knowledge of the user's life, career, and projects. "
-        "Answer based on the provided context from their personal archives. "
-        "Be direct, specific, and personal. "
-        "If the context doesn't contain the answer, say so honestly.\n\n"
-        "CAPABILITIES: You run on the user's Mac and can execute macOS shell commands "
+        f"{KHALIL_IDENTITY}"
+        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
         "and access many services through your action system.\n"
         f"{_skill_context}\n\n"
-        "If the user asks about their machine state, DO NOT suggest they run a command "
-        "— just tell them you'll check. Actions execute automatically.\n\n"
+        "If Ahmed asks about his machine state, DO NOT suggest he run a command "
+        "— just tell him you'll check. Actions execute automatically.\n\n"
         f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "AND no skill or extension covers it, "
@@ -1285,11 +1296,7 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
 
     return (
         f"{_temporal}"
-        "You are Khalil, a personal AI assistant. "
-        "You have deep knowledge of the user's life, career, and projects. "
-        "Answer based on the provided context from their personal archives. "
-        "Be direct, specific, and personal. "
-        "If the context doesn't contain the answer, say so honestly.\n\n"
+        f"{KHALIL_IDENTITY}"
         "TOOL USE RULES:\n"
         "- Each tool is a single action. Call the tool directly — no 'action' parameter needed.\n"
         "- Use tools when the user asks you to DO something (create event, send email, set reminder, "
@@ -4776,67 +4783,72 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # --- Tool-use LLM loop: LLM picks tools, we execute, loop until done ---
     progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
-    # Build context from all sources
-    results = await hybrid_search(query, limit=6)
-    archive_context = truncate_context(results) if results else "No relevant archive data found."
-    personal_context = get_relevant_context(query, max_chars=2000)
-    conversation_context = await get_conversation_context(chat_id, query)
-
-    full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
-    if conversation_context:
-        full_context = f"{conversation_context}\n\n{full_context}"
-
-    # M4: Proactive context pre-injection (session continuity + entity resolution)
     try:
-        import asyncio as _aio
-        proactive_parts = []
+        # Build context from all sources
+        results = await hybrid_search(query, limit=6)
+        archive_context = truncate_context(results) if results else "No relevant archive data found."
+        personal_context = get_relevant_context(query, max_chars=2000)
+        conversation_context = await get_conversation_context(chat_id, query)
 
-        async def _session_ctx():
-            from memory.session_continuity import get_session_continuity
-            return get_session_continuity(chat_id, query)
+        full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
+        if conversation_context:
+            full_context = f"{conversation_context}\n\n{full_context}"
 
-        async def _entity_ctx():
-            from knowledge.entity_resolver import get_entity_resolver
-            resolver = get_entity_resolver()
-            entities = await resolver.resolve_entities_in_query(query)
-            return resolver.format_entity_context(entities)
+        # M4: Proactive context pre-injection (session continuity + entity resolution)
+        try:
+            import asyncio as _aio
+            proactive_parts = []
 
-        session_ctx, entity_ctx = await _aio.gather(
-            _session_ctx(), _entity_ctx(), return_exceptions=True,
+            async def _session_ctx():
+                from memory.session_continuity import get_session_continuity
+                return get_session_continuity(chat_id, query)
+
+            async def _entity_ctx():
+                from knowledge.entity_resolver import get_entity_resolver
+                resolver = get_entity_resolver()
+                entities = await resolver.resolve_entities_in_query(query)
+                return resolver.format_entity_context(entities)
+
+            session_ctx, entity_ctx = await _aio.gather(
+                _session_ctx(), _entity_ctx(), return_exceptions=True,
+            )
+            if isinstance(session_ctx, str) and session_ctx:
+                proactive_parts.append(session_ctx)
+            if isinstance(entity_ctx, str) and entity_ctx:
+                proactive_parts.append(entity_ctx)
+            if proactive_parts:
+                full_context = "\n\n".join(proactive_parts) + "\n\n" + full_context
+        except Exception as e:
+            log.debug("Proactive context injection failed: %s", e)
+
+        # Live state injection
+        try:
+            from state.collector import collect_live_state, format_for_prompt
+            live = await collect_live_state()
+            live_context = format_for_prompt(live)
+            if live_context:
+                full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+        except Exception as e:
+            log.warning("Live state collection failed: %s", e)
+
+        # Voice mode
+        voice_mode = getattr(ctx, '_voice_mode', False)
+        if voice_mode:
+            full_context = (
+                "[Voice mode: User is speaking via voice. Keep your response concise "
+                "(1-3 sentences), conversational, and easy to read aloud. "
+                "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
+                + full_context
+            )
+
+        # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
+        display_response = await call_llm_with_tools(
+            query, full_context, chat_id, progress_msg, channel,
         )
-        if isinstance(session_ctx, str) and session_ctx:
-            proactive_parts.append(session_ctx)
-        if isinstance(entity_ctx, str) and entity_ctx:
-            proactive_parts.append(entity_ctx)
-        if proactive_parts:
-            full_context = "\n\n".join(proactive_parts) + "\n\n" + full_context
     except Exception as e:
-        log.debug("Proactive context injection failed: %s", e)
-
-    # Live state injection
-    try:
-        from state.collector import collect_live_state, format_for_prompt
-        live = await collect_live_state()
-        live_context = format_for_prompt(live)
-        if live_context:
-            full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
-    except Exception as e:
-        log.warning("Live state collection failed: %s", e)
-
-    # Voice mode
-    voice_mode = getattr(ctx, '_voice_mode', False)
-    if voice_mode:
-        full_context = (
-            "[Voice mode: User is speaking via voice. Keep your response concise "
-            "(1-3 sentences), conversational, and easy to read aloud. "
-            "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
-            + full_context
-        )
-
-    # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
-    display_response = await call_llm_with_tools(
-        query, full_context, chat_id, progress_msg, channel,
-    )
+        log.error("Message handler failed for query '%s': %s", query[:100], e, exc_info=True)
+        display_response = "Sorry, I hit an internal error processing that. Please try again."
+        await _safe_edit(progress_msg, display_response)
 
     # Save to conversation history
     save_message(chat_id, "assistant", display_response)
