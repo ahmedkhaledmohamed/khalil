@@ -1187,12 +1187,16 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "Answer based on the provided context from their personal archives. "
         "Be direct, specific, and personal. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
-        "You have access to tools for taking actions (calendar, email, reminders, "
-        "shell commands, Spotify, weather, etc.). Use tools when the user asks you "
-        "to DO something or CHECK something. For conversational messages, respond "
-        "without tools.\n\n"
-        "When using tools, ALWAYS use the tool result to inform your response. "
-        "Don't just say 'I checked' — tell the user what you found.\n\n"
+        "TOOL USE RULES:\n"
+        "- ONLY use tools when the user explicitly asks you to DO something "
+        "(create event, send email, set reminder, run command) or CHECK something "
+        "specific (calendar, weather, disk space, a file).\n"
+        "- DO NOT use tools for: greetings (hi, hey, hello), opinions, general chat, "
+        "questions answerable from context, follow-ups, thank-yous, or anything "
+        "you can answer from the conversation/context alone.\n"
+        "- When in doubt, respond with text. Fewer tool calls is better.\n"
+        "- When using tools, use the tool result to inform a natural response. "
+        "Don't dump raw output.\n\n"
         f"{style_hint}"
         f"{system_extra}"
     )
@@ -1210,8 +1214,25 @@ async def call_llm_with_tools(
 
     Returns the final display text. Streams the final response to Telegram.
     """
+    log.info("call_llm_with_tools called: query=%s", query[:80])
     from tool_catalog import generate_tool_schemas
     from skills import get_registry
+
+    # Skip tools entirely for obvious conversational messages (greetings, thanks, chat)
+    _q = query.strip().lower().rstrip("?!. ")
+    _GREETINGS = {"hey", "hi", "hello", "yo", "sup", "thanks", "thank you",
+                  "ok", "okay", "cool", "got it", "nice", "good", "great",
+                  "sure", "yes", "no", "nah", "yep", "nope", "hmm", "hm"}
+    _conversational = (
+        _q in _GREETINGS
+        or (_q.split()[0] in _GREETINGS and len(_q.split()) <= 5)
+    )
+    if _conversational:
+        log.info("Conversational bypass for: %s", query[:50])
+        stream_gen = ask_llm_stream(query, context, system_extra)
+        result = await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+        log.info("Conversational response: %d chars", len(result))
+        return result
 
     tools = generate_tool_schemas(get_registry())
     if not tools:
@@ -1247,14 +1268,17 @@ async def call_llm_with_tools(
         return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
     # Tool-use loop
+    # After 2 tool iterations, force the LLM to respond with text ("none")
+    # to prevent infinite tool-call loops.
     for iteration in range(_MAX_TOOL_ITERATIONS):
+        _tc = "auto" if iteration < 2 else "none"
         try:
             response = await _taskforce_client.chat.completions.create(
                 model=_routed_model,
                 max_tokens=1500,
                 messages=messages,
                 tools=tools,
-                tool_choice="auto" if iteration == 0 else "auto",
+                tool_choice=_tc,
                 timeout=CLAUDE_TIMEOUT,
             )
         except Exception as e:
@@ -1267,6 +1291,10 @@ async def call_llm_with_tools(
 
         choice = response.choices[0]
         msg = choice.message
+        log.info("Tool-use iteration %d: finish_reason=%s, tool_calls=%s, content_len=%d",
+                 iteration, choice.finish_reason,
+                 [tc.function.name for tc in msg.tool_calls] if msg.tool_calls else None,
+                 len(msg.content or ""))
 
         # If the model returned tool calls, execute them
         if msg.tool_calls:
@@ -1317,8 +1345,12 @@ async def call_llm_with_tools(
 
         # No tool calls — this is the final text response
         final_text = msg.content or ""
+        log.info("Tool-use final response: %d chars", len(final_text))
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
+        else:
+            log.warning("Tool-use returned empty final text")
+            await _safe_edit(progress_msg, "I'm not sure how to respond to that. Could you rephrase?")
         return final_text
 
     # Exhausted iterations — return whatever we have
@@ -1331,8 +1363,8 @@ async def _safe_edit(msg, text: str):
     """Edit a Telegram message, ignoring failures."""
     try:
         await msg.edit(text[:4096])
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("_safe_edit failed: %s (text_len=%d)", e, len(text))
 
 
 async def stream_to_telegram(
@@ -1351,8 +1383,10 @@ async def stream_to_telegram(
     last_edit_len = 0
     import time as _time
 
+    chunk_count = 0
     async for chunk in stream_gen:
         accumulated += chunk
+        chunk_count += 1
         now = _time.monotonic()
 
         # Strip internal tags from what the user sees
@@ -1371,6 +1405,7 @@ async def stream_to_telegram(
                 pass
 
     # Final edit with complete text (no cursor), tags stripped
+    log.info("stream_to_telegram: %d chunks, %d chars accumulated", chunk_count, len(accumulated))
     display_final = _internal_tag_re.sub("", accumulated).strip()
     if display_final and len(display_final) != last_edit_len:
         try:

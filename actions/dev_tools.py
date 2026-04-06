@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Dev tools status — check Claude Code sessions, git status, terminal activity.
 
 Answers questions like "is Claude Code waiting on me?" by inspecting running processes.
@@ -76,6 +78,7 @@ async def _get_claude_processes() -> list[dict]:
             status = "background"
 
         processes.append({
+            "pid": int(parts[1]),
             "tty": tty,
             "cpu": cpu,
             "stat": stat,
@@ -84,7 +87,30 @@ async def _get_claude_processes() -> list[dict]:
             "command": command[:60],
         })
 
+    # Resolve CWD for each process via lsof
+    for p in processes:
+        p["cwd"] = await _resolve_cwd(p["pid"])
+
     return processes
+
+
+async def _resolve_cwd(pid: int) -> str | None:
+    """Resolve the current working directory of a process via lsof."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "lsof", "-d", "cwd", "-p", str(pid), "-Fn",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        if proc.returncode != 0:
+            return None
+        for line in stdout.decode().splitlines():
+            if line.startswith("n/"):
+                return line[1:]  # Strip the 'n' prefix
+        return None
+    except Exception:
+        return None
 
 
 def _format_processes(processes: list[dict]) -> str:
@@ -100,18 +126,21 @@ def _format_processes(processes: list[dict]) -> str:
     if waiting:
         lines.append(f"⏳ **{len(waiting)} waiting for your input:**")
         for p in waiting:
-            lines.append(f"  • Terminal {p['tty']} (started {p['started']})")
+            cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
+            lines.append(f"  • Terminal {p['tty']} (started {p['started']}){cwd}")
 
     if working:
         lines.append(f"🔄 **{len(working)} actively working:**")
         for p in working:
-            lines.append(f"  • Terminal {p['tty']} — CPU {p['cpu']:.0f}%")
+            cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
+            lines.append(f"  • Terminal {p['tty']} — CPU {p['cpu']:.0f}%{cwd}")
 
     idle = [p for p in processes if p not in waiting and p not in working]
     if idle:
         lines.append(f"💤 **{len(idle)} idle:**")
         for p in idle:
-            lines.append(f"  • Terminal {p['tty']} (started {p['started']})")
+            cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
+            lines.append(f"  • Terminal {p['tty']} (started {p['started']}){cwd}")
 
     return "\n".join(lines)
 

@@ -37,7 +37,11 @@ SKILL = {
         (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
     ],
     "actions": [
-        {"type": "email", "handler": None, "keywords": "email send draft write about", "description": "Send or draft an email"},
+        {"type": "email", "handler": "handle_intent", "keywords": "email send draft write about", "description": "Send or draft an email",
+         "parameters": {
+             "to": {"type": "string", "description": "Recipient email address"},
+             "subject": {"type": "string", "description": "Email subject"},
+         }},
         {"type": "email_work", "handler": "handle_intent", "keywords": "search check work email inbox", "description": "Search work email"},
         {"type": "email_personal", "handler": "handle_intent", "keywords": "search check personal email inbox", "description": "Search personal email"},
     ],
@@ -491,6 +495,15 @@ async def create_drive_sheet(title: str, data: list[list[str]] | None = None) ->
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle a natural language intent. Returns True if handled."""
+    if action == "email":
+        to_addr = intent.get("to", "")
+        subject = intent.get("subject", "")
+        if not to_addr or not subject:
+            await ctx.reply("I need a recipient (to) and subject to draft an email. Try: 'email john@example.com about project update'")
+        else:
+            await ctx.reply(f"Draft email to {to_addr} about: {subject}\n(Use the Telegram interface to approve sending.)")
+        return True
+
     if action in ("email_work", "email_personal"):
         account = "work" if action == "email_work" else "personal"
         query = intent.get("query", intent.get("text", ""))
