@@ -1029,19 +1029,17 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
 
         try:
             if _taskforce_client:
-                # Taskforce proxy (OpenAI-compatible): streaming
+                # Taskforce proxy — non-streaming (streaming returns empty SSE)
                 _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
-                stream = await _taskforce_client.chat.completions.create(
+                response = await _taskforce_client.chat.completions.create(
                     model=_selected_model,
                     max_tokens=1500,
                     messages=_msgs,
                     timeout=CLAUDE_TIMEOUT,
-                    stream=True,
                 )
-                async for chunk in stream:
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    if delta and delta.content:
-                        yield delta.content
+                text = response.choices[0].message.content if response.choices else ""
+                if text:
+                    yield text
                 _cb_claude.record_success()
             else:
                 # Native Anthropic: streaming

@@ -133,6 +133,26 @@ SKILL = {
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle machine control intents by delegating to existing modules."""
 
+    # Infer action if the LLM only sent command/target without picking an action
+    if action == "machine" or action not in {
+        "list_sessions", "read_terminal", "claude_code_status", "system_info",
+        "frontmost_app", "screenshot", "send_to_terminal", "send_to_claude",
+        "create_terminal", "type_text", "click",
+    }:
+        if intent.get("command") and intent.get("target"):
+            # Has target + command — check if target is a Claude session
+            from actions.dev_tools import _get_claude_processes
+            processes = await _get_claude_processes()
+            tty_short = intent["target"].replace("/dev/", "")
+            if tty_short in {p["tty"] for p in processes}:
+                action = "send_to_claude"
+            else:
+                action = "send_to_terminal"
+            log.info("Inferred action=%s from args (target=%s)", action, intent["target"])
+        elif intent.get("command") and not intent.get("target"):
+            action = "send_to_terminal"
+            log.info("Inferred action=send_to_terminal (command only, no target)")
+
     if action == "list_sessions":
         return await _handle_list_sessions(ctx)
 
@@ -153,15 +173,20 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     if action == "screenshot":
         return await _handle_screenshot(ctx)
 
-    if action == "send_to_terminal":
+    if action in ("send_to_terminal", "send_to_claude"):
         target = intent.get("target", "current")
         command = intent.get("command", "")
+        # Auto-upgrade to send_to_claude if target is a Claude session
+        if action == "send_to_terminal" and target.startswith("/dev/"):
+            from actions.dev_tools import _get_claude_processes
+            processes = await _get_claude_processes()
+            tty_short = target.replace("/dev/", "")
+            if tty_short in {p["tty"] for p in processes}:
+                log.info("Upgraded send_to_terminal -> send_to_claude (target %s is Claude)", target)
+                action = "send_to_claude"
+        if action == "send_to_claude":
+            return await _handle_send_to_claude(target, command, intent, ctx)
         return await _handle_send_to_terminal(target, command, intent, ctx)
-
-    if action == "send_to_claude":
-        target = intent.get("target", "")
-        command = intent.get("command", "")
-        return await _handle_send_to_claude(target, command, intent, ctx)
 
     if action == "create_terminal":
         command = intent.get("command")
@@ -316,13 +341,28 @@ async def _handle_send_to_terminal(target: str, command: str, intent: dict, ctx)
         await ctx.reply(result)
         return True
 
-    # iTerm2 session
+    # Try iTerm2 first, fall back to direct TTY write
     from actions.terminal import send_to_iterm
     result = await send_to_iterm(command, session_tty=target)
     if result["success"]:
         await ctx.reply(f"Sent to {target}: `{command}`")
-    else:
-        await ctx.reply(f"Failed: {result['error']}")
+        return True
+
+    # iTerm2 unavailable — write directly to TTY
+    import asyncio as _aio
+    tty_path = target if target.startswith("/dev/") else f"/dev/{target}"
+    try:
+        proc = await _aio.create_subprocess_exec(
+            "bash", "-c", f'printf "%s\\n" "$1" > "$2"', "_", command, tty_path,
+            stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode == 0:
+            await ctx.reply(f"Sent to {target}: `{command}`")
+        else:
+            await ctx.reply(f"Failed to write to {tty_path}: {stderr.decode()[:200]}")
+    except _aio.TimeoutError:
+        await ctx.reply(f"Timed out writing to {tty_path}")
     return True
 
 
@@ -350,52 +390,31 @@ async def _handle_send_to_claude(target: str, command: str, intent: dict, ctx) -
         await ctx.reply(f"No Claude Code session on {target}.\nActive Claude sessions: {available}")
         return True
 
-    # Send directly to iTerm (bypasses shell sanitizer — this is a prompt, not a shell command)
-    from actions.terminal import _escape_applescript
-
-    escaped_cmd = _escape_applescript(command)
-    escaped_tty = _escape_applescript(target)
-    script = f'''tell application "iTerm2"
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                if tty of s is "{escaped_tty}" then
-                    tell s to write text "{escaped_cmd}"
-                    return "ok"
-                end if
-            end repeat
-        end repeat
-    end repeat
-    return "session_not_found"
-end tell'''
-
+    # Write directly to the TTY device — works regardless of terminal app
     import asyncio
+    tty_path = target if target.startswith("/dev/") else f"/dev/{target}"
     try:
+        # Use 'write to tty' approach: newline-terminated so Claude Code sees it as input
         proc = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
+            "bash", "-c", f'printf "%s\\n" "$1" > "$2"', "_", command, tty_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode != 0:
-            await ctx.reply(f"Failed to send to Claude session: {stderr.decode()[:200]}")
-            return True
-        output = stdout.decode().strip()
-        if output == "session_not_found":
-            await ctx.reply(f"Session {target} not found in iTerm2.")
+            err = stderr.decode()[:200]
+            await ctx.reply(f"Failed to send to Claude session on {tty_path}: {err}")
             return True
 
-        # Audit log
-        log.info("Sent to Claude Code session %s: %s", target, command[:80])
+        log.info("Sent to Claude Code session %s: %s", tty_path, command[:80])
 
-        # Find CWD for context
         cwd = None
         for p in processes:
             if p["tty"] == tty_short:
                 cwd = p.get("cwd")
                 break
         cwd_info = f" ({cwd})" if cwd else ""
-        await ctx.reply(f"Sent to Claude Code on {target}{cwd_info}:\n`{command[:200]}`")
+        await ctx.reply(f"Sent to Claude Code on {tty_path}{cwd_info}:\n`{command[:200]}`")
         return True
     except asyncio.TimeoutError:
         await ctx.reply("Timed out sending to Claude session.")
