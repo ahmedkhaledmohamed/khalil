@@ -164,6 +164,11 @@ TTS_VOICE = "Samantha"  # macOS say voice
 # Apple Reminders sync — push Khalil reminders to Reminders.app
 APPLE_REMINDERS_SYNC = True
 
+# AI media generation
+MEDIA_PROVIDER = "local"  # "local" (free, Apple Silicon) or "replicate" (paid cloud)
+MEDIA_DOWNLOAD_DIR = DATA_DIR / "media"
+MEDIA_MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB Telegram limit
+
 
 class AutonomyLevel(Enum):
     SUPERVISED = 1   # Ask before every action

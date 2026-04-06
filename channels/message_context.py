@@ -64,6 +64,18 @@ class MessageContext:
             return await self.channel.send_voice(self.chat_id, audio_path)
         return None
 
+    async def reply_video(self, video_path: str, caption: str = "") -> SentMessage | None:
+        """Send a video reply. Returns None if channel doesn't support video."""
+        if hasattr(self.channel, 'send_video'):
+            return await self.channel.send_video(self.chat_id, video_path, caption=caption)
+        return None
+
+    async def reply_document(self, doc_path: str, caption: str = "") -> SentMessage | None:
+        """Send a document/file reply. Returns None if channel doesn't support documents."""
+        if hasattr(self.channel, 'send_document'):
+            return await self.channel.send_document(self.chat_id, doc_path, caption=caption)
+        return None
+
     async def typing(self):
         """Show typing indicator."""
         await self.channel.send_typing(self.chat_id)
