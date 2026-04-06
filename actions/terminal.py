@@ -201,8 +201,7 @@ tell application "iTerm2"
                 try
                     set sName to name of s
                     set sTty to tty of s
-                    set sCurrent to (current session of t is s)
-                    set output to output & wName & "|||" & sName & "|||" & sTty & "|||" & sCurrent & linefeed
+                    set output to output & wName & "|||" & sName & "|||" & sTty & "|||" & "false" & linefeed
                 end try
             end repeat
         end repeat
