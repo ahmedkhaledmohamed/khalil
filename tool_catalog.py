@@ -31,12 +31,12 @@ _INCLUDE_SKILLS = {
     "calendar", "gmail", "reminders", "weather", "shell", "spotify",
     "web", "pomodoro", "synthesis", "slack", "clipboard",
     "apple_reminders", "github_api", "workflows", "summarize",
-    "machine",
+    "machine", "meta_tools",
 }
 
 # Core tools always included regardless of query relevance
 _CORE_TOOLS = {
-    "shell", "reminder", "web_search",
+    "shell", "reminder", "web_search", "clarify",
 }
 
 # Maximum tools to expose per query (core + filtered)
@@ -185,6 +185,12 @@ _TOOL_DESCRIPTIONS = {
     "summarize_pdf": (
         "Summarize a PDF document. "
         'Example: "Summarize this PDF" → summarize_pdf()'
+    ),
+    "clarify": (
+        "Ask the user a clarifying question instead of guessing. "
+        "Use when the request is ambiguous or you need more information to pick the right tool. "
+        'Example: clarify(question="Which terminal session should I send this to?") '
+        "DO NOT use for simple/obvious requests — just call the right tool directly."
     ),
 }
 

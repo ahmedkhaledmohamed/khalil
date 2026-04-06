@@ -1236,6 +1236,33 @@ def _record_tool_analytics(tool_name: str, params: str, success: bool,
         pass  # analytics should never break tool execution
 
 
+def _get_failing_tools() -> str:
+    """Query tool_analytics for recently failing tools (#46).
+
+    Returns a system prompt fragment warning the LLM about broken tools.
+    """
+    try:
+        rows = db_conn.execute("""
+            SELECT tool_name, COUNT(*) as fails, MAX(error) as last_error
+            FROM tool_analytics
+            WHERE success = 0
+              AND created_at > datetime('now', '-1 hour')
+            GROUP BY tool_name
+            HAVING fails >= 2
+            ORDER BY fails DESC
+            LIMIT 5
+        """).fetchall()
+        if not rows:
+            return ""
+        lines = ["KNOWN TOOL ISSUES (last hour):"]
+        for r in rows:
+            lines.append(f"- {r['tool_name']}: {r['fails']} failures ({r['last_error'][:80]})")
+        lines.append("Avoid these tools or try alternative approaches.\n")
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
 def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "") -> str:
     """Build the system prompt for tool-use calls. Shared with ask_llm."""
     from datetime import datetime as _dt
@@ -1245,6 +1272,10 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         f"CURRENT TIME: {_now.strftime('%A, %B %d, %Y at %I:%M %p %Z')} "
         f"(Q{(_now.month - 1) // 3 + 1} {_now.year})\n\n"
     )
+
+    # Inject known-broken tools to prevent wasted calls (#46)
+    _failing = _get_failing_tools()
+
     return (
         f"{_temporal}"
         "You are Khalil, a personal AI assistant. "
@@ -1259,6 +1290,7 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "- DO NOT use tools for: greetings, opinions, general chat, questions answerable from context, "
         "follow-ups, or thank-yous.\n"
         "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
+        "- If the request is ambiguous, use the clarify tool to ask before guessing.\n"
         "- Summarize tool results in natural language. Don't dump raw output.\n\n"
         "MULTI-STEP REASONING (ReAct):\n"
         "For complex requests, follow this cycle:\n"
@@ -1269,6 +1301,7 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "Otherwise, synthesize all results into a clear response.\n"
         "Example: 'Prep me for my next meeting' → "
         "calendar() → observe events → meeting_prep(meeting_title=...) → respond with brief.\n\n"
+        f"{_failing}"
         f"{style_hint}"
         f"{system_extra}"
     )
