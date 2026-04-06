@@ -205,6 +205,7 @@ def run_proactive_checks() -> list[str]:
 
     M9: Applies smart timing filter — suppresses non-urgent alerts during
     inactive hours based on learned activity patterns.
+    M10: Priority filtering — suppresses low-value alerts during busy periods.
     """
     checks = [
         check_stale_goals,
@@ -224,8 +225,42 @@ def run_proactive_checks() -> list[str]:
         except Exception as e:
             log.error("Proactive check %s failed: %s", check.__name__, e)
 
+    # M10: Priority filtering — suppress low-value alerts during busy weeks
+    findings = _priority_filter(findings)
+
     # M9: Filter by smart timing
     return filter_alerts_by_timing(findings)
+
+
+def _priority_filter(findings: list[str]) -> list[str]:
+    """M10: Suppress stale-portfolio and stale-project alerts during busy weeks.
+
+    If the user has many meetings or active goals, non-critical alerts add noise.
+    """
+    if len(findings) <= 2:
+        return findings  # Few alerts, show all
+
+    # Check if it's a busy period
+    try:
+        from synthesis.aggregator import aggregate_all_domains
+        import asyncio
+        # Sync check: see if work domain is stressed
+        import sqlite3
+        conn = sqlite3.connect(str(DB_PATH))
+        # Count recent activity signals as proxy for busyness
+        cutoff = (datetime.now(ZoneInfo(TIMEZONE)) - timedelta(days=3)).strftime("%Y-%m-%d %H:%M:%S")
+        activity = conn.execute(
+            "SELECT COUNT(*) FROM interaction_signals WHERE created_at > ?", (cutoff,)
+        ).fetchone()[0]
+        conn.close()
+
+        if activity > 50:  # Very active period
+            # Keep only deadline-related and overdue alerts
+            return [f for f in findings if "deadline" in f.lower() or "overdue" in f.lower() or "⚠" in f]
+    except Exception:
+        pass
+
+    return findings
 
 
 # --- M9: Smart Proactive Timing (Task 9.3) ---

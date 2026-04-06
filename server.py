@@ -1160,6 +1160,13 @@ async def _execute_tool_call(tool_call) -> str:
                            "message": f"{fn_name} requires: {', '.join(_missing)}",
                            "suggestion": f"Call {fn_name} again with the required parameters"})
 
+    # M7: Pre-fetch context before tool execution
+    try:
+        from knowledge.prefetch import prefetch_for_tool
+        args = await prefetch_for_tool(fn_name, args)
+    except Exception as e:
+        log.debug("Prefetch failed for %s: %s", fn_name, e)
+
     # New: tool name IS the action (one-tool-per-action)
     action = fn_name
 
@@ -3049,6 +3056,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 original_query = payload.get("query", "")
 
                 async def _execute_single_step(step, prior_results=None):
+                    # Route through execution bus when available
+                    from execution import get_execution_bus, ExecutionContext, ExecutionSource
+                    bus = get_execution_bus()
+                    if bus:
+                        exec_ctx = ExecutionContext(
+                            source=ExecutionSource.ORCHESTRATOR,
+                            parent_plan_id=payload.get("plan_id"),
+                            prior_results=prior_results or {},
+                            chat_id=query.message.chat_id,
+                        )
+                        params = dict(step.params)
+                        params["description"] = step.description
+                        params["user_query"] = step.description
+                        if prior_results:
+                            params["context"] = "\n".join(f"{k}: {v}" for k, v in prior_results.items())
+                        result = await bus.execute(step.action, params, exec_ctx)
+                        if result.success:
+                            return result.output or f"Completed: {step.description}"
+                        # Fall through to legacy path on bus failure
+                        if result.error and "No handler" not in (result.error or ""):
+                            return f"Error: {result.error}"
+
+                    # Legacy fallback
                     intent = None
                     if step.action == "reminder":
                         intent = {"action": "reminder", "text": step.params.get("text", step.description), "time": step.params.get("time", "")}
@@ -4179,6 +4209,65 @@ async def cmd_audit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await ctx.reply(text)
 
 
+async def cmd_trust(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """M12: Show autonomy graduation status — what's auto-approved and what's learning."""
+    ctx = _ctx_from_update(update)
+    try:
+        from learning import get_graduation_status, get_approval_patterns
+        policies = get_graduation_status()
+        if not policies:
+            await ctx.reply("No graduation data yet. Approval patterns build trust over time.")
+            return
+
+        graduated = [p for p in policies if p["graduated"]]
+        learning = [p for p in policies if not p["graduated"]]
+
+        lines = ["🎓 **Autonomy Trust Report**\n"]
+
+        if graduated:
+            lines.append("**Auto-approved:**")
+            for p in graduated:
+                lines.append(f"  ✅ {p['action_type']} ({p['context_key']})")
+
+        if learning:
+            lines.append("\n**Learning:**")
+            for p in learning[:10]:
+                rate = f"{p['success_rate']:.0%}" if p['total'] > 0 else "n/a"
+                lines.append(
+                    f"  📊 {p['action_type']} ({p['context_key']}): "
+                    f"{p['current']}/{p['required']} approvals, {rate} success"
+                )
+
+        await ctx.reply("\n".join(lines))
+    except Exception as e:
+        await ctx.reply(f"Trust report failed: {e}")
+
+
+async def cmd_agents(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """M11: Show background agent status."""
+    ctx = _ctx_from_update(update)
+    try:
+        from agents.coordinator import get_background_agents
+        agents = get_background_agents()
+        if not agents:
+            await ctx.reply("No background agents. Spawn one with a complex research task.")
+            return
+
+        status_icons = {"running": "🔄", "completed": "✅", "failed": "❌", "expired": "💤"}
+        lines = ["🤖 **Background Agents**\n"]
+        for a in agents[:10]:
+            icon = status_icons.get(a["status"], "❓")
+            lines.append(f"{icon} **{a['id']}**: {a['task'][:60]}")
+            if a["final_result"]:
+                lines.append(f"   → {a['final_result'][:100]}")
+            if a["progress"]:
+                lines.append(f"   Progress: {len(a['progress'])} step(s)")
+
+        await ctx.reply("\n".join(lines))
+    except Exception as e:
+        await ctx.reply(f"Agent status failed: {e}")
+
+
 async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show system health status including all integrations."""
     ctx = _ctx_from_update(update)
@@ -4696,6 +4785,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
     if conversation_context:
         full_context = f"{conversation_context}\n\n{full_context}"
+
+    # M4: Proactive context pre-injection (session continuity + entity resolution)
+    try:
+        import asyncio as _aio
+        proactive_parts = []
+
+        async def _session_ctx():
+            from memory.session_continuity import get_session_continuity
+            return get_session_continuity(chat_id, query)
+
+        async def _entity_ctx():
+            from knowledge.entity_resolver import get_entity_resolver
+            resolver = get_entity_resolver()
+            entities = await resolver.resolve_entities_in_query(query)
+            return resolver.format_entity_context(entities)
+
+        session_ctx, entity_ctx = await _aio.gather(
+            _session_ctx(), _entity_ctx(), return_exceptions=True,
+        )
+        if isinstance(session_ctx, str) and session_ctx:
+            proactive_parts.append(session_ctx)
+        if isinstance(entity_ctx, str) and entity_ctx:
+            proactive_parts.append(entity_ctx)
+        if proactive_parts:
+            full_context = "\n\n".join(proactive_parts) + "\n\n" + full_context
+    except Exception as e:
+        log.debug("Proactive context injection failed: %s", e)
 
     # Live state injection
     try:
@@ -5285,6 +5401,8 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("tasks", cmd_tasks))
     application.add_handler(CommandHandler("insights", cmd_insights))
     application.add_handler(CommandHandler("workflows", cmd_workflows))
+    application.add_handler(CommandHandler("trust", cmd_trust))
+    application.add_handler(CommandHandler("agents", cmd_agents))
 
     # Dynamically register extension handlers
     _load_extensions(application)
@@ -5864,6 +5982,15 @@ async def startup():
     set_learning_conn(db_conn)
     log.info(f"Autonomy level: {autonomy.format_level()}")
 
+    # Initialize unified execution bus (M1)
+    from execution import init_execution_bus
+    from skills import get_registry
+    _execution_bus = init_execution_bus(
+        get_registry_fn=get_registry,
+        autonomy_controller=autonomy,
+        ask_llm_fn=None,  # set after ask_llm is defined
+    )
+
     # Load persisted owner chat ID so notifications work after restart
     row = db_conn.execute("SELECT value FROM settings WHERE key = 'owner_chat_id'").fetchone()
     if row and row[0]:
@@ -5958,6 +6085,70 @@ async def startup():
     from webhooks.github import GitHubWebhookHandler
     from webhooks.registry import register as register_webhook
     register_webhook("github", GitHubWebhookHandler())
+
+    # Wire up execution bus with LLM + composite actions (M8: Layer Composition)
+    from execution import get_execution_bus, ExecutionContext, ExecutionSource, ExecutionResult
+    _exec_bus = get_execution_bus()
+    if _exec_bus:
+        _exec_bus._ask_llm = ask_llm
+
+        # M8: Register composite action handlers
+        async def _composite_orchestrate(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+            """Decompose a natural language task into a plan and execute it."""
+            from orchestrator import decompose_request, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
+            ensure_plans_table()
+            task_desc = params.get("task", params.get("description", ""))
+            if not task_desc:
+                return ExecutionResult(success=False, output="", error="No task description provided")
+            steps = await decompose_request(task_desc, "", ask_llm)
+            if not steps:
+                return ExecutionResult(success=False, output="", error="Could not decompose into steps")
+            child_ctx = ctx.child(ExecutionSource.ORCHESTRATOR, parent_plan_id=None)
+            async def _step_fn(step, prior_results=None):
+                r = await _exec_bus.execute(
+                    step.action, {**step.params, "description": step.description},
+                    child_ctx,
+                )
+                return r.output if r.success else f"Error: {r.error}"
+            plan_result = await execute_task_plan(
+                steps, task_desc, channel, ctx.chat_id or OWNER_CHAT_ID, _step_fn,
+                ask_llm_fn=ask_llm,
+            )
+            return ExecutionResult(success=plan_result.status == "completed",
+                                   output=format_plan_summary(plan_result))
+
+        async def _composite_tool_reason(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+            """Run a query through the tool-use LLM loop."""
+            query_text = params.get("query", params.get("task", ""))
+            if not query_text:
+                return ExecutionResult(success=False, output="", error="No query provided")
+            response = await ask_llm(query_text, "", "")
+            return ExecutionResult(success=True, output=response)
+
+        async def _composite_workflow(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+            """Trigger a named workflow."""
+            workflow_name = params.get("workflow", params.get("name", ""))
+            if not workflow_name:
+                return ExecutionResult(success=False, output="", error="No workflow name provided")
+            try:
+                from workflows import get_engine
+                engine = get_engine()
+                if not engine:
+                    return ExecutionResult(success=False, output="", error="Workflow engine not initialized")
+                wf = engine.get_workflow(workflow_name)
+                if not wf:
+                    return ExecutionResult(success=False, output="", error=f"Workflow '{workflow_name}' not found")
+                results = await engine._execute_steps(wf, params.get("event_data", {}))
+                output = "\n".join(
+                    f"{'ok' if r.get('ok') else 'fail'}: {r.get('action', '?')}" for r in results
+                )
+                return ExecutionResult(success=all(r.get("ok") for r in results), output=output)
+            except Exception as e:
+                return ExecutionResult(success=False, output="", error=str(e)[:500])
+
+        _exec_bus.register_composite_action("orchestrate", _composite_orchestrate)
+        _exec_bus.register_composite_action("tool_reason", _composite_tool_reason)
+        _exec_bus.register_composite_action("workflow", _composite_workflow)
 
     # Initialize workflow engine
     try:

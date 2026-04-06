@@ -426,9 +426,53 @@ async def get_frontmost_app() -> str | None:
 
 # --- Proactive State Polling ---
 
+async def _get_cursor_windows_passive() -> list[dict]:
+    """Get Cursor window info from ps without invoking the cursor CLI.
+
+    The `cursor --status` CLI activates the Electron app as a side effect,
+    causing Cursor to flash/open every time it's called. This passive
+    alternative parses Renderer process args to extract window configs.
+    """
+    if not _is_cursor_running():
+        return []
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ps", "aux",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        windows = []
+        for line in stdout.decode().splitlines():
+            if "Cursor Helper (Renderer)" not in line or "--vscode-window-config" not in line:
+                continue
+            parts = line.split()
+            try:
+                pid = int(parts[1])
+                cpu_pct = float(parts[2])
+                mem_mb = float(parts[5]) / 1024  # RSS in KB -> MB
+            except (IndexError, ValueError):
+                continue
+            windows.append({
+                "id": len(windows),
+                "name": f"window-{len(windows)}",
+                "project": None,
+                "pid": pid,
+                "cpu_pct": cpu_pct,
+                "mem_mb": mem_mb,
+            })
+        return windows
+    except Exception as e:
+        log.debug("Passive cursor window check failed: %s", e)
+        return []
+
+
 async def snapshot_dev_state() -> dict:
-    """Capture current dev environment state for change detection."""
-    cursor_windows = await get_cursor_windows()
+    """Capture current dev environment state for change detection.
+
+    Uses passive ps-based check for Cursor to avoid activating the app.
+    """
+    cursor_windows = await _get_cursor_windows_passive()
     sessions = await get_iterm_sessions()
     frontmost = await get_frontmost_app()
 

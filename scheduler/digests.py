@@ -203,12 +203,26 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     except Exception:
         pass
 
-    # Goal progress (sync, non-blocking)
+    # Goal progress (sync, non-blocking) — M5: enhanced with weekly activity + stale alerts
     goal_text = ""
     try:
         from actions.goals import get_goal_summary
         summary = get_goal_summary()
         goal_text = f"\n\nGoals: {summary}"
+
+        # M5: Weekly progress signals
+        from learning import get_weekly_goal_progress, get_stale_goals
+        weekly = get_weekly_goal_progress(days=7)
+        if weekly:
+            active_count = len(weekly)
+            total_signals = sum(g["count"] for g in weekly)
+            goal_text += f"\n  Activity: {active_count} goal(s) had {total_signals} progress signal(s) this week"
+
+        # M5: Stale goal alerts
+        stale = get_stale_goals(days=7)
+        if stale:
+            stale_names = ", ".join(g["text"][:40] for g in stale[:3])
+            goal_text += f"\n  ⚠ Stale ({len(stale)}): {stale_names}"
     except Exception:
         pass
 
@@ -271,26 +285,40 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         f"{discovery_text}{learning_text}{failed_text}"
     )
 
+    # M10: Smart brief — LLM decides what to prioritize based on context
+    meeting_count = calendar_text.count("•") + calendar_text.count("-") if calendar_text else 0
+    is_heavy_meeting_day = meeting_count >= 4
+    is_light_day = meeting_count <= 1
+
+    priority_hint = ""
+    if is_heavy_meeting_day:
+        priority_hint = (
+            "This is a HEAVY MEETING DAY ({} meetings). Lead with calendar events "
+            "and meeting prep links. Keep other sections minimal.".format(meeting_count)
+        )
+    elif is_light_day:
+        priority_hint = (
+            "This is a LIGHT DAY (0-1 meetings). Lead with goals and deep work. "
+            "Focus on progress tracking and blocked items."
+        )
+
     brief = await ask_claude_fn(
         f"Generate a concise morning brief for the user. Today is {day_name}.\n"
         f"Day style: {day_style}\n\n"
-        "Include:\n"
-        "- Weather at the top (one line)\n"
-        "- Today's calendar events (if any)\n"
-        "- Reminders due today (if any, highlight them)\n"
-        "- Work priorities: P0 epics or key in-progress items (1-2 lines)\n"
-        "- Goal progress (one line if goals exist)\n"
-        "- Financial deadlines if any are within 14 days or passed\n"
-        "- GitHub unread notifications count (if any)\n"
-        "- App Store stats for Zia if available (one line)\n"
-        "- Server health if available (one line)\n"
-        "- Readwise daily review count if available (one line)\n"
-        "- Job matches if any new ones found\n"
-        "- 'Did you know?' skill suggestions if provided (one line)\n"
-        "- 'Recently learned' adaptations if provided (one line)\n"
-        "- If any data sources were unavailable, note it briefly at the end (e.g. 'Note: Calendar was unreachable')\n"
-        "- A closing line with suggested focus for the day\n"
-        "- Keep it under 20 lines, be direct and actionable.",
+        f"{priority_hint}\n\n" if priority_hint else ""
+        "PRIORITIZE the 3-5 most important items from the data below. "
+        "Not everything needs to be included — surface what matters most today.\n\n"
+        "Available sections (include only if relevant and notable):\n"
+        "- Weather (one line)\n"
+        "- Calendar events (emphasize if heavy day)\n"
+        "- Reminders due today (always include if any)\n"
+        "- Work priorities (P0s, blockers)\n"
+        "- Goal progress + stale goal alerts\n"
+        "- Financial deadlines (only if within 14 days)\n"
+        "- GitHub, App Store, servers (only if notable)\n"
+        "- Job matches (only if new)\n"
+        "- A closing line with suggested focus\n"
+        "- Keep it under 15 lines, be direct and actionable.",
         context,
         system_extra=f"Today's date: {today_iso}, {day_name}",
     )
