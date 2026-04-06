@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Khalil — Self-Healing AI Assistant</title>
+    <meta name="description" content="A personal AI agent with 70+ action modules, three-tier autonomy, self-healing, and an evolution engine that improves itself.">
+    <meta property="og:title" content="Khalil — Self-Healing AI Assistant">
+    <meta property="og:description" content="An AI agent that detects its own failures, writes patches, and opens PRs against itself.">
+    <meta property="og:type" content="website">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="noise"></div>
+
+    <nav class="nav">
+        <div class="nav-inner">
+            <a href="#" class="logo">khalil<span class="logo-dot">.</span></a>
+            <button class="nav-toggle" aria-label="Toggle navigation">
+                <span></span><span></span><span></span>
+            </button>
+            <div class="nav-links">
+                <a href="#capabilities">Capabilities</a>
+                <a href="#architecture">Architecture</a>
+                <a href="#evolution">Evolution</a>
+                <a href="#stack">Stack</a>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <section class="hero">
+            <div class="hero-content">
+                <div class="hero-badge">Personal AI Agent</div>
+                <h1 class="hero-title">
+                    An AI that fixes<br>
+                    <span class="gradient-text">its own bugs.</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Khalil is a self-healing AI assistant with 70+ action modules,
+                    multi-channel messaging, three-tier autonomy, and an evolution engine
+                    that reads its own source code, writes patches, and opens PRs.
+                </p>
+                <div class="hero-stats">
+                    <div class="stat">
+                        <span class="stat-number">70+</span>
+                        <span class="stat-label">Action Modules</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number">4</span>
+                        <span class="stat-label">Channels</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number">3</span>
+                        <span class="stat-label">Autonomy Tiers</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-number">4x</span>
+                        <span class="stat-label">Daily Evolution</span>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-glow"></div>
+        </section>
+
+        <section class="section section-alt" id="capabilities">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">What it does</span>
+                    <h2 class="section-title">One agent, everywhere.</h2>
+                    <p class="section-subtitle">
+                        Talk to Khalil from any channel. It routes your intent through
+                        70+ action modules — from reading email to managing infrastructure.
+                    </p>
+                </div>
+
+                <div class="capabilities-grid">
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        </div>
+                        <h3>Multi-Channel</h3>
+                        <p>Telegram, Slack, Discord, WhatsApp. Unified conversation state across every channel.</p>
+                    </div>
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+                        </div>
+                        <h3>Machine Control</h3>
+                        <p>Terminal sessions, Cursor IDE, Claude Code. Khalil can read, navigate, and operate your development environment.</p>
+                    </div>
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                        </div>
+                        <h3>Three-Tier Autonomy</h3>
+                        <p>Reads freely. Asks before writing. Blocks anything dangerous. Every action is classified and gated.</p>
+                    </div>
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                        </div>
+                        <h3>70+ Actions</h3>
+                        <p>Gmail, Calendar, GitHub, finance, health, shell, coding agents, Spotify, notes, reminders, and more.</p>
+                    </div>
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v6M12 17v6M4.22 4.22l4.24 4.24M15.54 15.54l4.24 4.24M1 12h6M17 12h6M4.22 19.78l4.24-4.24M15.54 8.46l4.24-4.24"/></svg>
+                        </div>
+                        <h3>Hybrid LLMs</h3>
+                        <p>Local models via Ollama for fast, private tasks. Claude for complex reasoning. Routed automatically.</p>
+                    </div>
+                    <div class="cap-card">
+                        <div class="cap-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                        </div>
+                        <h3>MCP Server</h3>
+                        <p>Exposes knowledge search, context, timeline, and reminders as MCP tools for Cursor and Claude Code.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="architecture">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">How it works</span>
+                    <h2 class="section-title">Architecture</h2>
+                    <p class="section-subtitle">
+                        A layered system where every interaction produces signals
+                        that feed back into the evolution engine.
+                    </p>
+                </div>
+
+                <div class="arch-diagram">
+                    <div class="arch-layer">
+                        <div class="arch-layer-label">Channels</div>
+                        <div class="arch-nodes">
+                            <div class="arch-node node-channel">Telegram</div>
+                            <div class="arch-node node-channel">Slack</div>
+                            <div class="arch-node node-channel">Discord</div>
+                            <div class="arch-node node-channel">WhatsApp</div>
+                        </div>
+                    </div>
+                    <div class="arch-connector">
+                        <div class="connector-line"></div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-label">Core</div>
+                        <div class="arch-nodes">
+                            <div class="arch-node node-core node-wide">
+                                <strong>Orchestrator</strong>
+                                <span>sense → think → act → report</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="arch-connector">
+                        <div class="connector-line triple"></div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-label">Systems</div>
+                        <div class="arch-nodes arch-nodes-spread">
+                            <div class="arch-node node-system">
+                                <strong>Autonomy</strong>
+                                <span>read · write · dangerous</span>
+                            </div>
+                            <div class="arch-node node-system">
+                                <strong>Actions</strong>
+                                <span>70+ skill modules</span>
+                            </div>
+                            <div class="arch-node node-system">
+                                <strong>LLM Router</strong>
+                                <span>local + cloud</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="arch-connector">
+                        <div class="connector-line"></div>
+                    </div>
+                    <div class="arch-layer">
+                        <div class="arch-layer-label">Intelligence</div>
+                        <div class="arch-nodes arch-nodes-spread">
+                            <div class="arch-node node-intel">
+                                <strong>Self-Healing</strong>
+                                <span>detect → patch → PR</span>
+                            </div>
+                            <div class="arch-node node-intel">
+                                <strong>Evolution</strong>
+                                <span>sense → rank → execute</span>
+                            </div>
+                            <div class="arch-node node-intel">
+                                <strong>Learning</strong>
+                                <span>signals → insights</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section section-alt" id="evolution">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">The interesting part</span>
+                    <h2 class="section-title">It gets better at getting better.</h2>
+                    <p class="section-subtitle">
+                        Every interaction leaves a signal. Four times a day, the evolution
+                        engine reviews them and decides what to improve next.
+                    </p>
+                </div>
+
+                <div class="evolution-flow">
+                    <div class="evo-step">
+                        <div class="evo-number">01</div>
+                        <h3>Sense</h3>
+                        <p>Every interaction is scanned for signals — missed searches, manual fallbacks, user corrections. No LLM needed.</p>
+                    </div>
+                    <div class="evo-arrow">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </div>
+                    <div class="evo-step">
+                        <div class="evo-number">02</div>
+                        <h3>Gather</h3>
+                        <p>Accumulated signals are clustered into evolution candidates: fixes, extensions, improvements, integrations.</p>
+                    </div>
+                    <div class="evo-arrow">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </div>
+                    <div class="evo-step">
+                        <div class="evo-number">03</div>
+                        <h3>Rank</h3>
+                        <p>Each candidate is scored by impact and feasibility. The top candidates survive. Max 2 executions per cycle.</p>
+                    </div>
+                    <div class="evo-arrow">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </div>
+                    <div class="evo-step">
+                        <div class="evo-number">04</div>
+                        <h3>Execute</h3>
+                        <p>The engine reads relevant source code, generates a patch, runs tests in a sandbox, and opens a PR for review.</p>
+                    </div>
+                    <div class="evo-arrow">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                    </div>
+                    <div class="evo-step">
+                        <div class="evo-number">05</div>
+                        <h3>Verify</h3>
+                        <p>After merge, the system monitors whether the original signal recurs. If it does, the candidate re-enters the pipeline.</p>
+                    </div>
+                </div>
+
+                <div class="signal-examples">
+                    <h3>What counts as a signal?</h3>
+                    <div class="signal-grid">
+                        <div class="signal-card">
+                            <div class="signal-type type-miss">Search Miss</div>
+                            <p class="signal-quote">"I don't have information on that"</p>
+                            <p class="signal-meaning">Knowledge gap detected → extend action or improve retrieval</p>
+                        </div>
+                        <div class="signal-card">
+                            <div class="signal-type type-manual">Manual Fallback</div>
+                            <p class="signal-quote">"Try running this command yourself"</p>
+                            <p class="signal-meaning">Capability gap → build new action module</p>
+                        </div>
+                        <div class="signal-card">
+                            <div class="signal-type type-correction">User Correction</div>
+                            <p class="signal-quote">"No, actually I meant..."</p>
+                            <p class="signal-meaning">Intent parsing failure → improve context handling</p>
+                        </div>
+                        <div class="signal-card">
+                            <div class="signal-type type-failure">Recurring Failure</div>
+                            <p class="signal-quote">Same error 3+ times</p>
+                            <p class="signal-meaning">Systematic bug → self-healing generates patch</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section" id="autonomy">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">Safety model</span>
+                    <h2 class="section-title">Trust, but classify.</h2>
+                    <p class="section-subtitle">
+                        Every action is classified before execution. The autonomy controller
+                        gates behavior based on risk level.
+                    </p>
+                </div>
+
+                <div class="autonomy-tiers">
+                    <div class="tier-card tier-read">
+                        <div class="tier-header">
+                            <div class="tier-indicator"></div>
+                            <h3>Read</h3>
+                        </div>
+                        <p class="tier-desc">Always allowed. No approval needed.</p>
+                        <div class="tier-examples">
+                            <code>search_knowledge</code>
+                            <code>get_context</code>
+                            <code>search_email</code>
+                            <code>cursor_status</code>
+                            <code>terminal_status</code>
+                        </div>
+                    </div>
+                    <div class="tier-card tier-write">
+                        <div class="tier-header">
+                            <div class="tier-indicator"></div>
+                            <h3>Write</h3>
+                        </div>
+                        <p class="tier-desc">Requires approval in supervised mode.</p>
+                        <div class="tier-examples">
+                            <code>send_email</code>
+                            <code>create_reminder</code>
+                            <code>modify_file</code>
+                            <code>terminal_exec</code>
+                            <code>cursor_open_project</code>
+                        </div>
+                    </div>
+                    <div class="tier-card tier-dangerous">
+                        <div class="tier-header">
+                            <div class="tier-indicator"></div>
+                            <h3>Dangerous</h3>
+                        </div>
+                        <p class="tier-desc">Always requires explicit approval.</p>
+                        <div class="tier-examples">
+                            <code>send_money</code>
+                            <code>delete_data</code>
+                            <code>share_externally</code>
+                            <code>generate_capability</code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section section-alt" id="stack">
+            <div class="section-inner">
+                <div class="section-header">
+                    <span class="section-label">Built with</span>
+                    <h2 class="section-title">Stack</h2>
+                    <p class="section-subtitle">
+                        No framework lock-in. Runs entirely on a laptop.
+                    </p>
+                </div>
+
+                <div class="stack-grid">
+                    <div class="stack-item">
+                        <div class="stack-name">Python</div>
+                        <div class="stack-role">Core runtime & all modules</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">FastAPI</div>
+                        <div class="stack-role">HTTP server & webhooks</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">SQLite</div>
+                        <div class="stack-role">State, history, evolution signals</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">sqlite-vec</div>
+                        <div class="stack-role">Vector search & embeddings</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">Ollama</div>
+                        <div class="stack-role">Local LLM inference</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">Claude</div>
+                        <div class="stack-role">Complex reasoning & code gen</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">FastMCP</div>
+                        <div class="stack-role">MCP server for Cursor / Claude Code</div>
+                    </div>
+                    <div class="stack-item">
+                        <div class="stack-name">Git</div>
+                        <div class="stack-role">Self-healing PR pipeline</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="footer-inner">
+            <p>Built by <a href="https://ahmedkhaledmohamed.github.io/me/" target="_blank">Ahmed Khaled Mohamed</a></p>
+            <div class="footer-links">
+                <a href="https://linkedin.com/in/ahmedkhaledmohamed" target="_blank">LinkedIn</a>
+                <a href="https://github.com/ahmedkhaledmohamed" target="_blank">GitHub</a>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
