@@ -5972,8 +5972,11 @@ async def startup():
     except Exception as e:
         log.warning("Workflow engine not started: %s", e)
 
-    # Start Telegram bot
-    asyncio.create_task(start_telegram_bot())
+    # Start Telegram bot — await so `channel` is set before agent loop check
+    try:
+        await start_telegram_bot()
+    except Exception as e:
+        log.error("Telegram bot startup failed: %s", e)
 
     # Start Slack channel if configured
     try:
