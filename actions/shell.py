@@ -44,7 +44,10 @@ SKILL = {
         (r"\b(?:next|skip)\s+(?:song|track)\b", "shell"),
     ],
     "actions": [
-        {"type": "shell", "handler": None, "keywords": "run command shell open app brew install network disk space", "description": "Execute shell commands"},
+        {"type": "shell", "handler": "handle_intent", "keywords": "run command shell open app brew install network disk space", "description": "Execute shell commands",
+         "parameters": {
+             "command": {"type": "string", "description": "Shell command to execute"},
+         }},
     ],
     "examples": ["Open Safari", "Check disk space", "Run brew update"],
     "voice": {"confirm_before_execute": True, "response_style": "brief"},
@@ -374,3 +377,21 @@ def format_output(result: dict, cmd: str) -> str:
                 break
 
     return "\n".join(parts)
+
+
+async def handle_intent(action: str, intent: dict, ctx) -> bool:
+    """Handle shell intent from tool-use or direct dispatch."""
+    cmd = intent.get("command", "")
+    if not cmd:
+        await ctx.reply("No command specified.")
+        return True
+
+    classification = classify_command(cmd)
+    if classification == ActionType.DANGEROUS:
+        await ctx.reply(f"Command blocked (dangerous): {cmd}")
+        return True
+
+    result = await execute_shell(cmd)
+    output = format_output(result, cmd)
+    await ctx.reply(output)
+    return True
