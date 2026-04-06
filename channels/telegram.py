@@ -115,6 +115,16 @@ class TelegramChannel(Channel):
             msg = await self._bot.send_voice(chat_id=chat_id, voice=f)
         return SentMessage(chat_id=chat_id, message_id=msg.message_id, channel=self)
 
+    async def send_video(self, chat_id: int | str, video_path: str, caption: str = "") -> SentMessage:
+        with open(video_path, "rb") as f:
+            msg = await self._bot.send_video(chat_id=chat_id, video=f, caption=caption)
+        return SentMessage(chat_id=chat_id, message_id=msg.message_id, channel=self)
+
+    async def send_document(self, chat_id: int | str, doc_path: str, caption: str = "") -> SentMessage:
+        with open(doc_path, "rb") as f:
+            msg = await self._bot.send_document(chat_id=chat_id, document=f, caption=caption)
+        return SentMessage(chat_id=chat_id, message_id=msg.message_id, channel=self)
+
     async def download_file(self, file_id: str, dest_path: str) -> str | None:
         tg_file = await self._bot.get_file(file_id)
         await tg_file.download_to_drive(dest_path)
