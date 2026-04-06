@@ -356,7 +356,7 @@ async def _handle_send_to_terminal(target: str, command: str, intent: dict, ctx)
             "bash", "-c", f'printf "%s\\n" "$1" > "$2"', "_", command, tty_path,
             stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
         )
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        stdout, stderr = await _aio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0:
             await ctx.reply(f"Sent to {target}: `{command}`")
         else:
