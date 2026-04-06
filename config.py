@@ -112,7 +112,7 @@ GOOGLE_MODEL = "gemini-2.5-pro"
 OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
 
 # Timezone
-TIMEZONE = os.getenv("KHALIL_TIMEZONE", "UTC")
+TIMEZONE = os.getenv("KHALIL_TIMEZONE", "America/Toronto")
 
 # Weather (Open-Meteo, free, no API key)
 # Defaults to Toronto. Override with KHALIL_WEATHER_LAT / KHALIL_WEATHER_LON.
