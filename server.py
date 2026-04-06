@@ -1130,10 +1130,16 @@ class _ToolCaptureContext:
 
 
 _MAX_TOOL_ITERATIONS = 5
+_MAX_TOOL_AUTO_ITERATIONS = 4  # iterations with tool_choice="auto" before forcing "none"
 
 
 async def _execute_tool_call(tool_call) -> str:
-    """Execute a single tool call from the LLM and return the result text."""
+    """Execute a single tool call from the LLM and return the result text.
+
+    Tool name IS the action_type (one-tool-per-action design).
+    Falls back to legacy action-enum extraction for backward compat.
+    """
+    import time as _time
     from skills import get_registry
     registry = get_registry()
 
@@ -1141,32 +1147,83 @@ async def _execute_tool_call(tool_call) -> str:
     try:
         args = json.loads(tool_call.function.arguments)
     except json.JSONDecodeError:
+        _record_tool_analytics(fn_name, "", False, 0, error="invalid_json")
         return f"Error: invalid JSON arguments for {fn_name}"
 
-    action = args.pop("action", fn_name)
+    # Validate required parameters before dispatch
+    _missing = _check_required_params(fn_name, args)
+    if _missing:
+        _record_tool_analytics(fn_name, json.dumps(args), False, 0, error="missing_params")
+        return f"Error: {fn_name} requires parameters: {', '.join(_missing)}"
+
+    # New: tool name IS the action (one-tool-per-action)
+    action = fn_name
+
+    # Legacy compat: if caller sent an "action" param, use it
+    if "action" in args:
+        action = args.pop("action")
 
     # Look up handler from skill registry
     handler = registry.get_handler(action)
     if handler is None:
-        # Fallback: try the skill name as action
+        # Fallback: try the function name as skill name (old pattern)
         handler = registry.get_handler(fn_name)
         if handler is None:
-            return f"Error: no handler found for tool '{fn_name}' action '{action}'"
+            _record_tool_analytics(fn_name, json.dumps(args), False, 0, error="no_handler")
+            return f"Error: no handler found for tool '{fn_name}'"
 
     # Execute with a capture context so replies become tool results
     capture_ctx = _ToolCaptureContext()
     intent = {"action": action, **args, "tool_mode": True}
 
+    t0 = _time.monotonic()
     try:
         result = await asyncio.wait_for(
             handler(action, intent, capture_ctx),
-            timeout=30,
+            timeout=60,  # increased from 30s for shell/claude_code
         )
-        return capture_ctx.get_result()
+        elapsed = _time.monotonic() - t0
+        result_text = capture_ctx.get_result()
+        _record_tool_analytics(fn_name, json.dumps(args), True, elapsed)
+        return result_text
     except asyncio.TimeoutError:
-        return f"Error: {fn_name}/{action} timed out after 30s"
+        elapsed = _time.monotonic() - t0
+        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error="timeout")
+        return f"Error: {fn_name} timed out after 60s"
     except Exception as e:
-        return f"Error executing {fn_name}/{action}: {e}"
+        elapsed = _time.monotonic() - t0
+        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=str(e)[:200])
+        return f"Error executing {fn_name}: {e}"
+
+
+def _check_required_params(tool_name: str, args: dict) -> list[str]:
+    """Check if required parameters are present. Returns list of missing param names."""
+    _REQUIRED = {
+        "calendar_create": ["summary", "start_time"],
+        "email": ["to", "subject"],
+        "reminder": ["text"],
+        "send_to_terminal": ["command"],
+        "send_to_claude": ["command", "target"],
+        "shell": ["command"],
+        "type_text": ["command"],
+        "click": ["command"],
+    }
+    required = _REQUIRED.get(tool_name, [])
+    return [p for p in required if p not in args or not args[p]]
+
+
+def _record_tool_analytics(tool_name: str, params: str, success: bool,
+                           latency: float, error: str = ""):
+    """Record tool usage analytics to the DB."""
+    try:
+        db_conn.execute(
+            "INSERT INTO tool_analytics (tool_name, params, success, latency_s, error, created_at) "
+            "VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (tool_name, params[:2000], success, round(latency, 3), error[:500]),
+        )
+        db_conn.commit()
+    except Exception:
+        pass  # analytics should never break tool execution
 
 
 def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "") -> str:
@@ -1186,15 +1243,14 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "Be direct, specific, and personal. "
         "If the context doesn't contain the answer, say so honestly.\n\n"
         "TOOL USE RULES:\n"
-        "- ONLY use tools when the user explicitly asks you to DO something "
-        "(create event, send email, set reminder, run command) or CHECK something "
-        "specific (calendar, weather, disk space, a file).\n"
-        "- DO NOT use tools for: greetings (hi, hey, hello), opinions, general chat, "
-        "questions answerable from context, follow-ups, thank-yous, or anything "
-        "you can answer from the conversation/context alone.\n"
-        "- When in doubt, respond with text. Fewer tool calls is better.\n"
-        "- When using tools, use the tool result to inform a natural response. "
-        "Don't dump raw output.\n\n"
+        "- Each tool is a single action. Call the tool directly — no need to specify an 'action' parameter.\n"
+        "- Use tools when the user asks you to DO something (create event, send email, set reminder, "
+        "run command) or CHECK something specific (calendar, weather, disk space, terminal output).\n"
+        "- DO NOT use tools for: greetings, opinions, general chat, questions answerable from context, "
+        "follow-ups, or thank-yous.\n"
+        "- For multi-step tasks, call tools sequentially: observe each result before deciding the next step.\n"
+        "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
+        "- Summarize tool results in natural language. Don't dump raw output.\n\n"
         f"{style_hint}"
         f"{system_extra}"
     )
@@ -1216,15 +1272,13 @@ async def call_llm_with_tools(
     from tool_catalog import generate_tool_schemas
     from skills import get_registry
 
-    # Skip tools entirely for obvious conversational messages (greetings, thanks, chat)
+    # Skip tools only for pure conversational messages (exact match only).
+    # "hey what's the weather" should NOT bypass — only "hey", "thanks", etc.
     _q = query.strip().lower().rstrip("?!. ")
     _GREETINGS = {"hey", "hi", "hello", "yo", "sup", "thanks", "thank you",
                   "ok", "okay", "cool", "got it", "nice", "good", "great",
                   "sure", "yes", "no", "nah", "yep", "nope", "hmm", "hm"}
-    _conversational = (
-        _q in _GREETINGS
-        or (_q.split()[0] in _GREETINGS and len(_q.split()) <= 5)
-    )
+    _conversational = _q in _GREETINGS  # exact match only — no more "first word" heuristic
     if _conversational:
         log.info("Conversational bypass for: %s", query[:50])
         stream_gen = ask_llm_stream(query, context, system_extra)
@@ -1249,10 +1303,13 @@ async def call_llm_with_tools(
     system = _build_system_prompt(query, style_hint, system_extra)
     user_message = f"Context from personal archives:\n\n{context}\n\n---\n\nQuestion: {query}"
 
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user_message},
-    ]
+    # Inject recent conversation history for reference resolution
+    # ("send that to John" → knows what "that" refers to)
+    conversation_history = get_conversation_history(chat_id)
+    messages = [{"role": "system", "content": system}]
+    if conversation_history:
+        messages.append({"role": "system", "content": conversation_history})
+    messages.append({"role": "user", "content": user_message})
 
     # Model selection
     from model_router import route_query
@@ -1266,14 +1323,14 @@ async def call_llm_with_tools(
         return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
     # Tool-use loop
-    # After 2 tool iterations, force the LLM to respond with text ("none")
-    # to prevent infinite tool-call loops.
+    # Allow up to _MAX_TOOL_AUTO_ITERATIONS with tool_choice="auto",
+    # then force text response with "none" for remaining iterations.
     for iteration in range(_MAX_TOOL_ITERATIONS):
-        _tc = "auto" if iteration < 2 else "none"
+        _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
         try:
             response = await _taskforce_client.chat.completions.create(
                 model=_routed_model,
-                max_tokens=1500,
+                max_tokens=4000,  # increased from 1500 — LLM needs space for reasoning + tool calls
                 messages=messages,
                 tools=tools,
                 tool_choice=_tc,
@@ -1332,10 +1389,13 @@ async def call_llm_with_tools(
                              metadata=json.dumps({"tool_name": tc.function.name,
                                                   "tool_call_id": tc.id}))
 
+                # Smart truncation: keep first 5000 + last 2000 chars
+                if len(result_text) > 8000:
+                    result_text = result_text[:5000] + "\n\n[...truncated...]\n\n" + result_text[-2000:]
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc.id,
-                    "content": result_text[:4000],
+                    "content": result_text[:8000],
                 })
 
             # Continue loop — LLM will reason about tool results
