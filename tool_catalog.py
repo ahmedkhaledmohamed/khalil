@@ -18,6 +18,16 @@ log = logging.getLogger("khalil.tool_catalog")
 # Skills to exclude from tool catalog (internal/meta, not user-facing)
 _EXCLUDE_SKILLS = {"extend", "guardian"}
 
+# Only these skills get exposed as tools to the LLM.
+# Others are still available via regex fast-path and direct dispatch.
+# Keeping this small (~15) prevents the LLM from over-triggering tools.
+_INCLUDE_SKILLS = {
+    "calendar", "gmail", "reminders", "weather", "shell", "spotify",
+    "web", "pomodoro", "synthesis", "slack", "clipboard",
+    "apple_reminders", "github_api", "workflows", "summarize",
+    "machine",
+}
+
 
 def generate_tool_schemas(registry) -> list[dict]:
     """Generate OpenAI-format tool schemas from the skill registry.
@@ -31,6 +41,8 @@ def generate_tool_schemas(registry) -> list[dict]:
     tools = []
     for skill in registry.list_skills():
         if skill.name in _EXCLUDE_SKILLS:
+            continue
+        if skill.name not in _INCLUDE_SKILLS:
             continue
         if not skill.actions:
             continue

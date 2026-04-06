@@ -201,7 +201,7 @@ tell application "iTerm2"
                 try
                     set sName to name of s
                     set sTty to tty of s
-                    set sCurrent to is current of s
+                    set sCurrent to (current session of t is s)
                     set output to output & wName & "|||" & sName & "|||" & sTty & "|||" & sCurrent & linefeed
                 end try
             end repeat
@@ -294,6 +294,60 @@ async def get_active_processes(sessions: list[dict] = None) -> list[dict]:
     except Exception as e:
         log.warning("Failed to get active processes: %s", e)
         return []
+
+
+_ITERM_READ_SESSION_SCRIPT = '''
+tell application "iTerm2"
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                if tty of s is "{tty}" then
+                    return contents of s
+                end if
+            end repeat
+        end repeat
+    end repeat
+    return "session_not_found"
+end tell
+'''
+
+
+async def read_iterm_session(tty: str, lines: int = 100) -> dict:
+    """Read recent content from a specific iTerm2 session by TTY.
+
+    Args:
+        tty: TTY path like "/dev/ttys057".
+        lines: Number of trailing lines to return (default 100).
+
+    Returns: {success: bool, content: str | None, error: str | None}
+    """
+    escaped_tty = _escape_applescript(tty)
+    script = _ITERM_READ_SESSION_SCRIPT.format(tty=escaped_tty)
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            return {"success": False, "content": None, "error": stderr.decode()[:200]}
+        output = stdout.decode()
+        if output.strip() == "session_not_found":
+            return {"success": False, "content": None, "error": f"Session with tty {tty} not found"}
+        # Trim to last N lines
+        all_lines = output.splitlines()
+        trimmed = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        content = "\n".join(trimmed)
+        # Truncate for safety (Telegram limit)
+        if len(content) > 3500:
+            content = "...(truncated)\n" + content[-3500:]
+        return {"success": True, "content": content, "error": None}
+    except asyncio.TimeoutError:
+        return {"success": False, "content": None, "error": "Timed out reading session"}
+    except Exception as e:
+        return {"success": False, "content": None, "error": str(e)}
 
 
 async def get_terminal_status() -> dict:

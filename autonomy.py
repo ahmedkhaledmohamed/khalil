@@ -48,6 +48,18 @@ ACTION_RULES = {
     "cursor_terminal_status": ActionType.READ,
     "cursor_terminal_exec": ActionType.WRITE,   # injects command into Cursor terminal
     "cursor_terminal_new": ActionType.WRITE,
+    # Machine control meta-tool
+    "machine_list_sessions": ActionType.READ,
+    "machine_read_terminal": ActionType.READ,
+    "machine_claude_code_status": ActionType.READ,
+    "machine_system_info": ActionType.READ,
+    "machine_frontmost_app": ActionType.READ,
+    "machine_screenshot": ActionType.READ,
+    "machine_send_to_terminal": ActionType.WRITE,
+    "machine_send_to_claude": ActionType.WRITE,
+    "machine_create_terminal": ActionType.WRITE,
+    "machine_type_text": ActionType.WRITE,
+    "machine_click": ActionType.WRITE,
     # Multi-step task plans
     "task_plan": ActionType.WRITE,
 }
