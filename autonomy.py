@@ -62,6 +62,8 @@ ACTION_RULES = {
     "machine_click": ActionType.WRITE,
     # Multi-step task plans
     "task_plan": ActionType.WRITE,
+    # Evolution engine
+    "evolution_cycle": ActionType.WRITE,
 }
 
 # Safe writes: auto-approved in GUIDED mode (low risk, easily reversible)

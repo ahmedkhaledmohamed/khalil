@@ -15,7 +15,7 @@ import logging
 import sqlite3
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import IntEnum
 from zoneinfo import ZoneInfo
 
@@ -78,8 +78,19 @@ def _get_sensors() -> list[tuple[str, object]]:
     # Built-in fallbacks (only if not already registered by a skill)
     if "system" not in sensors:
         sensors["system"] = _sense_system_builtin
+    if "evolution" not in sensors:
+        sensors["evolution"] = _sense_evolution_builtin
 
     return list(sensors.items())
+
+
+async def _sense_evolution_builtin() -> dict:
+    """Count pending evolution signals since last cycle. Lightweight — no LLM."""
+    try:
+        from evolution import count_pending_signals, get_last_cycle_time
+        return {"pending_signals": count_pending_signals(), "last_cycle": get_last_cycle_time()}
+    except Exception:
+        return {}
 
 
 def _get_opportunity_fns() -> list[object]:
@@ -205,6 +216,29 @@ def _identify_opportunities(state: dict, last_state: dict, cooldowns: dict) -> l
                     ))
             except Exception as e:
                 log.debug("EOD reminder sweep failed: %s", e)
+
+    # --- 5. Evolution cycle readiness ---
+    evo = state.get("evolution", {})
+    pending = evo.get("pending_signals", 0)
+    last_cycle = evo.get("last_cycle")
+    hours_since = 24  # default: trigger if never run
+    if last_cycle:
+        try:
+            last_dt = datetime.fromisoformat(last_cycle)
+            hours_since = (datetime.now(timezone.utc) - last_dt).total_seconds() / 3600
+        except Exception:
+            pass
+    from evolution import EVOLUTION_SIGNAL_THRESHOLD, EVOLUTION_COOLDOWN_HOURS
+    if (pending >= EVOLUTION_SIGNAL_THRESHOLD or hours_since >= 6) and not _on_cooldown(
+        "evolution_cycle", cooldowns, now, hours=EVOLUTION_COOLDOWN_HOURS
+    ):
+        opps.append(Opportunity(
+            id="evolution_cycle",
+            source="evolution",
+            summary=f"Evolution cycle ready: {pending} signals, {hours_since:.0f}h since last run",
+            urgency=Urgency.LOW,
+            action_type="evolution_cycle",
+        ))
 
     return opps
 
@@ -513,6 +547,18 @@ class AgentLoop:
             except Exception as e:
                 log.warning("Reminder sweep failed: %s", e)
                 return f"Reminder sweep failed: {e}"
+
+        if opp.action_type == "evolution_cycle":
+            from evolution import execute_evolution_cycle
+            result = await execute_evolution_cycle(
+                self.channel, self.chat_id, self.ask_llm, self.autonomy,
+            )
+            parts = [f"Evolution: {result.candidates_found} candidates"]
+            if result.executed:
+                parts.append(f"{result.executed} executed")
+            if result.prs_created:
+                parts.append(f"PRs: {', '.join(result.prs_created)}")
+            return " | ".join(parts)
 
         return f"Unknown action: {opp.action_type}"
 

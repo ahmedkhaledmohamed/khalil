@@ -2574,3 +2574,45 @@ def get_behavior_profile() -> BehaviorProfile:
         profile.avg_latency_ms = int(lat)
 
     return profile
+
+
+# --- Evolution Engine Helpers ---
+
+def get_correction_signals(hours: int = 24) -> list[dict]:
+    """Get user correction signals for evolution analysis."""
+    from datetime import timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT signal_type, context, created_at FROM interaction_signals "
+        "WHERE signal_type = 'user_correction' AND created_at > ? ORDER BY created_at DESC",
+        (cutoff,),
+    ).fetchall()
+    return [
+        {"signal_type": r["signal_type"], "context": json.loads(r["context"]) if r["context"] else {}, "created_at": r["created_at"]}
+        for r in rows
+    ]
+
+
+def get_repeated_queries(hours: int = 24, window_minutes: int = 10) -> list[dict]:
+    """Find queries repeated within short time windows (user had to retry)."""
+    from datetime import timedelta, timezone
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT context, created_at FROM interaction_signals "
+        "WHERE signal_type = 'response_latency' AND created_at > ? ORDER BY created_at",
+        (cutoff,),
+    ).fetchall()
+
+    repeated = []
+    for i, row in enumerate(rows):
+        ctx = json.loads(row["context"]) if row["context"] else {}
+        query_len = ctx.get("query_len", 0)
+        # Look ahead for similar-length queries within window
+        for j in range(i + 1, min(i + 5, len(rows))):
+            ctx_j = json.loads(rows[j]["context"]) if rows[j]["context"] else {}
+            if abs(ctx_j.get("query_len", 0) - query_len) < 10:
+                repeated.append({"context": ctx, "created_at": row["created_at"]})
+                break
+    return repeated
