@@ -2,9 +2,9 @@
   "servers": [
     {
       "name": "the-hub",
-      "command": "node",
-      "args": ["/Users/ahmedm/Developer/Personal/the-hub/bin/hub-mcp.js"],
-      "env": {}
+      "command": "/bin/sh",
+      "args": ["-c", "cd /Users/ahmedm/Developer/Personal/the-hub && /opt/homebrew/bin/npx tsx src/mcp/server.ts"],
+      "env": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"}
     }
   ]
 }
