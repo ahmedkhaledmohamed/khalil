@@ -6232,6 +6232,25 @@ async def startup():
 
     # Initialize database
     db_conn = init_db()
+
+    # Record boot time for restart detection (before overwriting, save previous)
+    from datetime import datetime as _dt, timezone as _tz
+    _prev_boot = db_conn.execute(
+        "SELECT value FROM settings WHERE key = 'last_boot_time'"
+    ).fetchone()
+    if _prev_boot and _prev_boot[0]:
+        db_conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('previous_boot_time', ?)",
+            (_prev_boot[0],),
+        )
+    _boot_time = _dt.now(_tz.utc).isoformat()
+    db_conn.execute(
+        "INSERT OR REPLACE INTO settings (key, value) VALUES ('last_boot_time', ?)",
+        (_boot_time,),
+    )
+    db_conn.commit()
+    log.info("Boot time recorded: %s (previous: %s)", _boot_time, _prev_boot[0] if _prev_boot else "none")
+
     # M11: Create meeting intelligence tables
     from actions.meetings import ensure_tables as _ensure_meeting_tables
     _ensure_meeting_tables(db_conn)
