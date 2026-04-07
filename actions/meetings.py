@@ -436,3 +436,140 @@ def format_commitments(commitments: list[dict]) -> str:
         )
 
     return "\n".join(lines)
+
+
+# --- Post-meeting transcript ingestion ---
+
+
+async def find_meeting_transcript(event: dict) -> str | None:
+    """Search Google Drive for a transcript matching a recently ended meeting.
+
+    Google Meet auto-saves transcripts as Google Docs with titles like
+    "Meeting transcript — <meeting title> — <date>".
+    """
+    try:
+        from oauth_utils import get_drive_service
+        service = get_drive_service()
+    except Exception as e:
+        log.debug("Drive service unavailable for transcript search: %s", e)
+        return None
+
+    title = event.get("title", "")
+    if not title:
+        return None
+
+    # Search for transcripts created in the last hour matching the meeting title
+    try:
+        # Google Meet transcripts are named: "<meeting title> - Transcript"
+        # or "Meeting transcript — <title>"
+        query = (
+            f"name contains '{title[:40]}' and "
+            f"mimeType = 'application/vnd.google-apps.document' and "
+            f"modifiedTime > '{(datetime.now(ZoneInfo(TIMEZONE)) - timedelta(hours=1)).isoformat()}'"
+        )
+        results = service.files().list(
+            q=query, fields="files(id, name)", pageSize=5,
+        ).execute()
+        files = results.get("files", [])
+
+        if not files:
+            # Broader search for any recent transcript
+            query = (
+                "name contains 'transcript' and "
+                f"mimeType = 'application/vnd.google-apps.document' and "
+                f"modifiedTime > '{(datetime.now(ZoneInfo(TIMEZONE)) - timedelta(hours=1)).isoformat()}'"
+            )
+            results = service.files().list(
+                q=query, fields="files(id, name)", pageSize=3,
+            ).execute()
+            files = results.get("files", [])
+
+        if not files:
+            return None
+
+        # Read the transcript content
+        doc_id = files[0]["id"]
+        doc = service.files().export(
+            fileId=doc_id, mimeType="text/plain",
+        ).execute()
+        transcript_text = doc.decode("utf-8") if isinstance(doc, bytes) else str(doc)
+        log.info("Found transcript for '%s': %s (%d chars)", title, files[0]["name"], len(transcript_text))
+        return transcript_text[:8000]  # cap for LLM context
+
+    except Exception as e:
+        log.debug("Transcript search failed: %s", e)
+        return None
+
+
+async def extract_action_items_from_transcript(
+    transcript: str, meeting_title: str, ask_llm_fn,
+) -> list[dict]:
+    """Use LLM to extract action items and decisions from a meeting transcript."""
+    if not ask_llm_fn:
+        return []
+
+    prompt = (
+        f"Extract action items and key decisions from this meeting transcript.\n\n"
+        f"Meeting: {meeting_title}\n"
+        f"Transcript:\n{transcript[:6000]}\n\n"
+        "Return a JSON array of objects with these fields:\n"
+        '  {"person": "name", "commitment": "what they committed to", "due_date": "YYYY-MM-DD or null"}\n\n'
+        "Only include concrete, actionable commitments. Return [] if none found.\n"
+        "Respond with ONLY the JSON array."
+    )
+
+    try:
+        response = await ask_llm_fn(prompt, "", "Respond with ONLY a JSON array.")
+        import json
+        response = response.strip()
+        if response.startswith("```"):
+            response = response.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        items = json.loads(response) if response.startswith("[") else []
+        return items[:10]
+    except Exception as e:
+        log.debug("LLM action item extraction failed: %s", e)
+        return []
+
+
+async def ingest_post_meeting_transcript(event: dict, ask_llm_fn) -> str | None:
+    """Full pipeline: find transcript → extract items → store commitments.
+
+    Returns a summary string if action items were found, None otherwise.
+    """
+    meeting_key = make_meeting_key(event)
+    title = event.get("title", "Unknown meeting")
+
+    transcript = await find_meeting_transcript(event)
+    if not transcript:
+        return None
+
+    items = await extract_action_items_from_transcript(transcript, title, ask_llm_fn)
+    if not items:
+        return None
+
+    # Store commitments
+    conn = _get_conn()
+    ensure_tables(conn)
+    stored = 0
+    for item in items:
+        try:
+            conn.execute(
+                "INSERT INTO commitments (meeting_title, person, commitment, due_date, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (title, item.get("person", "unknown"), item.get("commitment", ""),
+                 item.get("due_date"), datetime.now(ZoneInfo(TIMEZONE)).isoformat()),
+            )
+            stored += 1
+        except Exception as e:
+            log.debug("Failed to store commitment: %s", e)
+    conn.commit()
+    conn.close()
+
+    if stored:
+        summary = f"📝 Captured {stored} action item(s) from **{title}**:\n"
+        for item in items[:5]:
+            person = item.get("person", "?")
+            commitment = item.get("commitment", "?")[:80]
+            summary += f"  • [{person}] {commitment}\n"
+        return summary
+    return None

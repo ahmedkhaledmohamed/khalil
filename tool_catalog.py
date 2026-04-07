@@ -31,7 +31,7 @@ _INCLUDE_SKILLS = {
     "calendar", "gmail", "reminders", "weather", "shell", "spotify",
     "web", "pomodoro", "synthesis", "slack", "clipboard",
     "apple_reminders", "github_api", "workflows", "summarize",
-    "machine", "meta_tools", "sync",
+    "machine", "meta_tools", "sync", "email_categorizer",
 }
 
 # Core tools always included regardless of query relevance
@@ -157,6 +157,16 @@ _TOOL_DESCRIPTIONS = {
         'Example: github_create_issue() '
         "Will prompt for repo, title, and body."
     ),
+    "github_merge_pr": (
+        "Merge a pull request via squash merge. "
+        'Example: github_merge_pr(repo="ahmedkhaledmohamed/khalil", pr_number="184") '
+        "Requires repo (owner/name format) and PR number."
+    ),
+    "github_create_pr": (
+        "Create a new pull request from a branch. "
+        'Example: github_create_pr(repo="ahmedkhaledmohamed/khalil", title="Add feature X") '
+        "Requires repo and title. Optionally specify branch and body."
+    ),
     "list_sessions": (
         "List all terminal sessions (iTerm2 + tmux) with running processes and TTY paths. "
         'Example: "What terminals are open?" → list_sessions()'
@@ -186,6 +196,11 @@ _TOOL_DESCRIPTIONS = {
         "Summarize a PDF document. "
         'Example: "Summarize this PDF" → summarize_pdf()'
     ),
+    "label": (
+        "Auto-categorize inbox emails by applying Gmail labels using LLM classification. "
+        'Example: "Categorize my inbox emails" → label() '
+        "Reads unread inbox, classifies each email, applies appropriate Gmail labels."
+    ),
     "clarify": (
         "Ask the user a clarifying question instead of guessing. "
         "Use when the request is ambiguous or you need more information to pick the right tool. "
@@ -197,12 +212,12 @@ _TOOL_DESCRIPTIONS = {
 # Tool co-selection groups (#65): when one tool is relevant, include its companions
 _TOOL_GROUPS = {
     "calendar": {"calendar", "calendar_create", "calendar_upcoming"},
-    "email": {"email", "email_work", "email_personal"},
+    "email": {"email", "email_work", "email_personal", "label"},
     "reminders": {"reminder", "reminder_list"},
     "weather": {"weather", "weather_forecast"},
     "spotify": {"spotify_now", "spotify_recent", "spotify_top"},
     "terminal": {"list_sessions", "read_terminal", "send_to_terminal", "send_to_claude", "claude_code_status", "create_terminal"},
-    "github": {"github_notifications", "github_prs", "github_create_issue"},
+    "github": {"github_notifications", "github_prs", "github_create_issue", "github_merge_pr", "github_create_pr"},
     "summarize": {"summarize_url", "summarize_youtube", "summarize_pdf"},
     "focus": {"pomodoro_start", "pomodoro_stop", "pomodoro_status", "daily_focus"},
     "workflows": {"workflow_run", "workflow_list"},

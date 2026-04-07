@@ -1,0 +1,10 @@
+{
+  "servers": [
+    {
+      "name": "the-hub",
+      "command": "node",
+      "args": ["/Users/ahmedm/Developer/Personal/the-hub/bin/hub-mcp.js"],
+      "env": {}
+    }
+  ]
+}
