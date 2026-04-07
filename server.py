@@ -2806,6 +2806,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/dev — Dev environment (Cursor + terminal)\n"
         "/run — Run a shell command\n"
         "/backup — Export backup\n"
+        "/export — Export knowledge to git (portable)\n"
         "/clear — Clear conversation history\n"
         "/help — Show this message"
     )
@@ -4427,6 +4428,37 @@ async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await ctx.reply(f"❌ Backup failed: {e}")
 
 
+async def cmd_export(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /export command: export portable knowledge to git-synced directory."""
+    ctx = _ctx_from_update(update)
+    from actions.backup import export_knowledge, import_knowledge, format_knowledge_summary
+
+    args = context.args or []
+    subcommand = args[0].lower() if args else "export"
+
+    if subcommand == "import":
+        await ctx.reply("📥 Importing knowledge...")
+        try:
+            counts = import_knowledge()
+            if "error" in counts:
+                await ctx.reply(f"❌ {counts['error']}")
+            else:
+                summary = format_knowledge_summary(counts)
+                await ctx.reply(f"✅ Knowledge imported!\n\n{summary}")
+        except Exception as e:
+            log.error("Knowledge import failed: %s", e)
+            await ctx.reply(f"❌ Import failed: {e}")
+    else:
+        await ctx.reply("📚 Exporting knowledge...")
+        try:
+            counts = export_knowledge()
+            summary = format_knowledge_summary(counts)
+            await ctx.reply(f"✅ Knowledge exported!\n\n{summary}")
+        except Exception as e:
+            log.error("Knowledge export failed: %s", e)
+            await ctx.reply(f"❌ Export failed: {e}")
+
+
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
     stats = get_stats()
@@ -5430,6 +5462,7 @@ async def start_telegram_bot():
     application.add_handler(CommandHandler("health", cmd_health))
     application.add_handler(CommandHandler("dev", cmd_dev))
     application.add_handler(CommandHandler("backup", cmd_backup))
+    application.add_handler(CommandHandler("export", cmd_export))
     application.add_handler(CommandHandler("run", cmd_run))
     application.add_handler(CommandHandler("learn", cmd_learn))
     application.add_handler(CommandHandler("feedback", cmd_feedback))
@@ -5997,6 +6030,24 @@ def _setup_scheduler():
         CronTrigger(hour=2, minute=30, timezone=TIMEZONE),
         id="live_source_indexing",
         name="Live Source Indexing",
+        replace_existing=True,
+    )
+
+    # Knowledge export — daily at 3:00 AM, commits to git
+    async def _knowledge_export_job():
+        try:
+            from actions.backup import export_knowledge
+            counts = export_knowledge()
+            total = sum(counts.values())
+            log.info("Scheduled knowledge export: %d rows across %d tables", total, len(counts))
+        except Exception as e:
+            log.warning("Scheduled knowledge export failed: %s", e)
+
+    scheduler.add_job(
+        _knowledge_export_job,
+        CronTrigger(hour=3, minute=0, timezone=TIMEZONE),
+        id="knowledge_export",
+        name="Knowledge Export",
         replace_existing=True,
     )
 
