@@ -2,10 +2,12 @@
 
 At session start (gap >2h), automatically inject last session summary.
 On continuation cues ("continue", "where were we"), inject last 2 summaries.
+After process restart, inject last tool-use burst so in-flight work isn't lost.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -60,6 +62,90 @@ def has_continuation_cue(query: str) -> bool:
     return bool(_CONTINUATION_CUES.search(query))
 
 
+def is_post_restart() -> bool:
+    """Check if this is the first query after a process restart.
+
+    Returns True if `previous_boot_time` exists in settings — set by startup()
+    when it detects a prior boot timestamp before overwriting it.
+    Consumed once, then cleared by get_session_continuity().
+    """
+    try:
+        conn = _get_conn()
+        row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'previous_boot_time'"
+        ).fetchone()
+        conn.close()
+        return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def get_last_tool_use_context(chat_id: int, max_chars: int = 2000) -> str:
+    """Reconstruct the last tool-use burst from saved conversation messages.
+
+    Walks backward from newest messages to find the most recent user query
+    and its associated tool_call/tool_result chain. Returns a formatted
+    summary of what was in progress.
+    """
+    try:
+        conn = _get_conn()
+        rows = conn.execute(
+            """SELECT role, content, message_type, metadata
+               FROM conversations
+               WHERE chat_id = ?
+               ORDER BY id DESC LIMIT 40""",
+            (chat_id,),
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        log.debug("Failed to load tool-use context: %s", e)
+        return ""
+
+    if not rows:
+        return ""
+
+    # Walk backward: collect tool_call/tool_result until we hit the user query
+    burst = []
+    user_query = ""
+    found_user = False
+    for role, content, msg_type, metadata in rows:
+        if msg_type in ("tool_call", "tool_result"):
+            burst.append((role, content, msg_type, metadata))
+        elif role == "user" and msg_type == "text":
+            user_query = content
+            found_user = True
+            break
+        elif role == "assistant" and msg_type == "text" and burst:
+            # Hit a completed text response before the burst — no in-flight work
+            break
+
+    if not burst or not found_user:
+        return ""
+
+    parts = [f"[Last in-progress task]\nUser asked: {user_query[:300]}"]
+    for role, content, msg_type, metadata in reversed(burst):
+        meta = json.loads(metadata) if metadata else {}
+        tool_name = meta.get("tool_name", "unknown")
+        if msg_type == "tool_call":
+            parts.append(f"→ Called {tool_name}: {content[:200]}")
+        elif msg_type == "tool_result":
+            parts.append(f"← Result from {tool_name}: {content[:400]}")
+
+    result = "\n".join(parts)
+    return result[:max_chars]
+
+
+def _clear_restart_flag() -> None:
+    """Clear the previous_boot_time flag so restart context is injected only once."""
+    try:
+        conn = _get_conn()
+        conn.execute("DELETE FROM settings WHERE key = 'previous_boot_time'")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def get_session_continuity(chat_id: int, query: str) -> str:
     """Get session continuity context to inject before LLM sees the query.
 
@@ -67,13 +153,15 @@ def get_session_continuity(chat_id: int, query: str) -> str:
     Returns empty string if no relevant context.
     """
     try:
+        post_restart = is_post_restart()
         conn = _get_conn()
 
         # Determine how many summaries to fetch
-        limit = 2 if has_continuation_cue(query) else 1
+        is_continuation = has_continuation_cue(query)
+        limit = 2 if is_continuation else 1
         new_session = is_new_session(chat_id)
 
-        if not new_session and not has_continuation_cue(query):
+        if not new_session and not is_continuation and not post_restart:
             conn.close()
             return ""
 
@@ -84,18 +172,17 @@ def get_session_continuity(chat_id: int, query: str) -> str:
         ).fetchall()
         conn.close()
 
-        if not rows:
-            return ""
-
-        is_continuation = has_continuation_cue(query)
-        char_budget = MAX_CONTEXT_CHARS_CONTINUATION if is_continuation else MAX_CONTEXT_CHARS
+        # Use higher budget for continuation or restart
+        use_high_budget = is_continuation or post_restart
+        char_budget = MAX_CONTEXT_CHARS_CONTINUATION if use_high_budget else MAX_CONTEXT_CHARS
 
         parts = ["[Prior session context]"]
-        for summary, created_at in reversed(rows):
-            # Truncate individual summaries to fit budget
-            max_per = char_budget // limit
-            truncated = summary[:max_per] + "..." if len(summary) > max_per else summary
-            parts.append(f"Session ({created_at[:10]}): {truncated}")
+
+        if rows:
+            for summary, created_at in reversed(rows):
+                max_per = char_budget // limit
+                truncated = summary[:max_per] + "..." if len(summary) > max_per else summary
+                parts.append(f"Session ({created_at[:10]}): {truncated}")
 
         # If continuation cue detected, also inject active task plans
         if is_continuation:
@@ -108,7 +195,18 @@ def get_session_continuity(chat_id: int, query: str) -> str:
             except Exception:
                 pass
 
+        # After restart, inject last tool-use burst so in-flight work is visible
+        if post_restart:
+            tool_ctx = get_last_tool_use_context(chat_id)
+            if tool_ctx:
+                parts.append(tool_ctx)
+            _clear_restart_flag()
+            log.info("Post-restart context injected for chat %d", chat_id)
+
         result = "\n".join(parts)
+        if len(parts) <= 1:
+            # Only header, no actual context
+            return ""
         return result[:char_budget]
     except Exception as e:
         log.debug("Session continuity failed: %s", e)
