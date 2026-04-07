@@ -1,14 +1,17 @@
 """Backup and restore — export/import Khalil state as JSON.
 
-Two export modes:
+Three export modes:
 - Full backup: all operational tables → data/backups/ (local only)
-- Knowledge export: portable knowledge tables → git-synced directory (for cross-machine persistence)
+- Knowledge export: portable knowledge tables → git-synced directory (PR workflow)
+- Full DB backup: gzipped SQLite DB → GitHub Release asset on khalil-knowledge repo
 """
 
+import gzip
 import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from datetime import datetime
@@ -215,63 +218,196 @@ def export_knowledge(export_dir: Path = None, git_sync: bool = True) -> dict:
 
 
 def _git_sync(export_dir: Path, timestamp: datetime):
-    """Commit and push knowledge export to git."""
+    """Commit knowledge export and open a PR (auto-merged via squash).
+
+    Workflow: checkout branch → stage → commit → push → gh pr create → gh pr merge --squash.
+    Falls back to local-only commit if no remote is configured.
+    """
+    cwd = str(export_dir)
+    _run = lambda cmd, **kw: subprocess.run(
+        cmd, cwd=cwd, capture_output=True, text=True, timeout=kw.get("timeout", 15),
+    )
+
     try:
         # Initialize repo if needed
         git_dir = export_dir / ".git"
         if not git_dir.exists():
-            subprocess.run(
-                ["git", "init"], cwd=str(export_dir),
-                capture_output=True, timeout=10,
-            )
-            # Create .gitignore
+            _run(["git", "init"])
             gitignore = export_dir / ".gitignore"
             if not gitignore.exists():
                 gitignore.write_text(".DS_Store\n")
             log.info("Initialized git repo in %s", export_dir)
 
+        # Ensure we're on main before branching
+        _run(["git", "checkout", "main"])
+        _run(["git", "pull", "--rebase"], timeout=30)
+
         # Stage all changes
-        subprocess.run(
-            ["git", "add", "-A"], cwd=str(export_dir),
-            capture_output=True, timeout=10,
-        )
+        _run(["git", "add", "-A"])
 
         # Check if there are changes to commit
-        status = subprocess.run(
-            ["git", "diff", "--cached", "--quiet"], cwd=str(export_dir),
-            capture_output=True, timeout=10,
-        )
+        status = _run(["git", "diff", "--cached", "--quiet"])
         if status.returncode == 0:
             log.info("No knowledge changes to commit")
             return
 
+        # Create timestamped branch
+        branch = f"export/{timestamp.strftime('%Y%m%d-%H%M')}"
+        _run(["git", "checkout", "-b", branch])
+
         # Commit
         msg = f"Knowledge export {timestamp.strftime('%Y-%m-%d %H:%M')}"
-        subprocess.run(
-            ["git", "commit", "-m", msg], cwd=str(export_dir),
-            capture_output=True, timeout=10,
-        )
-        log.info("Knowledge committed: %s", msg)
+        _run(["git", "commit", "-m", msg])
+        log.info("Knowledge committed on branch %s: %s", branch, msg)
 
-        # Push (if remote configured)
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"], cwd=str(export_dir),
-            capture_output=True, text=True, timeout=5,
-        )
-        if result.returncode == 0:
-            push_result = subprocess.run(
-                ["git", "push"], cwd=str(export_dir),
-                capture_output=True, text=True, timeout=30,
-            )
-            if push_result.returncode == 0:
-                log.info("Knowledge pushed to remote")
-            else:
-                log.warning("Git push failed: %s", push_result.stderr[:200])
-        else:
+        # Check if remote exists
+        remote_check = _run(["git", "remote", "get-url", "origin"])
+        if remote_check.returncode != 0:
             log.info("No git remote configured — export is local only")
+            _run(["git", "checkout", "main"])
+            return
+
+        # Push branch
+        push = _run(["git", "push", "-u", "origin", branch], timeout=30)
+        if push.returncode != 0:
+            log.warning("Git push failed: %s", push.stderr[:200])
+            _run(["git", "checkout", "main"])
+            return
+
+        # Open PR
+        pr_create = _run(
+            ["gh", "pr", "create", "--title", msg, "--body",
+             f"Automated knowledge export — {timestamp.strftime('%Y-%m-%d %H:%M %Z')}",
+             "--base", "main", "--head", branch],
+            timeout=30,
+        )
+        if pr_create.returncode != 0:
+            log.warning("PR creation failed: %s", pr_create.stderr[:200])
+            _run(["git", "checkout", "main"])
+            return
+
+        pr_url = pr_create.stdout.strip()
+        log.info("PR opened: %s", pr_url)
+
+        # Auto-merge via squash
+        merge = _run(
+            ["gh", "pr", "merge", "--squash", "--delete-branch", branch],
+            timeout=30,
+        )
+        if merge.returncode == 0:
+            log.info("PR merged and branch deleted: %s", branch)
+        else:
+            log.warning("PR auto-merge failed (manual merge needed): %s", merge.stderr[:200])
+
+        # Return to main
+        _run(["git", "checkout", "main"])
+        _run(["git", "pull", "--rebase"], timeout=30)
 
     except Exception as e:
         log.warning("Git sync failed (non-fatal): %s", e)
+        # Best-effort return to main
+        try:
+            _run(["git", "checkout", "main"])
+        except Exception:
+            pass
+
+
+# --- Full DB Backup (GitHub Release asset) ---
+
+# khalil-knowledge repo for release uploads
+_KNOWLEDGE_REPO = "ahmedkhaledmohamed/khalil-knowledge"
+_DB_BACKUP_RETENTION = 7  # keep last N release backups
+
+
+def backup_full_db() -> dict:
+    """Compress and upload the full SQLite DB as a GitHub Release asset.
+
+    Creates a gzipped copy of khalil.db and uploads it to the khalil-knowledge
+    repo as a release asset. Retains the last _DB_BACKUP_RETENTION releases.
+
+    Returns dict with status, size, and release URL.
+    """
+    now = datetime.now(ZoneInfo(TIMEZONE))
+    tag = f"db-backup-{now.strftime('%Y%m%d-%H%M')}"
+    title = f"Full DB backup {now.strftime('%Y-%m-%d %H:%M')}"
+
+    if not DB_PATH.exists():
+        return {"error": "Database not found", "path": str(DB_PATH)}
+
+    # 1. Gzip the DB to a temp file
+    gz_path = DATA_DIR / "khalil_db_backup.gz"
+    try:
+        log.info("Compressing %s...", DB_PATH)
+        with open(DB_PATH, "rb") as f_in, gzip.open(gz_path, "wb", compresslevel=6) as f_out:
+            shutil.copyfileobj(f_in, f_out)
+        gz_size_mb = round(gz_path.stat().st_size / (1024 * 1024), 1)
+        log.info("Compressed DB: %s MB", gz_size_mb)
+    except Exception as e:
+        return {"error": f"Compression failed: {e}"}
+
+    # 2. Create GitHub Release with the gzipped DB as an asset
+    try:
+        result = subprocess.run(
+            ["gh", "release", "create", tag,
+             str(gz_path),
+             "--repo", _KNOWLEDGE_REPO,
+             "--title", title,
+             "--notes", f"Automated full DB backup — {now.isoformat()}"],
+            capture_output=True, text=True, timeout=300,  # 5 min for large upload
+        )
+        if result.returncode != 0:
+            return {"error": f"Release creation failed: {result.stderr[:300]}"}
+
+        release_url = result.stdout.strip()
+        log.info("DB backup uploaded: %s (%s MB)", release_url, gz_size_mb)
+    except subprocess.TimeoutExpired:
+        return {"error": "Upload timed out (DB may be too large)"}
+    except Exception as e:
+        return {"error": f"Upload failed: {e}"}
+    finally:
+        # Clean up temp file
+        gz_path.unlink(missing_ok=True)
+
+    # 3. Prune old releases beyond retention limit
+    _prune_old_db_releases()
+
+    return {
+        "status": "success",
+        "tag": tag,
+        "size_mb": gz_size_mb,
+        "release_url": release_url,
+    }
+
+
+def _prune_old_db_releases():
+    """Delete DB backup releases beyond the retention limit."""
+    try:
+        result = subprocess.run(
+            ["gh", "release", "list", "--repo", _KNOWLEDGE_REPO,
+             "--limit", "50", "--json", "tagName,createdAt"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return
+
+        releases = json.loads(result.stdout)
+        db_releases = sorted(
+            [r for r in releases if r["tagName"].startswith("db-backup-")],
+            key=lambda r: r["createdAt"],
+            reverse=True,
+        )
+
+        for old in db_releases[_DB_BACKUP_RETENTION:]:
+            tag = old["tagName"]
+            subprocess.run(
+                ["gh", "release", "delete", tag, "--repo", _KNOWLEDGE_REPO,
+                 "--yes", "--cleanup-tag"],
+                capture_output=True, timeout=15,
+            )
+            log.info("Pruned old DB backup release: %s", tag)
+
+    except Exception as e:
+        log.warning("Failed to prune old releases (non-fatal): %s", e)
 
 
 def import_knowledge(source_dir: Path = None) -> dict:
