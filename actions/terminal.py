@@ -890,6 +890,12 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         await ctx.reply(format_cursor_terminal_status(status))
         return True
     elif action == "terminal_status":
+        if not await _is_iterm_running():
+            await ctx.reply(
+                "iTerm2 is not currently running. "
+                "I can execute commands directly via the shell skill instead — just ask."
+            )
+            return True
         status = await get_terminal_status()
         await ctx.reply(format_terminal_status(status))
         return True
@@ -910,6 +916,11 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         session = intent.get("session", "current")
         if not cmd:
             return False
+        if not await _is_iterm_running():
+            await ctx.reply(
+                f"iTerm2 is not running. I can run `{cmd}` directly via the shell skill instead."
+            )
+            return True
         server = intent.get("_server", {})
         autonomy = server.get("autonomy")
         if autonomy:
@@ -928,6 +939,12 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
 
     elif action == "terminal_new_tab":
+        if not await _is_iterm_running():
+            await ctx.reply(
+                "iTerm2 is not running. Cannot open a new tab. "
+                "I can execute commands directly via the shell skill instead."
+            )
+            return True
         cmd = intent.get("command")
         server = intent.get("_server", {})
         autonomy = server.get("autonomy")

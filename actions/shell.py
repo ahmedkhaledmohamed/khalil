@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import re
+import shlex
 import subprocess
 
 from config import ActionType
@@ -18,6 +19,27 @@ log = logging.getLogger("khalil.actions.shell")
 
 SHELL_TIMEOUT = 30
 MAX_OUTPUT_LENGTH = 3000
+
+# --- Per-chat working directory tracking ---
+
+_chat_cwd: dict[int, str] = {}
+
+
+def get_chat_cwd(chat_id: int) -> str:
+    """Get the tracked working directory for a chat, defaulting to ~."""
+    return _chat_cwd.get(chat_id, os.path.expanduser("~"))
+
+
+def set_chat_cwd(chat_id: int, path: str) -> bool:
+    """Set the working directory for a chat. Returns True if path is valid."""
+    resolved = os.path.expanduser(path)
+    if not os.path.isabs(resolved):
+        resolved = os.path.join(get_chat_cwd(chat_id), resolved)
+    resolved = os.path.realpath(resolved)
+    if os.path.isdir(resolved):
+        _chat_cwd[chat_id] = resolved
+        return True
+    return False
 
 SKILL = {
     "name": "shell",
@@ -190,11 +212,74 @@ SAFE_PREFIXES = [
 ]
 
 
+def _split_chained_command(cmd: str) -> list[str] | None:
+    """Split a command on &&, ||, ; while respecting quoted strings.
+
+    Returns list of segments, or None if the command has no chaining operators.
+    """
+    # Quick check: if no chaining operators, skip the expensive split
+    if not re.search(r"[;&]|&&|\|\|", cmd):
+        return None
+
+    # Split respecting quotes: tokenize, then re-join on operators
+    segments = []
+    current = []
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        # Malformed quotes — fall back to simple regex split
+        parts = re.split(r"\s*(?:&&|\|\||;)\s*", cmd)
+        return [p.strip() for p in parts if p.strip()] or None
+
+    # Re-scan the raw string for operator positions (shlex eats them)
+    # Use a simpler approach: split raw string on unquoted operators
+    result = []
+    buf = ""
+    i = 0
+    in_single = False
+    in_double = False
+    while i < len(cmd):
+        c = cmd[i]
+        if c == "'" and not in_double:
+            in_single = not in_single
+            buf += c
+        elif c == '"' and not in_single:
+            in_double = not in_double
+            buf += c
+        elif not in_single and not in_double:
+            if cmd[i:i+2] == "&&":
+                if buf.strip():
+                    result.append(buf.strip())
+                buf = ""
+                i += 2
+                continue
+            elif cmd[i:i+2] == "||":
+                if buf.strip():
+                    result.append(buf.strip())
+                buf = ""
+                i += 2
+                continue
+            elif c == ";":
+                if buf.strip():
+                    result.append(buf.strip())
+                buf = ""
+            else:
+                buf += c
+        else:
+            buf += c
+        i += 1
+    if buf.strip():
+        result.append(buf.strip())
+
+    return result if len(result) > 1 else None
+
+
 def sanitize_command(cmd: str) -> tuple[str | None, str]:
     """Sanitize a shell command for injection patterns.
 
     Returns (sanitized_cmd, rejection_reason). If rejected, cmd is None.
-    LLM-generated commands may contain chained operators that bypass classification.
+    For chained commands (&&, ;, ||), each segment is classified independently.
+    The chain is rejected only if any segment is DANGEROUS.
     """
     # Reject null bytes
     if "\x00" in cmd:
@@ -204,11 +289,14 @@ def sanitize_command(cmd: str) -> tuple[str | None, str]:
     if "`" in cmd or "$(" in cmd:
         return None, "Command contains subshell expansion (backticks or $(...)). Rejected for safety."
 
-    # Reject command chaining operators (;, &&, ||, |) unless the whole command is safe
-    # We allow pipes for safe read-only pipelines (e.g. "ps aux | grep python")
-    # but reject ; and && and || which allow arbitrary command injection
-    if re.search(r"[;&]|&&|\|\|", cmd):
-        return None, "Command contains chaining operators (;, &&, ||). Split into separate commands."
+    # For chained commands, classify each segment independently
+    segments = _split_chained_command(cmd)
+    if segments:
+        for seg in segments:
+            if classify_command(seg) == ActionType.DANGEROUS:
+                return None, f"Chained command contains a dangerous segment: {seg[:80]}"
+        # All segments are safe or write — allow the full chain
+        return cmd.strip(), ""
 
     return cmd.strip(), ""
 
@@ -244,8 +332,27 @@ def _sanitize_env() -> dict:
     return env
 
 
-async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT) -> dict:
+def _extract_cd_target(cmd: str) -> str | None:
+    """Extract the target directory from a cd command. Returns None if not a cd command."""
+    m = re.match(r"^\s*cd\s+(.*)", cmd)
+    if not m:
+        return None
+    target = m.group(1).strip()
+    # Remove surrounding quotes
+    if (target.startswith('"') and target.endswith('"')) or \
+       (target.startswith("'") and target.endswith("'")):
+        target = target[1:-1]
+    return target or None
+
+
+async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT, chat_id: int = None) -> dict:
     """Execute a shell command in a subprocess.
+
+    Args:
+        cmd: Shell command to execute.
+        cwd: Working directory override. If None and chat_id is provided, uses tracked cwd.
+        timeout: Max execution time in seconds.
+        chat_id: Chat ID for per-chat cwd tracking.
 
     Returns: {"returncode": int, "stdout": str, "stderr": str, "timed_out": bool}
     """
@@ -261,8 +368,54 @@ async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT)
         }
     cmd = sanitized
 
+    # Resolve working directory
+    if not cwd and chat_id is not None:
+        cwd = get_chat_cwd(chat_id)
     if not cwd:
         cwd = os.path.expanduser("~")
+
+    # Handle pure `cd` commands — update tracker, don't run subprocess
+    cd_target = _extract_cd_target(cmd)
+    if cd_target and not re.search(r"&&|\|\||;", cmd):
+        # Pure cd command — just update the cwd tracker
+        resolved = os.path.expanduser(cd_target)
+        if not os.path.isabs(resolved):
+            resolved = os.path.join(cwd, resolved)
+        resolved = os.path.realpath(resolved)
+        if os.path.isdir(resolved):
+            if chat_id is not None:
+                set_chat_cwd(chat_id, resolved)
+            return {
+                "returncode": 0,
+                "stdout": f"Changed directory to {resolved}",
+                "stderr": "",
+                "timed_out": False,
+            }
+        else:
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": f"cd: no such directory: {cd_target}",
+                "timed_out": False,
+            }
+
+    # For chained commands starting with cd, extract cd and run the rest
+    segments = _split_chained_command(cmd)
+    if segments and _extract_cd_target(segments[0]):
+        cd_seg = segments[0]
+        cd_dir = _extract_cd_target(cd_seg)
+        resolved = os.path.expanduser(cd_dir)
+        if not os.path.isabs(resolved):
+            resolved = os.path.join(cwd, resolved)
+        resolved = os.path.realpath(resolved)
+        if os.path.isdir(resolved):
+            cwd = resolved
+            if chat_id is not None:
+                set_chat_cwd(chat_id, resolved)
+            # Run the remaining segments with the new cwd
+            remaining = cmd[cmd.index(segments[1]):]
+            cmd = remaining
+        # If cd target doesn't exist, let the full command fail naturally
 
     def _run():
         try:

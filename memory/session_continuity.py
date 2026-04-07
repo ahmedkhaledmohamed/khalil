@@ -18,12 +18,15 @@ log = logging.getLogger("khalil.session_continuity")
 # Phrases that indicate the user wants to continue a prior conversation
 _CONTINUATION_CUES = re.compile(
     r"\b(continue|where were we|pick up where|last time|yesterday|earlier|"
-    r"what were we|as we discussed|we were talking|resume|carry on)\b",
+    r"what were we|as we discussed|we were talking|resume|carry on|"
+    r"you were working on|what happened to|continue the|finish the|"
+    r"status of|how did .+ go|what were you doing)\b",
     re.IGNORECASE,
 )
 
 # Maximum tokens to inject (approximate: 1 token ~= 4 chars)
 MAX_CONTEXT_CHARS = 1200  # ~300 tokens
+MAX_CONTEXT_CHARS_CONTINUATION = 2400  # ~600 tokens when resuming work
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -84,15 +87,29 @@ def get_session_continuity(chat_id: int, query: str) -> str:
         if not rows:
             return ""
 
+        is_continuation = has_continuation_cue(query)
+        char_budget = MAX_CONTEXT_CHARS_CONTINUATION if is_continuation else MAX_CONTEXT_CHARS
+
         parts = ["[Prior session context]"]
         for summary, created_at in reversed(rows):
             # Truncate individual summaries to fit budget
-            max_per = MAX_CONTEXT_CHARS // limit
+            max_per = char_budget // limit
             truncated = summary[:max_per] + "..." if len(summary) > max_per else summary
             parts.append(f"Session ({created_at[:10]}): {truncated}")
 
+        # If continuation cue detected, also inject active task plans
+        if is_continuation:
+            try:
+                from orchestrator import get_active_plans_for_chat, format_plan_summary, ensure_table
+                ensure_table()
+                active_plans = get_active_plans_for_chat(chat_id)
+                for plan in active_plans[:2]:
+                    parts.append(f"[Active plan]\n{format_plan_summary(plan)}")
+            except Exception:
+                pass
+
         result = "\n".join(parts)
-        return result[:MAX_CONTEXT_CHARS]
+        return result[:char_budget]
     except Exception as e:
         log.debug("Session continuity failed: %s", e)
         return ""

@@ -308,7 +308,7 @@ async def execute_plan(
     result = PlanResult(plan_id=plan_id, query=query, steps=steps)
 
     # Save initial plan state
-    save_plan(result)
+    save_plan(result, chat_id=chat_id)
 
     while True:
         # Find steps ready to execute (pending, no unresolved dependencies)
@@ -451,7 +451,7 @@ async def execute_plan(
             break
 
     # Save final state
-    save_plan(result)
+    save_plan(result, chat_id=chat_id)
 
     # Record signal
     try:
@@ -503,6 +503,7 @@ def ensure_table():
     conn.execute("""
         CREATE TABLE IF NOT EXISTS active_plans (
             plan_id TEXT PRIMARY KEY,
+            chat_id INTEGER,
             query TEXT NOT NULL,
             steps_json TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'in_progress',
@@ -510,12 +511,18 @@ def ensure_table():
             completed_at TEXT
         )
     """)
+    # Migration: add chat_id if table already exists without it
+    try:
+        conn.execute("ALTER TABLE active_plans ADD COLUMN chat_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     conn.execute("CREATE INDEX IF NOT EXISTS idx_plans_status ON active_plans(status)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_plans_chat ON active_plans(chat_id, status)")
     conn.commit()
     conn.close()
 
 
-def save_plan(plan: PlanResult):
+def save_plan(plan: PlanResult, chat_id: int = None):
     """Save or update a plan in the database."""
     conn = _get_conn()
     steps_json = json.dumps([s.to_dict() for s in plan.steps])
@@ -524,11 +531,11 @@ def save_plan(plan: PlanResult):
 
     conn.execute(
         """INSERT OR REPLACE INTO active_plans
-           (plan_id, query, steps_json, status, created_at, completed_at)
-           VALUES (?, ?, ?, ?, COALESCE(
+           (plan_id, chat_id, query, steps_json, status, created_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, COALESCE(
                (SELECT created_at FROM active_plans WHERE plan_id = ?), ?
            ), ?)""",
-        (plan.plan_id, plan.query, steps_json, plan.status,
+        (plan.plan_id, chat_id, plan.query, steps_json, plan.status,
          plan.plan_id, now, completed_at),
     )
     conn.commit()
@@ -577,6 +584,28 @@ def list_active_plans() -> list[dict]:
             "created_at": r[4],
             "completed_at": r[5],
         })
+    return plans
+
+
+def get_active_plans_for_chat(chat_id: int) -> list[PlanResult]:
+    """Get in-progress plans for a specific chat."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT plan_id, query, steps_json, status FROM active_plans "
+        "WHERE chat_id = ? AND status = 'in_progress' "
+        "ORDER BY created_at DESC LIMIT 3",
+        (chat_id,),
+    ).fetchall()
+    conn.close()
+    plans = []
+    for r in rows:
+        steps = [TaskStep.from_dict(s) for s in json.loads(r[2])]
+        plans.append(PlanResult(
+            plan_id=r[0], query=r[1], steps=steps,
+            completed_count=sum(1 for s in steps if s.status == "completed"),
+            failed_count=sum(1 for s in steps if s.status == "failed"),
+            blocked_count=sum(1 for s in steps if s.status == "blocked"),
+        ))
     return plans
 
 

@@ -253,9 +253,12 @@ KHALIL_IDENTITY = (
     "Answer based on the provided context from his personal archives. "
     "Be direct, specific, and personal. "
     "If the context doesn't contain the answer, say so honestly.\n\n"
-    "SHELL RULES: When executing shell commands, always use ABSOLUTE PATHS (your cwd may vary). "
-    "Do NOT chain commands with && or ; — the safety filter will reject them. "
-    "Execute one command at a time.\n\n"
+    "SHELL RULES: When executing shell commands, prefer ABSOLUTE PATHS. "
+    "You can chain commands with && or ; as long as no segment is dangerous. "
+    "The cd command updates your working directory for subsequent commands.\n\n"
+    "TASK CONTINUITY: If your context includes active task plans, continue executing pending steps. "
+    "Report progress after each step. If a plan is stalled or failed, explain what happened and ask "
+    "whether to retry, skip, or abandon.\n\n"
 )
 
 
@@ -458,6 +461,29 @@ async def get_conversation_context(chat_id: int, query: str) -> str:
             parts.append(f"[Source: previous conversation summary]\n{summary_row[0]}")
     except Exception:
         pass  # Table may not exist yet
+
+    # 2.5. Active task plans — so LLM knows about in-progress work
+    try:
+        from orchestrator import get_active_plans_for_chat, ensure_table as ensure_plans_table
+        ensure_plans_table()
+        active_plans = get_active_plans_for_chat(chat_id)
+        if active_plans:
+            plan_lines = []
+            for plan in active_plans:
+                plan_lines.append(f"Plan: {plan.query[:100]}")
+                plan_lines.append(f"  Status: {plan.status} (ID: {plan.plan_id})")
+                for step in plan.steps:
+                    status_label = {"completed": "DONE", "failed": "FAILED", "pending": "TODO",
+                                    "running": "RUNNING", "blocked": "BLOCKED", "skipped": "SKIPPED"}.get(step.status, "?")
+                    line = f"  [{status_label}] {step.description}"
+                    if step.result:
+                        line += f" -> {step.result[:150]}"
+                    if step.error:
+                        line += f" ERROR: {step.error[:100]}"
+                    plan_lines.append(line)
+            parts.append("[Source: active task plans]\n" + "\n".join(plan_lines))
+    except Exception as e:
+        log.debug("Active plans injection failed: %s", e)
 
     # 3. Recent messages (last 16 raw rows — tool exchanges use multiple rows)
     rows = db_conn.execute(
