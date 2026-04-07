@@ -1235,20 +1235,26 @@ def _check_result_needs_reflection(tool_name: str, result_text: str, query: str)
     return (
         f"\n⚠️ SELF-IMPROVEMENT REQUIRED — This tool produced poor results ({detail}).\n"
         f"\n"
-        f"You MUST follow these steps before doing anything else:\n"
+        f"MANDATORY STEPS (do these IN ORDER before anything else):\n"
         f"\n"
-        f"1. READ the tool's source code: {khalil_dir}/{source_path}\n"
-        f"   Use shell(command=\"cat {khalil_dir}/{source_path}\") to read it.\n"
+        f"1. READ the tool's source code:\n"
+        f"   shell(command=\"cat {khalil_dir}/{source_path}\")\n"
         f"\n"
-        f"2. DIAGNOSE why the results were poor. Look at the matching logic, rules, and parameters.\n"
+        f"2. DIAGNOSE: Explain to Ahmed WHY results were poor. "
+        f"Look at the matching logic, rules, default parameters, and what's missing.\n"
         f"\n"
-        f"3. PROPOSE specific code changes that would fix the issue. Be precise — "
-        f"which lines, what changes.\n"
+        f"3. PROPOSE: List specific changes to {source_path} that would fix this. "
+        f"Include which functions to modify and what the fix looks like.\n"
+        f"   Also check: does this tool support what the user actually asked for? "
+        f"(e.g., does it archive emails, or only label them?)\n"
         f"\n"
-        f"4. ASK Ahmed if he wants you to implement the fix and open a PR.\n"
+        f"4. ASK Ahmed: \"Want me to implement these changes and open a PR?\"\n"
         f"\n"
-        f"DO NOT work around this with shell commands or new scripts. "
-        f"The fix belongs in the tool itself."
+        f"RULES:\n"
+        f"- Do NOT create new scripts, files, or workarounds.\n"
+        f"- Do NOT use shell to build a replacement solution.\n"
+        f"- The fix MUST go into {source_path} — improve the existing tool.\n"
+        f"- If the tool is missing a feature (e.g., archiving), propose adding it to THIS tool."
     )
 
 
@@ -1668,15 +1674,18 @@ async def stream_to_telegram(
     log.info("stream_to_telegram: %d chunks, %d chars accumulated", chunk_count, len(accumulated))
     display_final = _internal_tag_re.sub("", accumulated).strip()
     if display_final and len(display_final) != last_edit_len:
+        # Telegram enforces a 4096-char limit per message
+        _TG_LIMIT = 4096
         try:
-            await progress_msg.edit(display_final)
+            await progress_msg.edit(display_final[:_TG_LIMIT])
         except Exception:
-            # If final edit fails, delete and send fresh
+            # If final edit fails, delete and send fresh (chunked if needed)
             try:
                 await progress_msg.delete()
             except Exception:
                 pass
-            await channel.send_message(chat_id, display_final)
+            for i in range(0, len(display_final), _TG_LIMIT):
+                await channel.send_message(chat_id, display_final[i:i + _TG_LIMIT])
 
     return accumulated
 
