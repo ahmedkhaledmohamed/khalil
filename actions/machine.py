@@ -10,6 +10,7 @@ READ actions are auto-approved. WRITE actions go through autonomy approval.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 log = logging.getLogger("khalil.actions.machine")
@@ -349,19 +350,18 @@ async def _handle_send_to_terminal(target: str, command: str, intent: dict, ctx)
         return True
 
     # iTerm2 unavailable — write directly to TTY
-    import asyncio as _aio
     tty_path = target if target.startswith("/dev/") else f"/dev/{target}"
     try:
-        proc = await _aio.create_subprocess_exec(
+        proc = await asyncio.create_subprocess_exec(
             "bash", "-c", f'printf "%s\\n" "$1" > "$2"', "_", command, tty_path,
-            stdout=_aio.subprocess.PIPE, stderr=_aio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await _aio.wait_for(proc.communicate(), timeout=10)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
         if proc.returncode == 0:
             await ctx.reply(f"Sent to {target}: `{command}`")
         else:
             await ctx.reply(f"Failed to write to {tty_path}: {stderr.decode()[:200]}")
-    except _aio.TimeoutError:
+    except asyncio.TimeoutError:
         await ctx.reply(f"Timed out writing to {tty_path}")
     return True
 
@@ -391,7 +391,6 @@ async def _handle_send_to_claude(target: str, command: str, intent: dict, ctx) -
         return True
 
     # Write directly to the TTY device — works regardless of terminal app
-    import asyncio
     tty_path = target if target.startswith("/dev/") else f"/dev/{target}"
     try:
         # Use 'write to tty' approach: newline-terminated so Claude Code sees it as input
