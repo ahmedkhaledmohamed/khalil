@@ -53,6 +53,10 @@ WORK_PROJECT_DOCS = [
     (Path.home() / "Developer" / "CM_Backend", "work:cm-backend"),
     # Orchestration Dashboard
     (Path.home() / "Developer" / "ClientMessaging" / "orchestration-dashboard", "work:orchestration"),
+    # Product catalog (roadmap, strategy, channels, discovery docs)
+    (Path.home() / "Developer" / "ClientMessaging" / "product-catalog", "work:product-catalog"),
+    # Ahmed's work sandbox (context docs, planning, strategy)
+    (Path.home() / "Developer" / "ahmed-sandbox", "work:sandbox"),
     # Bézier monorepo
     (Path.home() / "Developer" / "Bézier" / "monorepo", "projects:bezier"),
     # Aika pipeline

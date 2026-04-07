@@ -31,7 +31,7 @@ _INCLUDE_SKILLS = {
     "calendar", "gmail", "reminders", "weather", "shell", "spotify",
     "web", "pomodoro", "synthesis", "slack", "clipboard",
     "apple_reminders", "github_api", "workflows", "summarize",
-    "machine", "meta_tools",
+    "machine", "meta_tools", "sync",
 }
 
 # Core tools always included regardless of query relevance

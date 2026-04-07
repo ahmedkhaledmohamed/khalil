@@ -234,8 +234,8 @@ async def _reply_with_keyboard(ctx: MessageContext, text: str, reply_markup, par
         await ctx.reply(text, parse_mode=parse_mode)
 
 
-CONVERSATION_CONTEXT_WINDOW = 10  # max messages sent to LLM for context
-CONVERSATION_MIN_WINDOW = 4      # minimum messages to include
+CONVERSATION_CONTEXT_WINDOW = 30  # max messages sent to LLM for context (tool calls burn 2 rows each)
+CONVERSATION_MIN_WINDOW = 8      # minimum messages to include
 SUMMARIZE_THRESHOLD = 15         # unsummarized messages before triggering summary
 SESSION_GAP_SECONDS = 7200       # 2 hours = new session
 
@@ -485,9 +485,10 @@ async def get_conversation_context(chat_id: int, query: str) -> str:
     except Exception as e:
         log.debug("Active plans injection failed: %s", e)
 
-    # 3. Recent messages (last 16 raw rows — tool exchanges use multiple rows)
+    # 3. Recent messages (last 30 raw rows — tool exchanges use 2 rows each,
+    #    so 30 rows ≈ 10-15 logical turns with tool use)
     rows = db_conn.execute(
-        "SELECT role, content, message_type, metadata FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 16",
+        "SELECT role, content, message_type, metadata FROM conversations WHERE chat_id = ? ORDER BY id DESC LIMIT 30",
         (chat_id,),
     ).fetchall()
     if rows:
