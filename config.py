@@ -164,6 +164,12 @@ TTS_VOICE = "Samantha"  # macOS say voice
 # Apple Reminders sync — push Khalil reminders to Reminders.app
 APPLE_REMINDERS_SYNC = True
 
+# Knowledge export — portable knowledge synced to git
+KNOWLEDGE_EXPORT_DIR = Path(os.getenv(
+    "KHALIL_KNOWLEDGE_EXPORT_DIR",
+    str(Path.home() / "Developer" / "Personal" / "khalil-knowledge"),
+))
+
 # AI media generation
 MEDIA_PROVIDER = "local"  # "local" (free, Apple Silicon) or "replicate" (paid cloud)
 MEDIA_DOWNLOAD_DIR = DATA_DIR / "media"
