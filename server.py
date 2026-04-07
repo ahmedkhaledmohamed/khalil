@@ -6055,6 +6055,26 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Full DB backup — daily at 3:15 AM, uploads gzipped DB as GitHub Release asset
+    async def _full_db_backup_job():
+        try:
+            from actions.backup import backup_full_db
+            result = backup_full_db()
+            if result.get("status") == "success":
+                log.info("Scheduled DB backup: %s MB → %s", result["size_mb"], result["tag"])
+            else:
+                log.warning("Scheduled DB backup failed: %s", result.get("error", "unknown"))
+        except Exception as e:
+            log.warning("Scheduled DB backup failed: %s", e)
+
+    scheduler.add_job(
+        _full_db_backup_job,
+        CronTrigger(hour=3, minute=15, timezone=TIMEZONE),
+        id="full_db_backup",
+        name="Full DB Backup",
+        replace_existing=True,
+    )
+
     log.info("Scheduler jobs registered")
 
 
