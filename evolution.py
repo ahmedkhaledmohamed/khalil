@@ -172,7 +172,8 @@ def count_pending_signals() -> int:
             "WHERE signal_type IN ("
             "'user_correction', 'search_miss', 'capability_gap_detected', "
             "'response_suggests_manual_action', 'intent_detection_failure', "
-            "'action_execution_failure', 'slow_response', 'extension_runtime_failure'"
+            "'action_execution_failure', 'slow_response', 'extension_runtime_failure', "
+            "'tool_result_inadequate'"
             ") AND created_at > ?",
             (cutoff,),
         ).fetchone()
@@ -337,6 +338,29 @@ def _detect_suboptimal_responses(hours: int = 24) -> list[EvolutionCandidate]:
                     evidence=[ctx],
                     impact_score=0.8, feasibility_score=0.6,
                 ))
+
+        # Tool result inadequacy (tools ran but results were poor)
+        rows = conn.execute(
+            "SELECT context FROM interaction_signals "
+            "WHERE signal_type = 'tool_result_inadequate' AND created_at > ? LIMIT 10",
+            (cutoff,),
+        ).fetchall()
+        if rows:
+            # Group by issue type
+            issues: dict[str, list] = {}
+            for row in rows:
+                ctx = json.loads(row["context"]) if row["context"] else {}
+                issue = ctx.get("issue", "unknown")
+                issues.setdefault(issue, []).append(ctx)
+            for issue, evidence_list in issues.items():
+                cid = f"tool_inadequate_{issue}_{hashlib.md5(cutoff.encode()).hexdigest()[:8]}"
+                if not _candidate_exists(cid):
+                    candidates.append(EvolutionCandidate(
+                        id=cid, source="post_interaction", category="improve",
+                        summary=f"Tool produced inadequate results: {issue} ({len(evidence_list)}x)",
+                        evidence=evidence_list[:3],
+                        impact_score=0.8, feasibility_score=0.7,
+                    ))
 
         conn.close()
     except Exception as e:
@@ -580,6 +604,7 @@ def _check_evolution_outcomes():
 async def post_interaction_check(
     query: str, response: str, latency_ms: float,
     *, gap_tags: list[tuple] | None = None,
+    tool_results: list[str] | None = None,
 ):
     """Lightweight post-interaction signal recording. No LLM calls.
 
@@ -589,6 +614,7 @@ async def post_interaction_check(
     Args:
         gap_tags: Extracted [CAPABILITY_GAP] tuples (name, command, description)
                   from the raw LLM response, passed by server.py.
+        tool_results: Raw tool result strings from tool-use path, for adequacy analysis.
     """
     try:
         from learning import record_signal, detect_search_miss
@@ -627,7 +653,88 @@ async def post_interaction_check(
                     "source": "regex_gate",
                 })
 
-        # 5. Latency already recorded by server.py, no need to duplicate
+        # 5. Tool result adequacy check — detect tools that ran but produced poor results
+        if tool_results:
+            _check_tool_result_adequacy(query, response, tool_results, record_signal)
+
+        # 6. Latency already recorded by server.py, no need to duplicate
 
     except Exception as e:
         log.debug("post_interaction_check failed: %s", e)
+
+
+# Patterns indicating a tool produced inadequate results
+_INADEQUATE_RESULT_PATTERNS = [
+    # High unmatched/failure ratios
+    (r"(\d+)\s+unmatched", r"processed\s+(\d+)", "high_unmatched_ratio"),
+    # Tool returned errors or empty results
+    (r"command not found", None, "tool_command_not_found"),
+    (r"no (?:results?|output|data|matches)", None, "tool_empty_result"),
+    (r"0 (?:labeled|processed|matched|found)", None, "tool_zero_results"),
+]
+
+# Response phrases suggesting the LLM couldn't fulfill the request despite having tools
+_TOOL_INSUFFICIENCY_PHRASES = [
+    "i'll need to create",
+    "let me build",
+    "i'll set up a",
+    "there isn't currently a way",
+    "the current tool doesn't support",
+    "this feature isn't available yet",
+    "i don't have a way to",
+]
+
+
+def _check_tool_result_adequacy(
+    query: str, response: str, tool_results: list[str], record_signal,
+):
+    """Detect when tools ran but results were inadequate for the user's request.
+
+    This catches the gap between 'capability exists' and 'capability is sufficient' —
+    e.g., email categorizer runs but only matches 16/50 emails, or a tool runs but
+    can't do what the user actually asked (like archiving emails).
+    """
+    combined_results = "\n".join(tool_results).lower()
+    resp_lower = response.lower()
+
+    # Check for high unmatched ratios in tool output
+    import re as _re
+    processed_match = _re.search(r"processed\s+(\d+)", combined_results)
+    unmatched_match = _re.search(r"(\d+)\s+unmatched", combined_results)
+    if processed_match and unmatched_match:
+        processed = int(processed_match.group(1))
+        unmatched = int(unmatched_match.group(1))
+        if processed > 0 and unmatched / processed > 0.5:
+            record_signal("tool_result_inadequate", {
+                "query": query[:200],
+                "issue": "high_unmatched_ratio",
+                "detail": f"{unmatched}/{processed} unmatched ({unmatched*100//processed}%)",
+                "tool_output": combined_results[:300],
+            })
+
+    # Check for zero-result patterns
+    if _re.search(r"\b0\s+(?:labeled|processed|matched|found)\b", combined_results):
+        record_signal("tool_result_inadequate", {
+            "query": query[:200],
+            "issue": "zero_results",
+            "tool_output": combined_results[:300],
+        })
+
+    # Check for command-not-found (tool confusion — tried shell instead of action)
+    if "command not found" in combined_results:
+        record_signal("tool_result_inadequate", {
+            "query": query[:200],
+            "issue": "tool_command_not_found",
+            "tool_output": combined_results[:300],
+        })
+
+    # Check if the LLM's response suggests the tool was insufficient
+    for phrase in _TOOL_INSUFFICIENCY_PHRASES:
+        if phrase in resp_lower:
+            record_signal("tool_result_inadequate", {
+                "query": query[:200],
+                "issue": "tool_insufficient_for_request",
+                "phrase": phrase,
+                "response_snippet": response[:200],
+            })
+            break

@@ -249,6 +249,16 @@ KHALIL_IDENTITY = (
     "Instead: (1) identify the capability gap, (2) propose a solution, (3) write the code to extend "
     "yourself by sending the task to one of the active Claude Code sessions, (4) open a PR on your "
     "own repo (github.com/ahmedkhaledmohamed/khalil), and (5) share the PR link with Ahmed.\n\n"
+    "SELF-IMPROVEMENT: When a tool runs but produces poor results (high unmatched rate, missing "
+    "features, insufficient for the user's actual request), DO NOT just report the partial results "
+    "and move on. Instead:\n"
+    "1. DIAGNOSE: Explain WHY the results were inadequate (e.g., 'The email categorizer only has "
+    "7 generic keyword rules — most of your emails don't match these patterns').\n"
+    "2. PROPOSE: Suggest specific improvements to your own code that would fix the issue.\n"
+    "3. IMPLEMENT: Read your own source code (it's at ~/Developer/Personal/scripts/khalil/), "
+    "write the fix, and open a PR — or ask Ahmed if he'd like you to.\n"
+    "Your tools live in actions/*.py. You CAN read and modify your own code. "
+    "Treat tool limitations as bugs to fix, not walls to accept.\n\n"
     "You have deep knowledge of Ahmed's life, career, and projects. "
     "Answer based on the provided context from his personal archives. "
     "Be direct, specific, and personal. "
@@ -1505,6 +1515,24 @@ async def call_llm_with_tools(
         else:
             log.warning("Tool-use returned empty final text")
             await _safe_edit(progress_msg, "I'm not sure how to respond to that. Could you rephrase?")
+
+        # Post-interaction reflection for tool-use path (mirrors non-tool path at ~5076)
+        try:
+            from evolution import post_interaction_check
+            _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
+            _gap_tags = _gap_tag_re.findall(final_text)
+            # Collect tool results for adequacy analysis
+            _tool_results = [
+                m["content"] for m in messages
+                if isinstance(m, dict) and m.get("role") == "tool"
+            ]
+            asyncio.create_task(post_interaction_check(
+                query, final_text, 0.0, gap_tags=_gap_tags,
+                tool_results=_tool_results,
+            ))
+        except Exception:
+            pass
+
         return final_text
 
     # Exhausted iterations — return whatever we have

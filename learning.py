@@ -149,6 +149,11 @@ SIGNAL_ACTION_MAP = {
         "window_hours": 168,
         "action": "adjust_plan_style",
     },
+    "tool_result_inadequate": {
+        "threshold": 1,
+        "window_hours": 24,
+        "action": "flag_tool_improvement",
+    },
 }
 
 
@@ -240,6 +245,21 @@ def _process_signal_action(signal_type: str, context: dict | None):
     elif action == "adjust_plan_style":
         log.info("M6: Daily plan dismissed %d times — flagging for style adjustment", count)
         record_signal("plan_style_adjustment_needed", {"dismiss_count": count})
+
+    elif action == "flag_tool_improvement" and context:
+        issue = context.get("issue", "unknown")
+        query_text = context.get("query", "")[:100]
+        tool_output = context.get("tool_output", "")[:200]
+        log.info(
+            "M6: Tool produced inadequate results — issue=%s, query=%s",
+            issue, query_text,
+        )
+        record_signal("tool_improvement_needed", {
+            "issue": issue,
+            "query": query_text,
+            "tool_output": tool_output,
+            "inadequacy_count": count,
+        })
 
 
 def get_tool_preference_overrides() -> dict[str, float]:
