@@ -5049,7 +5049,9 @@ async def handle_message_generic(ctx: MessageContext):
 
     response = await ask_claude(query, full_context)
 
-    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*\w+\s*\|\s*/\w+\s*\|\s*.+?\]')
+    # Extract capability gap tags BEFORE stripping from display
+    _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
+    _gap_tags = _gap_tag_re.findall(response)  # list of (name, command, description)
     display_response = _gap_tag_re.sub("", response).strip()
 
     save_message(chat_id, "assistant", display_response)
@@ -5068,9 +5070,10 @@ async def handle_message_generic(ctx: MessageContext):
         pass
 
     # Post-interaction evolution signal collection (fire-and-forget, no LLM)
+    # Pass raw response + extracted gap tags so evolution can record capability gaps
     try:
         from evolution import post_interaction_check
-        asyncio.create_task(post_interaction_check(query, display_response, _latency_ms))
+        asyncio.create_task(post_interaction_check(query, response, _latency_ms, gap_tags=_gap_tags))
     except Exception:
         pass
 

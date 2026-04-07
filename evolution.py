@@ -320,6 +320,24 @@ def _detect_suboptimal_responses(hours: int = 24) -> list[EvolutionCandidate]:
                     impact_score=0.6, feasibility_score=0.5,
                 ))
 
+        # Capability gaps (from post_interaction_check gap tag extraction + regex fallback)
+        rows = conn.execute(
+            "SELECT context FROM interaction_signals "
+            "WHERE signal_type = 'capability_gap_detected' AND created_at > ? LIMIT 10",
+            (cutoff,),
+        ).fetchall()
+        for row in rows:
+            ctx = json.loads(row["context"]) if row["context"] else {}
+            gap_name = ctx.get("gap_name", "unknown")
+            cid = f"gap_{gap_name}"
+            if not _candidate_exists(cid):
+                candidates.append(EvolutionCandidate(
+                    id=cid, source="post_interaction", category="extend",
+                    summary=f"Capability gap: {ctx.get('gap_description', gap_name)}",
+                    evidence=[ctx],
+                    impact_score=0.8, feasibility_score=0.6,
+                ))
+
         conn.close()
     except Exception as e:
         log.debug("_detect_suboptimal_responses failed: %s", e)
@@ -559,11 +577,18 @@ def _check_evolution_outcomes():
 
 # --- Post-Interaction Hook ---
 
-async def post_interaction_check(query: str, response: str, latency_ms: float):
+async def post_interaction_check(
+    query: str, response: str, latency_ms: float,
+    *, gap_tags: list[tuple] | None = None,
+):
     """Lightweight post-interaction signal recording. No LLM calls.
 
     Called as fire-and-forget after every non-trivial response.
     Records signals that the next evolution cycle will pick up.
+
+    Args:
+        gap_tags: Extracted [CAPABILITY_GAP] tuples (name, command, description)
+                  from the raw LLM response, passed by server.py.
     """
     try:
         from learning import record_signal, detect_search_miss
@@ -581,7 +606,28 @@ async def post_interaction_check(query: str, response: str, latency_ms: float):
                 })
                 break
 
-        # 3. Latency already recorded by server.py, no need to duplicate
+        # 3. Explicit capability gap tags (emitted by LLM)
+        if gap_tags:
+            for name, command, description in gap_tags:
+                record_signal("capability_gap_detected", {
+                    "query": query[:200],
+                    "gap_name": name,
+                    "gap_command": command,
+                    "gap_description": description,
+                    "source": "llm_tag",
+                })
+
+        # 4. Regex-based gap detection fallback (catches refusals without explicit tags)
+        if not gap_tags:
+            from actions.extend import detect_capability_gap
+            if detect_capability_gap(response):
+                record_signal("capability_gap_detected", {
+                    "query": query[:200],
+                    "response_snippet": response[:200],
+                    "source": "regex_gate",
+                })
+
+        # 5. Latency already recorded by server.py, no need to duplicate
 
     except Exception as e:
         log.debug("post_interaction_check failed: %s", e)
