@@ -642,8 +642,9 @@ class AgentLoop:
                 # Can auto-execute
                 result = await self._execute_action(opp)
                 acted.append((opp, result))
-            else:
-                # Alert the user
+            elif opp.urgency >= Urgency.HIGH:
+                # Only alert user for HIGH urgency items — low/medium alerts
+                # were not useful and created noise
                 alerted.append(opp)
 
             # Mark cooldown
