@@ -1508,6 +1508,7 @@ async def call_llm_with_tools(
     # Tool-use loop
     # Allow up to _MAX_TOOL_AUTO_ITERATIONS with tool_choice="auto",
     # then force text response with "none" for remaining iterations.
+    _progress_steps = []
     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
         try:
@@ -1550,9 +1551,15 @@ async def call_llm_with_tools(
                 ],
             })
 
-            # Update progress message to show what's happening
+            # Update progress message to show what's happening (accumulative)
             tool_names = [tc.function.name for tc in msg.tool_calls]
-            await _safe_edit(progress_msg, f"🔧 Using: {', '.join(tool_names)}...")
+            _step_label = f"Step {iteration + 1}: {', '.join(tool_names)}"
+            if iteration == 0:
+                _progress_steps = [_step_label]
+            else:
+                _progress_steps.append(_step_label)
+            _progress_text = "🔧 " + " → ".join(_progress_steps) + "..."
+            await _safe_edit(progress_msg, _progress_text[:4096])
 
             # Execute each tool call and save to conversation history
             for tc in msg.tool_calls:
@@ -6529,6 +6536,36 @@ async def startup():
                  AGENT_LOOP_ENABLED, OWNER_CHAT_ID, bool(channel))
 
     log.info("Khalil is ready.")
+
+    # Auto-resume: if restarting, check for unfinished work and notify user
+    if OWNER_CHAT_ID and channel and _prev_boot and _prev_boot[0]:
+        asyncio.create_task(_auto_resume_after_restart(channel, OWNER_CHAT_ID))
+
+
+async def _auto_resume_after_restart(channel, chat_id: int):
+    """After a restart, check for unfinished work and proactively resume."""
+    await asyncio.sleep(5)  # Let everything initialize
+    try:
+        from memory.session_continuity import get_last_tool_use_context
+        tool_ctx = get_last_tool_use_context(chat_id, max_chars=1500)
+        if not tool_ctx:
+            log.info("Auto-resume: no in-progress work found")
+            return
+
+        # Extract the user's original query from the context
+        lines = tool_ctx.split("\n")
+        task_line = next((l for l in lines if l.startswith("User asked:")), "")
+        task_desc = task_line.replace("User asked:", "").strip()[:200] if task_line else "a task"
+
+        await channel.send_message(
+            chat_id,
+            f"🔄 I restarted and found unfinished work:\n\n"
+            f"**{task_desc}**\n\n"
+            f"Want me to continue where I left off?",
+        )
+        log.info("Auto-resume: notified user about unfinished work: %s", task_desc[:80])
+    except Exception as e:
+        log.warning("Auto-resume check failed: %s", e)
 
 
 @app.get("/health")

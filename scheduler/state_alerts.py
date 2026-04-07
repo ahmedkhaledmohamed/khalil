@@ -186,4 +186,5 @@ async def run_state_aware_checks(channel, chat_id: int):
     log.info("Running state-aware checks")
     await check_meeting_prep(channel, chat_id)
     await check_email_urgency(channel, chat_id)
-    await check_deep_work_window(channel, chat_id)
+    # Deep work window notifications disabled — user found them not useful
+    # await check_deep_work_window(channel, chat_id)
