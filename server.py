@@ -5939,7 +5939,7 @@ def _setup_scheduler():
         from actions.meetings import (
             get_recently_ended_meetings, make_meeting_key,
             should_prompt_followup, record_followup_prompt,
-            is_standup_meeting,
+            is_standup_meeting, ingest_post_meeting_transcript,
         )
 
         ended = get_recently_ended_meetings()
@@ -5960,12 +5960,23 @@ def _setup_scheduler():
             if len(attendees) > 3:
                 names += f" +{len(attendees) - 3}"
 
-            await channel.send_message(
-                OWNER_CHAT_ID,
-                f"Meeting '{title}' with {names} just ended.\n"
-                "Any action items? Reply here and I'll track them.\n"
-                "(I'll stop asking after 30 min.)",
-            )
+            # Try to auto-ingest transcript from Google Drive
+            transcript_summary = None
+            try:
+                transcript_summary = await ingest_post_meeting_transcript(event, ask_claude)
+            except Exception as e:
+                log.debug("Transcript ingestion failed for '%s': %s", title, e)
+
+            if transcript_summary:
+                await channel.send_message(OWNER_CHAT_ID, transcript_summary)
+                log.info("Auto-ingested transcript for: %s", title)
+            else:
+                await channel.send_message(
+                    OWNER_CHAT_ID,
+                    f"Meeting '{title}' with {names} just ended.\n"
+                    "Any action items? Reply here and I'll track them.\n"
+                    "(I'll stop asking after 30 min.)",
+                )
             log.info("Post-meeting follow-up prompt sent for: %s", title)
 
     scheduler.add_job(
@@ -6072,6 +6083,26 @@ def _setup_scheduler():
         CronTrigger(hour=3, minute=15, timezone=TIMEZONE),
         id="full_db_backup",
         name="Full DB Backup",
+        replace_existing=True,
+    )
+
+    # Email inbox categorization — daily at 8:00 AM
+    async def _email_categorize_job():
+        try:
+            from actions.email_categorizer import handle_intent
+            from types import SimpleNamespace
+            # Minimal context — just needs a reply function for logging
+            _ctx = SimpleNamespace(reply=lambda msg: log.info("Email categorizer: %s", msg))
+            await handle_intent("label", {}, _ctx)
+            log.info("Scheduled email categorization completed")
+        except Exception as e:
+            log.warning("Scheduled email categorization failed: %s", e)
+
+    scheduler.add_job(
+        _email_categorize_job,
+        CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
+        id="email_categorize",
+        name="Email Categorization",
         replace_existing=True,
     )
 

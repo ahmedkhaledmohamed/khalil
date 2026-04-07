@@ -2,9 +2,11 @@
 
 Auth: Personal Access Token stored in keyring under KEYRING_SERVICE / "github-pat".
 All public functions are async — HTTP calls use httpx.AsyncClient.
+PR merge/create uses `gh` CLI for reliability.
 """
 
 import logging
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -29,13 +31,37 @@ SKILL = {
         (r"\bgithub\s+notifications?\b", "github_notifications"),
         (r"\bcheck\s+(?:my\s+)?(?:github\s+)?notifications?\b", "github_notifications"),
         (r"\bunread\s+(?:github\s+)?notifications?\b", "github_notifications"),
+        (r"\bmerge\s+(?:pr|pull\s+request)\s*#?\d+", "github_merge_pr"),
+        (r"\bmerge\s+(?:the\s+)?(?:pr|pull\s+request)", "github_merge_pr"),
+        (r"\bcreate\s+(?:a\s+)?(?:pr|pull\s+request)\b", "github_create_pr"),
+        (r"\bopen\s+(?:a\s+)?(?:pr|pull\s+request)\b", "github_create_pr"),
     ],
     "actions": [
         {"type": "github_notifications", "handler": "handle_intent", "keywords": "github notifications unread alerts", "description": "Check unread GitHub notifications"},
         {"type": "github_prs", "handler": "handle_intent", "keywords": "github pull requests prs open review", "description": "List open pull requests"},
         {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue"},
+        {
+            "type": "github_merge_pr", "handler": "handle_intent",
+            "keywords": "github merge pr pull request squash",
+            "description": "Merge a pull request (squash merge)",
+            "parameters": {
+                "repo": {"type": "string", "description": "Repository in owner/name format", "required": True},
+                "pr_number": {"type": "string", "description": "PR number to merge", "required": True},
+            },
+        },
+        {
+            "type": "github_create_pr", "handler": "handle_intent",
+            "keywords": "github create open pr pull request branch",
+            "description": "Create a new pull request",
+            "parameters": {
+                "repo": {"type": "string", "description": "Repository in owner/name format", "required": True},
+                "title": {"type": "string", "description": "PR title", "required": True},
+                "branch": {"type": "string", "description": "Source branch name"},
+                "body": {"type": "string", "description": "PR description"},
+            },
+        },
     ],
-    "examples": ["GitHub notifications", "Check my PRs", "Create issue on khalil repo"],
+    "examples": ["GitHub notifications", "Check my PRs", "Create issue on khalil repo", "Merge PR 184 on khalil", "Open a PR for my branch"],
     "sensor": {"function": "sense_github", "interval_min": 5, "identify_opportunities": "identify_github_opportunities"},
 }
 
@@ -306,4 +332,68 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         except Exception as e:
             await ctx.reply(f"❌ GitHub issue creation failed: {e}")
         return True
+    elif action == "github_merge_pr":
+        try:
+            repo = intent.get("repo", "")
+            pr_number = intent.get("pr_number", "")
+            if not repo or not pr_number:
+                await ctx.reply("I need a repo and PR number.\n"
+                                "Example: merge PR 184 on ahmedkhaledmohamed/khalil")
+                return True
+            result = merge_pr(repo, int(pr_number))
+            await ctx.reply(result)
+        except Exception as e:
+            await ctx.reply(f"❌ PR merge failed: {e}")
+        return True
+    elif action == "github_create_pr":
+        try:
+            repo = intent.get("repo", "")
+            title = intent.get("title", "")
+            branch = intent.get("branch", "")
+            body = intent.get("body", "")
+            if not repo or not title:
+                await ctx.reply("I need a repo and title.\n"
+                                "Example: create PR on user/repo titled 'Add feature X'")
+                return True
+            result = create_pr(repo, title, branch=branch, body=body)
+            await ctx.reply(result)
+        except Exception as e:
+            await ctx.reply(f"❌ PR creation failed: {e}")
+        return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# PR operations via gh CLI
+# ---------------------------------------------------------------------------
+
+def merge_pr(repo: str, pr_number: int, method: str = "squash") -> str:
+    """Merge a PR using gh CLI. Returns status message."""
+    log.info("Merging PR #%d in %s via %s", pr_number, repo, method)
+    result = subprocess.run(
+        ["gh", "pr", "merge", str(pr_number),
+         f"--{method}", "--delete-branch", "--repo", repo],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode == 0:
+        return f"✅ PR #{pr_number} merged ({method}) on {repo}"
+    return f"❌ Merge failed: {result.stderr.strip()[:200]}"
+
+
+def create_pr(repo: str, title: str, branch: str = "", body: str = "") -> str:
+    """Create a PR using gh CLI. Returns PR URL or error."""
+    log.info("Creating PR in %s: %s", repo, title)
+    cmd = ["gh", "pr", "create", "--title", title, "--repo", repo]
+    if branch:
+        cmd.extend(["--head", branch])
+    if body:
+        cmd.extend(["--body", body])
+    else:
+        cmd.extend(["--body", ""])
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode == 0:
+        pr_url = result.stdout.strip()
+        return f"✅ PR created: {pr_url}"
+    return f"❌ PR creation failed: {result.stderr.strip()[:200]}"

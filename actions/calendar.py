@@ -121,7 +121,8 @@ def _handle_http_error(e: HttpError, write: bool = False):
 
 
 def _get_events_sync(days: int = 1, max_results: int = 20) -> list[dict]:
-    """Fetch upcoming events. Runs in thread."""
+    """Fetch upcoming events from primary + family calendar. Runs in thread."""
+    from config import FAMILY_CALENDAR_ID
     service = _get_calendar_service()
 
     tz = ZoneInfo(TIMEZONE)
@@ -129,33 +130,42 @@ def _get_events_sync(days: int = 1, max_results: int = 20) -> list[dict]:
     time_min = now.isoformat()
     time_max = (now + timedelta(days=days)).isoformat()
 
-    try:
-        events_result = service.events().list(
-            calendarId="primary",
-            timeMin=time_min,
-            timeMax=time_max,
-            maxResults=max_results,
-            singleEvents=True,
-            orderBy="startTime",
-            timeZone=TIMEZONE,
-        ).execute()
-    except HttpError as e:
-        _handle_http_error(e, write=False)
+    calendar_ids = [("primary", "")]
+    if FAMILY_CALENDAR_ID:
+        calendar_ids.append((FAMILY_CALENDAR_ID, "👨‍👩‍👧‍👦 "))
 
-    events = events_result.get("items", [])
     result = []
-    for event in events:
-        start = event["start"].get("dateTime", event["start"].get("date", ""))
-        end = event["end"].get("dateTime", event["end"].get("date", ""))
-        result.append({
-            "summary": event.get("summary", "(no title)"),
-            "start": start,
-            "end": end,
-            "location": event.get("location", ""),
-            "description": (event.get("description") or "")[:200],
-            "all_day": "date" in event["start"],
-        })
+    for cal_id, prefix in calendar_ids:
+        try:
+            events_result = service.events().list(
+                calendarId=cal_id,
+                timeMin=time_min,
+                timeMax=time_max,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+                timeZone=TIMEZONE,
+            ).execute()
+        except HttpError as e:
+            if cal_id != "primary":
+                log.debug("Family calendar fetch failed: %s", e)
+                continue
+            _handle_http_error(e, write=False)
 
+        for event in events_result.get("items", []):
+            start = event["start"].get("dateTime", event["start"].get("date", ""))
+            end = event["end"].get("dateTime", event["end"].get("date", ""))
+            result.append({
+                "summary": prefix + event.get("summary", "(no title)"),
+                "start": start,
+                "end": end,
+                "location": event.get("location", ""),
+                "description": (event.get("description") or "")[:200],
+                "all_day": "date" in event["start"],
+            })
+
+    # Sort merged events by start time
+    result.sort(key=lambda e: e["start"])
     return result
 
 

@@ -124,6 +124,11 @@ OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
 # Timezone
 TIMEZONE = os.getenv("KHALIL_TIMEZONE", "America/Toronto")
 
+# Family/shared calendar — set to a Google Calendar ID to include family events
+# in morning briefs and scheduling conflict detection.
+# Find the ID in Google Calendar → Settings → <calendar> → "Calendar ID"
+FAMILY_CALENDAR_ID = os.getenv("KHALIL_FAMILY_CALENDAR_ID", "")
+
 # Weather (Open-Meteo, free, no API key)
 # Defaults to Toronto. Override with KHALIL_WEATHER_LAT / KHALIL_WEATHER_LON.
 WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT", "43.6629"))
