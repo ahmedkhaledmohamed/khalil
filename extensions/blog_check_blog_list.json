@@ -1,0 +1,9 @@
+{
+    "name": "blog_check_blog_list",
+    "command": "blogfeed",
+    "description": "Actions 'blog_check' and 'blog_list' used together 34x — integration opportunity",
+    "action_module": "actions.blog_check_blog_list",
+    "handler_function": "handle_blogfeed",
+    "generated_at": "2026-04-07T12:00:00",
+    "generated_for": "Actions 'blog_check' and 'blog_list' used together 34x — integration opportunity"
+}
