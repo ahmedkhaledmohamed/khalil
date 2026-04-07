@@ -53,6 +53,16 @@ WORK_PROJECT_DOCS = [
     (Path.home() / "Developer" / "CM_Backend", "work:cm-backend"),
     # Orchestration Dashboard
     (Path.home() / "Developer" / "ClientMessaging" / "orchestration-dashboard", "work:orchestration"),
+    # Product catalog (roadmap, strategy, channels, discovery docs)
+    (Path.home() / "Developer" / "ClientMessaging" / "product-catalog", "work:product-catalog"),
+    # PM operating system workspace (vendors, OKRs, org areas, domains)
+    (Path.home() / "Developer" / "ClientMessaging" / "pm-os-workspace", "work:pm-os"),
+    # Ahmed's work sandbox (context docs, planning, strategy)
+    (Path.home() / "Developer" / "ahmed-sandbox", "work:sandbox"),
+    # Experience mission (PRDs, planning, DevTalk, capability audits, career docs)
+    (Path.home() / "Developer" / "ahmed-experience-mission", "work:experience-mission"),
+    # Product specs (inbox architecture, push taxonomy, opt-in API)
+    (Path.home() / "Developer" / "Client-Messaging-Product-Specs", "work:product-specs"),
     # Bézier monorepo
     (Path.home() / "Developer" / "Bézier" / "monorepo", "projects:bezier"),
     # Aika pipeline
