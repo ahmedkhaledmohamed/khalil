@@ -284,7 +284,7 @@ def record_activity_timing(signal_type: str = "user_active"):
         log.debug("Failed to record activity timing: %s", e)
 
 
-def get_active_hours(day_of_week: int | None = None, min_signals: int = 3) -> list[int]:
+def get_active_hours(day_of_week: int | None = None, min_signals: int = 1) -> list[int]:
     """Get hours when the user is typically active, based on observed signals.
 
     Args:
@@ -297,6 +297,12 @@ def get_active_hours(day_of_week: int | None = None, min_signals: int = 3) -> li
     if day_of_week is None:
         day_of_week = datetime.now(ZoneInfo(TIMEZONE)).weekday()
 
+    # Default work hours — used when learned data is too sparse
+    if day_of_week >= 5:  # weekend
+        default_hours = list(range(9, 23))  # 9 AM - 10 PM
+    else:
+        default_hours = list(range(8, 22))  # 8 AM - 9 PM
+
     try:
         conn = sqlite3.connect(str(DB_PATH))
         # Look at last 30 days of data for this day of week
@@ -308,10 +314,14 @@ def get_active_hours(day_of_week: int | None = None, min_signals: int = 3) -> li
             (day_of_week, cutoff, min_signals),
         ).fetchall()
         conn.close()
-        return [r[0] for r in rows]
+        learned = [r[0] for r in rows]
+        # If learned window is too narrow (<4 hours), merge with defaults
+        if len(learned) < 4:
+            return sorted(set(default_hours) | set(learned))
+        return learned
     except Exception as e:
         log.debug("Failed to get active hours: %s", e)
-        return []
+        return default_hours
 
 
 def is_good_time_for_alert(alert_type: str = "general") -> bool:

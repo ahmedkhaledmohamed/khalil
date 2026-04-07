@@ -318,7 +318,7 @@ async def _identify_opportunities_llm(
         now = time.monotonic()
         for item in items[:3]:
             opp_id = f"llm_{item.get('id', 'unknown')}"
-            if not _on_cooldown(opp_id, cooldowns, now, hours=4):
+            if not _on_cooldown(opp_id, cooldowns, now, hours=8):
                 opps.append(Opportunity(
                     id=opp_id,
                     source="llm_reasoning",
@@ -431,6 +431,9 @@ def _on_cooldown(opp_id: str, cooldowns: dict, now: float, hours: int) -> bool:
 class AgentLoop:
     """Continuous sense-think-act loop running in background."""
 
+    # Max proactive notifications per day (resets at midnight)
+    _DAILY_NOTIFICATION_CAP = 8
+
     def __init__(
         self,
         channel,
@@ -451,6 +454,8 @@ class AgentLoop:
         self._cooldowns: dict[str, float] = {}  # opp_id -> monotonic timestamp
         self._tick_count = 0
         self._snapshot_cache: tuple[float, object] | None = None  # (monotonic_time, DomainSnapshot)
+        self._daily_notification_count = 0
+        self._daily_notification_date: str = ""  # YYYY-MM-DD, resets at midnight
 
     async def start(self):
         """Start the background loop. Call as asyncio.create_task(loop.start())."""
@@ -571,8 +576,8 @@ class AgentLoop:
         except Exception as e:
             log.debug("Temporal task check failed: %s", e)
 
-        # M3: LLM-powered opportunity detection every 3rd tick (~15 min)
-        if self._tick_count % 3 == 0 and self.ask_llm:
+        # M3: LLM-powered opportunity detection every 6th tick (~30 min)
+        if self._tick_count % 6 == 0 and self.ask_llm:
             try:
                 snapshot = self._snapshot_cache[1] if self._snapshot_cache else None
                 llm_opps = await _identify_opportunities_llm(
@@ -587,9 +592,15 @@ class AgentLoop:
         if not opportunities:
             return  # nothing to do
 
-        # 3. FILTER — quiet hours, user presence, learned behavior
+        # 3. FILTER — quiet hours, user presence, learned behavior, daily cap
         now_dt = datetime.now(ZoneInfo(TIMEZONE))
         in_quiet = self._in_quiet_hours(now_dt)
+
+        # Reset daily notification counter at midnight
+        today_str = now_dt.strftime("%Y-%m-%d")
+        if today_str != self._daily_notification_date:
+            self._daily_notification_count = 0
+            self._daily_notification_date = today_str
 
         # Load behavior profile to filter by learned preferences
         suppress_skills = set()
@@ -621,6 +632,11 @@ class AgentLoop:
                 suppressed.append(opp)
                 continue
 
+            # Daily notification cap — only HIGH urgency bypasses
+            if opp.urgency < Urgency.HIGH and self._daily_notification_count >= self._DAILY_NOTIFICATION_CAP:
+                suppressed.append(opp)
+                continue
+
             # 4. ACT — execute actions or alert
             if opp.action_type and not self.autonomy.needs_approval(opp.action_type):
                 # Can auto-execute
@@ -635,6 +651,7 @@ class AgentLoop:
 
         # 5. REPORT — batch notification
         if acted or alerted:
+            self._daily_notification_count += 1
             await self._send_report(acted, alerted)
 
         elapsed = time.monotonic() - tick_start
