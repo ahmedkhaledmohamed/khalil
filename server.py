@@ -1181,6 +1181,77 @@ _MAX_TOOL_ITERATIONS = 5
 _MAX_TOOL_AUTO_ITERATIONS = 4  # iterations with tool_choice="auto" before forcing "none"
 
 
+def _get_tool_source_path(action_type: str) -> str:
+    """Map action_type to source file path via skill registry."""
+    try:
+        from skills import get_registry
+        skill = get_registry().get_by_action(action_type)
+        if skill:
+            return f"actions/{skill.module_name}.py"
+    except Exception:
+        pass
+    return f"actions/{action_type}.py"
+
+
+def _check_result_needs_reflection(tool_name: str, result_text: str, query: str) -> str | None:
+    """Check if a tool result is inadequate and return a reflection prompt if so.
+
+    Injects a mandatory reflection directive into the tool result so the LLM
+    MUST read it before deciding its next action. This prevents the LLM from
+    ignoring poor results and working around them with shell commands.
+    """
+    result_lower = result_text.lower()
+
+    # Skip error JSON — those already have suggestions
+    if result_text.startswith('{"error":'):
+        return None
+
+    detail = None
+
+    # High unmatched ratio
+    processed_m = re.search(r"processed\s+(\d+)", result_lower)
+    unmatched_m = re.search(r"(\d+)\s+unmatched", result_lower)
+    if processed_m and unmatched_m:
+        processed = int(processed_m.group(1))
+        unmatched = int(unmatched_m.group(1))
+        if processed > 0 and unmatched / processed > 0.5:
+            detail = f"{unmatched}/{processed} unmatched ({unmatched * 100 // processed}%)"
+
+    # Zero results
+    if not detail and re.search(r"\b0\s+(?:labeled|processed|matched|found)\b", result_lower):
+        detail = "zero results"
+
+    # Command not found (tool confusion — tried shell instead of action)
+    if not detail and "command not found" in result_lower:
+        detail = "command not found"
+
+    if not detail:
+        return None
+
+    source_path = _get_tool_source_path(tool_name)
+    khalil_dir = "~/Developer/Personal/scripts/khalil"
+    log.info("Tool result reflection injected for '%s': %s", tool_name, detail)
+
+    return (
+        f"\n⚠️ SELF-IMPROVEMENT REQUIRED — This tool produced poor results ({detail}).\n"
+        f"\n"
+        f"You MUST follow these steps before doing anything else:\n"
+        f"\n"
+        f"1. READ the tool's source code: {khalil_dir}/{source_path}\n"
+        f"   Use shell(command=\"cat {khalil_dir}/{source_path}\") to read it.\n"
+        f"\n"
+        f"2. DIAGNOSE why the results were poor. Look at the matching logic, rules, and parameters.\n"
+        f"\n"
+        f"3. PROPOSE specific code changes that would fix the issue. Be precise — "
+        f"which lines, what changes.\n"
+        f"\n"
+        f"4. ASK Ahmed if he wants you to implement the fix and open a PR.\n"
+        f"\n"
+        f"DO NOT work around this with shell commands or new scripts. "
+        f"The fix belongs in the tool itself."
+    )
+
+
 async def _execute_tool_call(tool_call) -> str:
     """Execute a single tool call from the LLM and return the result text.
 
@@ -1489,11 +1560,18 @@ async def call_llm_with_tools(
 
                 result_text = await _execute_tool_call(tc)
 
-                # Save tool result to DB
+                # Save tool result to DB (raw, without reflection)
                 save_message(chat_id, "tool", result_text[:2000],
                              message_type="tool_result",
                              metadata=json.dumps({"tool_name": tc.function.name,
                                                   "tool_call_id": tc.id}))
+
+                # Inject reflection if tool result looks inadequate (first 2 iterations only)
+                if iteration < 2:
+                    _reflection = _check_result_needs_reflection(
+                        tc.function.name, result_text, query)
+                    if _reflection:
+                        result_text = result_text + "\n\n" + _reflection
 
                 # Smart truncation: keep first 5000 + last 2000 chars
                 if len(result_text) > 8000:
