@@ -1,0 +1,9 @@
+{
+    "name": "gap_home_climate",
+    "command": "climate",
+    "description": "Capability gap: Control home thermostat temperature and modes directly",
+    "action_module": "actions.gap_home_climate",
+    "handler_function": "handle_climate",
+    "generated_at": "2026-04-08T12:00:00",
+    "generated_for": "Capability gap: Control home thermostat temperature and modes directly"
+}
