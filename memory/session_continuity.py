@@ -22,7 +22,9 @@ _CONTINUATION_CUES = re.compile(
     r"\b(continue|where were we|pick up where|last time|yesterday|earlier|"
     r"what were we|as we discussed|we were talking|resume|carry on|"
     r"you were working on|what happened to|continue the|finish the|"
-    r"status of|how did .+ go|what were you doing)\b",
+    r"status of|how did .+ go|what were you doing|"
+    r"what'?s the status|any update|any progress|how'?s it going|"
+    r"is it (?:done|ready|finished)|did you (?:finish|complete)|where are we)\b",
     re.IGNORECASE,
 )
 
@@ -183,6 +185,23 @@ def get_session_continuity(chat_id: int, query: str) -> str:
                 max_per = char_budget // limit
                 truncated = summary[:max_per] + "..." if len(summary) > max_per else summary
                 parts.append(f"Session ({created_at[:10]}): {truncated}")
+
+        # Check for incomplete tasks from prior session
+        try:
+            pending_row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?",
+                (f"pending_task_{chat_id}",),
+            ).fetchone()
+            if pending_row:
+                task = json.loads(pending_row[0])
+                parts.append(
+                    f"[Incomplete task from prior session]\n"
+                    f"User asked: {task['query']}\n"
+                    f"Tools used: {', '.join(task.get('tools_used', []))}\n"
+                    f"Status: May not have completed successfully"
+                )
+        except Exception:
+            pass
 
         # If continuation cue detected, also inject active task plans
         if is_continuation:
