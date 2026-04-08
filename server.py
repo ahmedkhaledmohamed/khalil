@@ -1213,8 +1213,8 @@ class _ToolCaptureContext:
         return "\n".join(self.captured) if self.captured else "(no output)"
 
 
-_MAX_TOOL_ITERATIONS = 5
-_MAX_TOOL_AUTO_ITERATIONS = 4  # iterations with tool_choice="auto" before forcing "none"
+_MAX_TOOL_ITERATIONS = 8
+_MAX_TOOL_AUTO_ITERATIONS = 6  # iterations with tool_choice="auto" before forcing "none"
 
 
 def _get_tool_source_path(action_type: str) -> str:
@@ -1640,8 +1640,46 @@ async def call_llm_with_tools(
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
         else:
-            log.warning("Tool-use returned empty final text")
-            await _safe_edit(progress_msg, "I'm not sure how to respond to that. Could you rephrase?")
+            # Empty response after tool calls — force a synthesis retry
+            log.warning("Tool-use returned empty final text — injecting synthesis prompt")
+            # Collect what tools found
+            _tool_summaries = []
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") == "tool":
+                    _tool_summaries.append(m["content"][:500])
+            if _tool_summaries:
+                # Ask the LLM to synthesize the gathered information
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You gathered information using tools above but didn't produce a response. "
+                        "Please synthesize all the tool results into a complete, helpful answer "
+                        "to the original question. Do not call any more tools."
+                    ),
+                })
+                try:
+                    _synth_resp = await _taskforce_client.chat.completions.create(
+                        model=_routed_model,
+                        max_tokens=4000,
+                        messages=messages,
+                        tool_choice="none",
+                        timeout=CLAUDE_TIMEOUT,
+                    )
+                    final_text = _synth_resp.choices[0].message.content or ""
+                    log.info("Synthesis retry produced %d chars", len(final_text))
+                except Exception as _synth_e:
+                    log.error("Synthesis retry failed: %s", _synth_e)
+            if final_text:
+                await _safe_edit(progress_msg, final_text[:4096])
+            else:
+                log.warning("Tool-use empty even after synthesis retry")
+                # Last resort: summarize what was done
+                _step_summary = " → ".join(_progress_steps) if _progress_steps else "research"
+                await _safe_edit(
+                    progress_msg,
+                    f"I completed {_step_summary} but couldn't generate a final response. "
+                    "Could you try rephrasing or breaking this into smaller steps?",
+                )
 
         # Post-interaction reflection for tool-use path (mirrors non-tool path at ~5076)
         try:
@@ -1662,10 +1700,37 @@ async def call_llm_with_tools(
 
         return final_text
 
-    # Exhausted iterations — return whatever we have
-    log.warning("Tool-use loop exhausted %d iterations", _MAX_TOOL_ITERATIONS)
-    last_content = messages[-1].get("content", "") if messages else ""
-    return last_content
+    # Exhausted iterations — try one final synthesis before giving up
+    log.warning("Tool-use loop exhausted %d iterations — attempting final synthesis", _MAX_TOOL_ITERATIONS)
+    messages.append({
+        "role": "user",
+        "content": (
+            "You've used all available tool iterations. Based on everything gathered so far, "
+            "please provide your best answer to the original question. Do not call any more tools."
+        ),
+    })
+    try:
+        _final_resp = await _taskforce_client.chat.completions.create(
+            model=_routed_model,
+            max_tokens=4000,
+            messages=messages,
+            tool_choice="none",
+            timeout=CLAUDE_TIMEOUT,
+        )
+        final_text = _final_resp.choices[0].message.content or ""
+        if final_text:
+            await _safe_edit(progress_msg, final_text[:4096])
+            return final_text
+    except Exception as e:
+        log.error("Final synthesis after exhaustion failed: %s", e)
+
+    _step_summary = " → ".join(_progress_steps) if _progress_steps else "multiple steps"
+    _fallback = (
+        f"I completed {_step_summary} but ran out of iterations before finishing. "
+        "Could you try breaking this into smaller steps?"
+    )
+    await _safe_edit(progress_msg, _fallback)
+    return _fallback
 
 
 async def _safe_edit(msg, text: str):
