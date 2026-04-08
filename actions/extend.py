@@ -55,9 +55,9 @@ class KhalilContext:
         record_signal(signal_type, context)
 
 
-# Rate limit: max 1 generation per hour
+# Rate limit: max 1 generation per 15 min (was 1hr — too slow for backlog drain)
 _last_generation_time: float = 0
-GENERATION_COOLDOWN_SECONDS = 3600
+GENERATION_COOLDOWN_SECONDS = 900
 
 # --- Stage 1: Phrase-based capability gap detection ---
 
