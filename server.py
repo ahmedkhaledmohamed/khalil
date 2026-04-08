@@ -7,7 +7,7 @@ import logging
 import os
 import re
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 
 # Add khalil directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -1216,6 +1216,45 @@ class _ToolCaptureContext:
 _MAX_TOOL_ITERATIONS = 8
 _MAX_TOOL_AUTO_ITERATIONS = 6  # iterations with tool_choice="auto" before forcing "none"
 
+# Preamble detection: catch LLM responses that announce intent instead of delivering results
+_PREAMBLE_RE = re.compile(
+    r"^(now\s+)?(?:let\s+me\s+|i(?:'ll|\s+will)\s+(?:now\s+)?)"
+    r"(?:gather|look|check|search|find|create|prepare|analyze|compile|review|examine)",
+    re.IGNORECASE,
+)
+
+
+def _is_preamble_response(text: str) -> bool:
+    """Detect responses that announce intent instead of delivering results."""
+    if len(text) > 500:
+        return False  # Long enough to contain real content
+    return bool(_PREAMBLE_RE.search(text.strip()))
+
+
+def _save_pending_task(chat_id: int | str, query: str, tool_names: list[str]) -> None:
+    """Save a marker when a tool-use task didn't fully complete."""
+    try:
+        db_conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (f"pending_task_{chat_id}", json.dumps({
+                "query": query[:500],
+                "tools_used": tool_names[:10],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })),
+        )
+        db_conn.commit()
+    except Exception as e:
+        log.debug("Failed to save pending task: %s", e)
+
+
+def _clear_pending_task(chat_id: int | str) -> None:
+    """Clear pending task marker after successful completion."""
+    try:
+        db_conn.execute("DELETE FROM settings WHERE key = ?", (f"pending_task_{chat_id}",))
+        db_conn.commit()
+    except Exception:
+        pass
+
 
 def _get_tool_source_path(action_type: str) -> str:
     """Map action_type to source file path via skill registry."""
@@ -1547,6 +1586,21 @@ async def call_llm_with_tools(
     _progress_steps = []
     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
+
+        # When switching to tool_choice="none", inject synthesis instruction
+        # so the LLM knows to deliver results, not announce plans
+        if iteration == _MAX_TOOL_AUTO_ITERATIONS and any(
+            isinstance(m, dict) and m.get("role") == "tool" for m in messages
+        ):
+            messages.append({
+                "role": "user",
+                "content": (
+                    "You have completed your tool calls. Now synthesize all the information "
+                    "gathered above into a clear, complete response to the user's original question. "
+                    "Do NOT announce what you plan to do — provide the actual answer."
+                ),
+            })
+
         try:
             response = await _taskforce_client.chat.completions.create(
                 model=_routed_model,
@@ -1637,6 +1691,34 @@ async def call_llm_with_tools(
         # No tool calls — this is the final text response
         final_text = msg.content or ""
         log.info("Tool-use final response: %d chars", len(final_text))
+
+        # Preamble detection: LLM announced intent instead of delivering results
+        _has_tool_results = any(isinstance(m, dict) and m.get("role") == "tool" for m in messages)
+        if final_text and _is_preamble_response(final_text) and _has_tool_results:
+            log.warning("Preamble detected (%d chars) — retrying with synthesis prompt", len(final_text))
+            messages.append({"role": "assistant", "content": final_text})
+            messages.append({
+                "role": "user",
+                "content": (
+                    "That response just announced what you plan to do instead of providing the answer. "
+                    "Please synthesize all the tool results above into a complete response NOW."
+                ),
+            })
+            try:
+                _synth_resp = await _taskforce_client.chat.completions.create(
+                    model=_routed_model,
+                    max_tokens=4000,
+                    messages=messages,
+                    tool_choice="none",
+                    timeout=CLAUDE_TIMEOUT,
+                )
+                _retry_text = _synth_resp.choices[0].message.content or ""
+                if _retry_text and len(_retry_text) > len(final_text):
+                    final_text = _retry_text
+                    log.info("Preamble retry produced %d chars", len(final_text))
+            except Exception as _pre_e:
+                log.error("Preamble synthesis retry failed: %s", _pre_e)
+
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
         else:
@@ -1697,6 +1779,13 @@ async def call_llm_with_tools(
             ))
         except Exception:
             pass
+
+        # Track incomplete tasks for session continuity
+        _tool_names_used = [s.split(": ", 1)[-1] for s in _progress_steps]
+        if _has_tool_results and (not final_text or _is_preamble_response(final_text) or len(final_text) < 300):
+            _save_pending_task(chat_id, query, _tool_names_used)
+        else:
+            _clear_pending_task(chat_id)
 
         return final_text
 
