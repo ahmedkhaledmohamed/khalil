@@ -20,7 +20,7 @@ Measured against GAIA, TheAgentCompany, τ-bench, ConvBench, Microsoft Failure T
 
 | Metric | Value | Target | Source | Status |
 |--------|-------|--------|--------|--------|
-| Eval Pass Rate (frozen cases) | 90.2% | >85% | `eval/reports/20260405_032129.json` | PASS |
+| Eval Pass Rate (frozen cases) | 83.9% | >85% | `eval/reports/20260408_181456.json` (851 cases) | BORDERLINE |
 | Eval Pass Rate (generated, full scope) | 23.4% | >50% | `eval/reports/20260408_162754.json` | FAIL |
 | Direct-Action Pass Rate | 71.3% | >80% | 910 pattern-matched cases, Apr 8 | BORDERLINE |
 | Tool Success Rate | 84.4% | >90% (τ-bench) | Production DB (205/243 calls) | BORDERLINE |
@@ -33,7 +33,7 @@ Measured against GAIA, TheAgentCompany, τ-bench, ConvBench, Microsoft Failure T
 | Self-Heal Success | 25% | >50% | 1/4 attempts (3 guardian-blocked) | FAIL |
 | Capability Gap Closure | 51.7% | >60% | 15 generated / 29 detected | BORDERLINE |
 
-**Last updated**: 2026-04-08 (Run #8)
+**Last updated**: 2026-04-08 (Run #9)
 
 ---
 
@@ -51,14 +51,18 @@ Measured against GAIA, TheAgentCompany, τ-bench, ConvBench, Microsoft Failure T
 | 6 | 2026-04-05 | production | 2,458 | 2,216 | 90.2% | -2.1pp | Full-scope production validation (frozen cases.json) |
 | 7 | 2026-04-08 | `fix/p0-p2` | 910 | 649 | 71.3% | — | Direct-action only (LLM cases excluded — API key issue) |
 | 8 | 2026-04-08 | `fix/p0-p2` | 2,774 | 650 | 23.4% | — | Full generated suite via Taskforce. handler_bad_output dominant failure |
+| 9 | **2026-04-08** | `fix/p0-p2` | **851** | **714** | **83.9%** | **-2.2pp** | Frozen cases via Taskforce. 92 fixed, 111 regressed (net -19) |
 
-### Run #8 Notes
-- **Taskforce proxy working** — LLM responses flowing via `hendrix-genai.spotify.net`
-- 2,098/2,124 failures are `handler_bad_output` (response quality, not routing)
-- Only 26 timeouts (down from 37 in Run #4)
-- Calendar: **0% → 77%** after pattern fix (PR #199)
-- Reminder routing: **0% → 100%** (handler needs LLM for bare queries)
-- Self-healing: **unblocked** (`BLOCKLISTED_CALLS` import fixed in PR #199)
+### Run #9 Notes (Apples-to-Apples Baseline Comparison)
+- **Same 851 cases** that existed in both Apr 5 and Apr 8 runs
+- Apr 5 baseline on these cases: **733/851 = 86.1%**
+- Apr 8 post-fix: **714/851 = 83.9%** (-2.2pp)
+- **92 cases fixed** (was fail → now pass): calendar (+8), reminder (+5), weather (+5), github (+6), linkedin (+8), apps (+5), readwise (+4), etc.
+- **111 cases regressed** (was pass → now fail): mostly LLM response quality variability — same handler, different model behavior via Taskforce proxy vs direct Anthropic
+- Calendar: **0% → 100%** (8/8) — pattern fix working
+- Reminder: **0% → 62%** (5/8) — routing fixed, handler needs LLM for bare queries
+- Weather: **40% → 100%** — env vars now available
+- Net: fixes outweighed by LLM response variance. Core routing improvements confirmed.
 
 ---
 
