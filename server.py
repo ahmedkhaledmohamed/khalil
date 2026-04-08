@@ -5931,6 +5931,39 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Weekly eval metrics — Sunday 4 AM, compute production metrics and save report
+    async def _weekly_eval_metrics_job():
+        try:
+            from eval.metrics import compute_metrics, save_metrics, print_metrics
+            snapshot = compute_metrics()
+            path = save_metrics(snapshot)
+            log.info("Weekly eval metrics saved: %s", path)
+            if _can_send():
+                lines = []
+                for name, val in [
+                    ("Task Completion", snapshot.task_completion_rate),
+                    ("Tool Success", snapshot.tool_success_rate),
+                    ("User Corrections", snapshot.user_correction_rate),
+                    ("Self-Heal", snapshot.self_heal_success_rate),
+                ]:
+                    if val is not None:
+                        lines.append(f"  {name}: {val:.0%}")
+                if lines:
+                    await channel.send_message(
+                        OWNER_CHAT_ID,
+                        "📊 Weekly Eval Metrics\n\n" + "\n".join(lines),
+                    )
+        except Exception as e:
+            log.warning("Weekly eval metrics failed: %s", e)
+
+    scheduler.add_job(
+        _weekly_eval_metrics_job,
+        CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=TIMEZONE),
+        id="weekly_eval_metrics",
+        name="Weekly Eval Metrics",
+        replace_existing=True,
+    )
+
     # OAuth token refresh — every 6 hours, proactively refresh before expiry
     async def _oauth_refresh_job():
         from oauth_utils import proactive_token_refresh
