@@ -141,7 +141,7 @@ class CircuitBreaker:
 _cb_gmail = CircuitBreaker("gmail")
 _cb_calendar = CircuitBreaker("calendar")
 _cb_ollama = CircuitBreaker("ollama", threshold=3, cooldown_seconds=60)
-_cb_claude = CircuitBreaker("claude", threshold=5, cooldown_seconds=120)
+_cb_claude = CircuitBreaker("claude", threshold=3, cooldown_seconds=60)
 
 # Error dedup — suppress identical errors within 60s window
 _last_llm_error: tuple[str, float] = ("", 0.0)
@@ -599,7 +599,7 @@ def _get_mcp_tools_text() -> str:
 
 
 LLM_TIMEOUT = 90.0  # seconds — qwen3 thinking model can be slow
-CLAUDE_TIMEOUT = 30.0
+CLAUDE_TIMEOUT = 15.0  # aggressive — fail fast, fall back to GPT/Gemini
 _ollama_recovery_attempted = False
 
 
@@ -870,7 +870,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                     continue
             return "⚠️ LLM temporarily unavailable. Try again in a few minutes."
 
-        _max_retries = 3
+        _max_retries = 2  # only retry for rate limits; timeouts fail fast
         for _attempt in range(1, _max_retries + 1):
             try:
                 if _taskforce_client:
@@ -899,12 +899,17 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                 _cb_claude.record_failure()
                 _err_str = str(e).lower()
                 _is_rate_limit = "429" in _err_str or "rate" in _err_str or "overloaded" in _err_str
+                _is_timeout = "timeout" in _err_str
+                # Only retry on rate limits; timeouts → immediate fallback
                 if _is_rate_limit and _attempt < _max_retries:
-                    _delay = min(2.0 * (2 ** (_attempt - 1)), 10.0)
+                    _delay = min(2.0 * (2 ** (_attempt - 1)), 8.0)
                     log.warning("Claude rate limited (attempt %d/%d), retrying in %.1fs", _attempt, _max_retries, _delay)
                     await asyncio.sleep(_delay)
                     continue
-                log.error("Claude API call failed: %s", e)
+                if _is_timeout:
+                    log.warning("Claude timed out after %.0fs — immediate fallback", CLAUDE_TIMEOUT)
+                else:
+                    log.error("Claude API call failed: %s", e)
                 from learning import record_signal
                 record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
                 # Try backup providers before giving up
@@ -1109,7 +1114,31 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
                 _cb_claude.record_success()
         except Exception as e:
             _cb_claude.record_failure()
-            log.error("Streaming LLM failed: %s — falling back to non-streaming", e)
+            _err_str = str(e).lower()
+            _is_timeout = "timeout" in _err_str
+            if _is_timeout:
+                log.warning("Streaming Claude timed out after %.0fs — direct fallback to backup", CLAUDE_TIMEOUT)
+            else:
+                log.error("Streaming LLM failed: %s — falling back to backup providers", e)
+            from learning import record_signal
+            record_signal("llm_failure", {"backend": "claude", "error": f"{type(e).__name__}: {e}"[:200]})
+            # Try backup providers directly (skip re-entering ask_llm retry loop)
+            _backup_msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
+            for _bp_attr, _bp_model in _BACKUP_PROVIDERS:
+                _bp_client = globals().get(_bp_attr)
+                if not _bp_client:
+                    continue
+                try:
+                    _bp_resp = await _bp_client.chat.completions.create(
+                        model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
+                    )
+                    log.info("Streaming fallback: %s succeeded", _bp_model)
+                    yield _bp_resp.choices[0].message.content
+                    return
+                except Exception as _bp_e:
+                    log.warning("Streaming fallback %s failed: %s", _bp_model, _bp_e)
+                    continue
+            # All providers failed — last resort non-streaming
             result = await ask_llm(query, context, system_extra, model)
             yield result
             return
