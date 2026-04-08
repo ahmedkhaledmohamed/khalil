@@ -112,6 +112,28 @@ TOOL_SELECTION_CASES = [
     # Multi-word ambiguous — should offer clarify
     ToolUseTestCase("clarify-01", "send that to John", ["clarify"],
                     description="Ambiguous request — should clarify"),
+
+    # --- Failure cases from production incidents ---
+
+    # PR number hallucination: tool returns URL, LLM should extract number from it
+    ToolUseTestCase("gh-03", "Open a PR for this branch",
+                    ["shell"], excluded_tools=["clarify"],
+                    description="PR creation — should use shell/gh, not hallucinate PR number"),
+
+    # Branch existence check before PR creation
+    ToolUseTestCase("gh-04", "Create a PR from fix-typo to main",
+                    ["shell"],
+                    description="PR creation — should verify branch exists before creating PR"),
+
+    # Repo confusion: don't mix up khalil, me, the-hub repos
+    ToolUseTestCase("gh-05", "What repo am I in?",
+                    ["shell"], excluded_tools=["clarify"],
+                    description="Repo context — should run git remote or pwd, not guess"),
+
+    # Git push to wrong branch detection
+    ToolUseTestCase("gh-06", "Push my changes",
+                    ["shell"],
+                    description="Git push — should check current branch, never push to main"),
 ]
 
 # Required parameter test cases
