@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khalil Eval Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --green: #3fb950;
+    --green-dim: #238636;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.8rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--text-muted); font-size: 0.95rem; margin-bottom: 2rem; }
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.25rem;
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 1rem;
+  }
+  .big-number {
+    font-size: 3.5rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .big-number .unit { font-size: 1.5rem; color: var(--text-muted); }
+  .big-number .delta {
+    font-size: 1rem;
+    vertical-align: super;
+    margin-left: 0.5rem;
+  }
+  .stat-row {
+    display: flex;
+    gap: 2rem;
+    margin-top: 1rem;
+  }
+  .stat-item .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+  .stat-item .value { font-size: 1.4rem; font-weight: 600; }
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-align: center;
+  }
+  .kpi .kpi-value { font-size: 1.8rem; font-weight: 700; }
+  .kpi .kpi-label { font-size: 0.7rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+  .kpi .kpi-delta { font-size: 0.8rem; font-weight: 600; margin-top: 0.15rem; }
+
+  /* Chart */
+  .chart-container { position: relative; height: 220px; margin-top: 0.5rem; }
+  .chart-svg { width: 100%; height: 100%; }
+  .chart-line { fill: none; stroke: var(--blue); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .chart-area { fill: url(#areaGrad); }
+  .chart-dot { fill: var(--blue); stroke: var(--surface); stroke-width: 3; }
+  .chart-label { fill: var(--text); font-size: 11px; font-weight: 600; text-anchor: middle; }
+  .chart-sublabel { fill: var(--text-muted); font-size: 9px; text-anchor: middle; }
+  .chart-grid { stroke: var(--border); stroke-width: 0.5; stroke-dasharray: 4 4; }
+  .chart-grid-label { fill: var(--text-muted); font-size: 10px; text-anchor: end; }
+
+  /* Waterfall */
+  .waterfall-bar { display: flex; align-items: center; margin-bottom: 0.5rem; gap: 0.75rem; }
+  .waterfall-bar .iter { width: 24px; font-size: 0.8rem; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+  .waterfall-bar .bar-track { flex: 1; height: 26px; background: rgba(88,166,255,0.08); border-radius: 6px; overflow: hidden; }
+  .waterfall-bar .bar-fill { height: 100%; border-radius: 6px; display: flex; align-items: center; padding-left: 10px; font-size: 0.75rem; font-weight: 600; color: #fff; white-space: nowrap; transition: width 1s ease; }
+  .waterfall-bar .delta-label { width: 55px; text-align: right; font-size: 0.85rem; font-weight: 600; flex-shrink: 0; }
+
+  /* Iterations */
+  .iteration { border-left: 3px solid var(--border); padding: 0.6rem 0 0.6rem 1rem; margin-bottom: 0.4rem; }
+  .iteration:last-child { margin-bottom: 0; }
+  .iteration .head { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .iteration .num { background: var(--blue); color: #000; font-size: 0.7rem; font-weight: 700; padding: 2px 7px; border-radius: 10px; }
+  .iteration .title { font-weight: 600; font-size: 0.9rem; }
+  .iteration .rate-badge { font-size: 0.75rem; padding: 2px 8px; border-radius: 10px; background: rgba(63,185,80,0.15); color: var(--green); font-weight: 600; }
+  .iteration .case-count { font-size: 0.7rem; color: var(--text-muted); }
+  .iteration ul { list-style: none; padding: 0; }
+  .iteration li { font-size: 0.8rem; color: var(--text-muted); padding: 2px 0 2px 1rem; position: relative; }
+  .iteration li::before { content: ">"; position: absolute; left: 0; color: var(--border); }
+
+  /* Skill table */
+  .skill-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem 1.5rem; }
+  .skill-row { display: flex; align-items: center; gap: 0.5rem; padding: 3px 0; }
+  .skill-row .status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .skill-row .status.perfect { background: var(--green); }
+  .skill-row .status.good { background: var(--yellow); }
+  .skill-row .status.mid { background: #d29922; opacity: 0.6; }
+  .skill-row .status.bad { background: var(--red); }
+  .skill-row .name { flex: 1; font-size: 0.78rem; font-family: 'SF Mono', 'Fira Code', monospace; }
+  .skill-row .bar-bg { width: 80px; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; flex-shrink: 0; }
+  .skill-row .bar-fg { height: 100%; border-radius: 3px; transition: width 0.8s ease; }
+  .skill-row .pct { width: 42px; text-align: right; font-size: 0.78rem; font-weight: 600; flex-shrink: 0; }
+  .skill-row .count { width: 40px; text-align: right; font-size: 0.72rem; color: var(--text-muted); flex-shrink: 0; }
+
+  /* Donut */
+  .donut-container { display: flex; align-items: center; gap: 2rem; justify-content: center; }
+  .donut-legend .item { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; font-size: 0.82rem; }
+  .donut-legend .dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* Timeline table */
+  .timeline-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  .timeline-table th { text-align: left; color: var(--text-muted); font-weight: 500; padding: 0.5rem; border-bottom: 1px solid var(--border); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; }
+  .timeline-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid rgba(48,54,61,0.4); }
+  .timeline-table .mono { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.75rem; }
+
+  .tab-bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .tab { padding: 0.4rem 1rem; border-radius: 8px; font-size: 0.8rem; cursor: pointer; border: 1px solid var(--border); background: transparent; color: var(--text-muted); }
+  .tab.active { background: var(--blue); color: #000; border-color: var(--blue); font-weight: 600; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  .gen-note { color: var(--text-muted); font-size: 0.75rem; text-align: right; margin-top: 1.5rem; }
+
+  @media (max-width: 700px) {
+    .grid { grid-template-columns: 1fr; }
+    .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+    .skill-grid { grid-template-columns: 1fr; }
+    body { padding: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<h1>Khalil Eval Dashboard</h1>
+<p class="subtitle">Performance tracking across 9 iterations &mdash; 24 eval runs &mdash; Last updated: Apr 08, 2026</p>
+
+<!-- KPI strip -->
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-value" style="color:var(--yellow)">83.9%</div>
+    <div class="kpi-label">Current Pass Rate</div>
+    <div class="kpi-delta" style="color:var(--green)">+60.5pp vs prev</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value" style="color:var(--blue)">+57.9pp</div>
+    <div class="kpi-label">Total Improvement</div>
+    <div class="kpi-delta" style="color:var(--text-muted)">from 26% baseline</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value">714</div>
+    <div class="kpi-label">Cases Passed</div>
+    <div class="kpi-delta" style="color:var(--text-muted)">of 851</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-value" style="color:var(--red)">137</div>
+    <div class="kpi-label">Failures</div>
+    <div class="kpi-delta" style="color:var(--text-muted)">4 categories</div>
+  </div>
+</div>
+
+<!-- Chart + Failure donut -->
+<div class="grid">
+  <div class="card full">
+    <h2>Pass Rate Over Iterations</h2>
+    <div class="chart-container">
+      <svg class="chart-svg" viewBox="0 0 760 220" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--blue)" stop-opacity="0.25"/>
+            <stop offset="100%" stop-color="var(--blue)" stop-opacity="0.02"/>
+          </linearGradient>
+        </defs>
+        <line x1="60" y1="30" x2="720" y2="30" class="chart-grid"/>
+        <line x1="60" y1="68" x2="720" y2="68" class="chart-grid"/>
+        <line x1="60" y1="105" x2="720" y2="105" class="chart-grid"/>
+        <line x1="60" y1="142" x2="720" y2="142" class="chart-grid"/>
+        <text x="55" y="34" class="chart-grid-label">100%</text>
+        <text x="55" y="72" class="chart-grid-label">75%</text>
+        <text x="55" y="109" class="chart-grid-label">50%</text>
+        <text x="55" y="146" class="chart-grid-label">25%</text>
+        <path class="chart-area" d="M60,141 L142,124 L225,81 L308,66 L390,54 L472,41 L555,45 L638,145 L720,54 L720,180 L60,180 Z"/>
+        <polyline class="chart-line" points="60,141 142,124 225,81 308,66 390,54 472,41 555,45 638,145 720,54"/>
+        
+        <circle cx="60" cy="141" r="6" class="chart-dot" />
+        <text x="60" y="129" class="chart-label">26.0%</text>
+        <text x="60" y="161" class="chart-sublabel">#0 </text>
+        <circle cx="142" cy="124" r="6" class="chart-dot" />
+        <text x="142" y="112" class="chart-label">37.5%</text>
+        <text x="142" y="144" class="chart-sublabel">#1 +11.5</text>
+        <circle cx="225" cy="81" r="6" class="chart-dot" />
+        <text x="225" y="69" class="chart-label">66.3%</text>
+        <text x="225" y="101" class="chart-sublabel">#2 +28.7</text>
+        <circle cx="308" cy="66" r="6" class="chart-dot" />
+        <text x="308" y="54" class="chart-label">75.9%</text>
+        <text x="308" y="86" class="chart-sublabel">#3 +9.7</text>
+        <circle cx="390" cy="54" r="6" class="chart-dot" />
+        <text x="390" y="42" class="chart-label">84.1%</text>
+        <text x="390" y="74" class="chart-sublabel">#4 +8.2</text>
+        <circle cx="472" cy="41" r="6" class="chart-dot" />
+        <text x="472" y="29" class="chart-label">92.3%</text>
+        <text x="472" y="61" class="chart-sublabel">#5 +8.3</text>
+        <circle cx="555" cy="45" r="6" class="chart-dot" />
+        <text x="555" y="33" class="chart-label">90.2%</text>
+        <text x="555" y="65" class="chart-sublabel">#6 -2.2</text>
+        <circle cx="638" cy="145" r="6" class="chart-dot" />
+        <text x="638" y="133" class="chart-label">23.4%</text>
+        <text x="638" y="165" class="chart-sublabel">#7 -66.8</text>
+        <circle cx="720" cy="54" r="8" class="chart-dot" style="fill:var(--green);stroke-width:3"/>
+        <text x="720" y="42" class="chart-label" style="fill:var(--green)">83.9%</text>
+        <text x="720" y="74" class="chart-sublabel">#8 +60.5</text>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<!-- Waterfall + Iterations -->
+<div class="grid">
+  <div class="card">
+    <h2>Cumulative Progress</h2>
+    
+      <div class="waterfall-bar">
+        <div class="iter">#0</div>
+        <div class="bar-track"><div class="bar-fill" style="width:26.0%;background:var(--red)">26.0%</div></div>
+        <div class="delta-label" style="color:var(--green)">+26.0</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#1</div>
+        <div class="bar-track"><div class="bar-fill" style="width:37.5%;background:var(--red)">37.5%</div></div>
+        <div class="delta-label" style="color:var(--green)">+11.5</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#2</div>
+        <div class="bar-track"><div class="bar-fill" style="width:66.3%;background:var(--blue)">66.3%</div></div>
+        <div class="delta-label" style="color:var(--green)">+28.7</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#3</div>
+        <div class="bar-track"><div class="bar-fill" style="width:75.9%;background:var(--blue)">75.9%</div></div>
+        <div class="delta-label" style="color:var(--green)">+9.7</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#4</div>
+        <div class="bar-track"><div class="bar-fill" style="width:84.1%;background:var(--blue)">84.1%</div></div>
+        <div class="delta-label" style="color:var(--green)">+8.2</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#5</div>
+        <div class="bar-track"><div class="bar-fill" style="width:92.3%;background:var(--green)">92.3%</div></div>
+        <div class="delta-label" style="color:var(--green)">+8.3</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#6</div>
+        <div class="bar-track"><div class="bar-fill" style="width:90.2%;background:var(--green)">90.2%</div></div>
+        <div class="delta-label" style="color:var(--red)">-2.2</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#7</div>
+        <div class="bar-track"><div class="bar-fill" style="width:23.4%;background:var(--red)">23.4%</div></div>
+        <div class="delta-label" style="color:var(--red)">-66.8</div>
+      </div>
+      <div class="waterfall-bar">
+        <div class="iter">#8</div>
+        <div class="bar-track"><div class="bar-fill" style="width:83.9%;background:var(--blue)">83.9%</div></div>
+        <div class="delta-label" style="color:var(--green)">+60.5</div>
+      </div>
+  </div>
+  <div class="card">
+    <h2>What Changed Per Iteration</h2>
+    
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#0</span>
+        <span class="title">Baseline</span>
+        <span class="rate-badge">26.0%</span>
+        <span class="case-count">50 cases</span>
+      </div>
+      <ul><li>Initial run, all failures were LLM timeouts</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#1</span>
+        <span class="title">Direct dispatch</span>
+        <span class="rate-badge">37.5%</span>
+        <span class="case-count">309 cases</span>
+      </div>
+      <ul><li>Pattern match → handler, skip LLM call</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#2</span>
+        <span class="title">Query gen + routing</span>
+        <span class="rate-badge">66.3%</span>
+        <span class="case-count">323 cases</span>
+      </div>
+      <ul><li>Regex → NL generator, routing priority fix</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#3</span>
+        <span class="title">Case quality</span>
+        <span class="rate-badge">75.9%</span>
+        <span class="case-count">245 cases</span>
+      </div>
+      <ul><li>Keyword cases → llm_intent, natural templates</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#4</span>
+        <span class="title">Eval infra</span>
+        <span class="rate-badge">84.1%</span>
+        <span class="case-count">245 cases</span>
+      </div>
+      <ul><li>Latency threshold, runner timeout, screenshot fix</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#5</span>
+        <span class="title">Param extraction</span>
+        <span class="rate-badge">92.3%</span>
+        <span class="case-count">196 cases</span>
+      </div>
+      <ul><li>Search term extraction, weather exclusion</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#6</span>
+        <span class="title">Production validation</span>
+        <span class="rate-badge">90.2%</span>
+        <span class="case-count">2458 cases</span>
+      </div>
+      <ul><li>Full-scope 2,458 cases</li></ul>
+    </div>
+    <div class="iteration">
+      <div class="head">
+        <span class="num">#7</span>
+        <span class="title">Direct-action + generated</span>
+        <span class="rate-badge">23.4%</span>
+        <span class="case-count">2774 cases</span>
+      </div>
+      <ul><li>Full generated suite via Taskforce</li></ul>
+    </div>
+    <div class="iteration" style="border-left-color:var(--green)">
+      <div class="head">
+        <span class="num" style="background:var(--green)">#8</span>
+        <span class="title">Frozen baseline (Taskforce)</span>
+        <span class="rate-badge">83.9%</span>
+        <span class="case-count">851 cases</span>
+      </div>
+      <ul><li>851 frozen cases, apples-to-apples</li></ul>
+    </div>
+  </div>
+</div>
+
+<!-- Skills + Failures -->
+<div class="grid">
+  <div class="card">
+    <h2>Skill Pass Rates (Run #8)</h2>
+    <div class="skill-grid" id="skillGrid"></div>
+  </div>
+  <div class="card">
+    <h2>Failure Categories</h2>
+    <div class="donut-container">
+      <svg width="120" height="120" viewBox="0 0 120 120">
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--border)" stroke-width="16"/>
+        <circle cx="60" cy="60" r="50" fill="none" stroke="var(--yellow)" stroke-width="16" stroke-dasharray="137.6 176.6" stroke-dashoffset="78.5" stroke-linecap="round"/>
+<circle cx="60" cy="60" r="50" fill="none" stroke="var(--purple)" stroke-width="16" stroke-dasharray="84.8 229.3" stroke-dashoffset="-59.1" stroke-linecap="round"/>
+<circle cx="60" cy="60" r="50" fill="none" stroke="var(--red)" stroke-width="16" stroke-dasharray="82.6 231.6" stroke-dashoffset="-143.9" stroke-linecap="round"/>
+<circle cx="60" cy="60" r="50" fill="none" stroke="var(--blue)" stroke-width="16" stroke-dasharray="9.2 305.0" stroke-dashoffset="-226.5" stroke-linecap="round"/>
+
+        <text x="60" y="56" text-anchor="middle" fill="var(--text)" font-size="22" font-weight="700">137</text>
+        <text x="60" y="72" text-anchor="middle" fill="var(--text-muted)" font-size="10">failures</text>
+      </svg>
+      <div class="donut-legend">
+        <div class="item"><div class="dot" style="background:var(--yellow)"></div> handler_bad_output (60)</div>
+<div class="item"><div class="dot" style="background:var(--purple)"></div> pattern_gap (37)</div>
+<div class="item"><div class="dot" style="background:var(--red)"></div> timeout (36)</div>
+<div class="item"><div class="dot" style="background:var(--blue)"></div> routing_wrong (4)</div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- All runs -->
+<div class="grid">
+  <div class="card full">
+    <h2>All Eval Runs (24 reports)</h2>
+    <table class="timeline-table">
+      <thead>
+        <tr><th>Date</th><th>Report</th><th>Cases</th><th>Passed</th><th>Rate</th></tr>
+      </thead>
+      <tbody>
+        
+        <tr>
+          <td class="mono">Mar 28</td>
+          <td class="mono">20260328_205230.json</td>
+          <td>20</td>
+          <td>7</td>
+          <td><span style="color:var(--red);font-weight:600">35.0%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 28</td>
+          <td class="mono">20260328_210126.json</td>
+          <td>20</td>
+          <td>8</td>
+          <td><span style="color:var(--yellow);font-weight:600">40.0%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_002626.json</td>
+          <td>50</td>
+          <td>13</td>
+          <td><span style="color:var(--red);font-weight:600">26.0%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_125445.json</td>
+          <td>309</td>
+          <td>116</td>
+          <td><span style="color:var(--red);font-weight:600">37.5%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_133153.json</td>
+          <td>346</td>
+          <td>205</td>
+          <td><span style="color:var(--yellow);font-weight:600">59.2%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_133556.json</td>
+          <td>323</td>
+          <td>205</td>
+          <td><span style="color:var(--blue);font-weight:600">63.5%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_134306.json</td>
+          <td>323</td>
+          <td>214</td>
+          <td><span style="color:var(--blue);font-weight:600">66.3%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_151847.json</td>
+          <td>323</td>
+          <td>242</td>
+          <td><span style="color:var(--blue);font-weight:600">74.9%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_152223.json</td>
+          <td>416</td>
+          <td>221</td>
+          <td><span style="color:var(--yellow);font-weight:600">53.1%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_152446.json</td>
+          <td>245</td>
+          <td>186</td>
+          <td><span style="color:var(--blue);font-weight:600">75.9%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_183108.json</td>
+          <td>851</td>
+          <td>109</td>
+          <td><span style="color:var(--red);font-weight:600">12.8%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_195135.json</td>
+          <td>245</td>
+          <td>180</td>
+          <td><span style="color:var(--blue);font-weight:600">73.5%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_195251.json</td>
+          <td>851</td>
+          <td>228</td>
+          <td><span style="color:var(--red);font-weight:600">26.8%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_195921.json</td>
+          <td>245</td>
+          <td>191</td>
+          <td><span style="color:var(--blue);font-weight:600">78.0%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_200302.json</td>
+          <td>245</td>
+          <td>206</td>
+          <td><span style="color:var(--blue);font-weight:600">84.1%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_201623.json</td>
+          <td>851</td>
+          <td>235</td>
+          <td><span style="color:var(--red);font-weight:600">27.6%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_202149.json</td>
+          <td>214</td>
+          <td>188</td>
+          <td><span style="color:var(--green);font-weight:600">87.9%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 29</td>
+          <td class="mono">20260329_202327.json</td>
+          <td>196</td>
+          <td>181</td>
+          <td><span style="color:var(--green);font-weight:600">92.3%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Mar 31</td>
+          <td class="mono">20260331_212319.json</td>
+          <td>222</td>
+          <td>148</td>
+          <td><span style="color:var(--blue);font-weight:600">66.7%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Apr 05</td>
+          <td class="mono">20260405_030054.json</td>
+          <td>2458</td>
+          <td>2217</td>
+          <td><span style="color:var(--green);font-weight:600">90.2%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Apr 05</td>
+          <td class="mono">20260405_032129.json</td>
+          <td>2458</td>
+          <td>2216</td>
+          <td><span style="color:var(--green);font-weight:600">90.2%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Apr 08</td>
+          <td class="mono">20260408_161549.json</td>
+          <td>2774</td>
+          <td>241</td>
+          <td><span style="color:var(--red);font-weight:600">8.7%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Apr 08</td>
+          <td class="mono">20260408_162754.json</td>
+          <td>2774</td>
+          <td>650</td>
+          <td><span style="color:var(--red);font-weight:600">23.4%</span></td>
+        </tr>
+        <tr>
+          <td class="mono">Apr 08</td>
+          <td class="mono">20260408_181456.json</td>
+          <td>851</td>
+          <td>714</td>
+          <td><span style="color:var(--blue);font-weight:600">83.9%</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="gen-note">Auto-generated by <code>eval/generate_dashboard.py</code> from 24 reports in eval/reports/</p>
+
+<script>
+const skills = [["apple_reminders_sync", 4, 4], ["appstore_ratings", 12, 12], ["browser_navigate", 5, 5], ["calendar", 8, 8], ["conversational", 100, 100], ["cursor_extensions", 2, 2], ["cursor_goto", 1, 1], ["cursor_open", 5, 5], ["cursor_terminal_exec", 4, 4], ["cursor_terminal_new", 4, 4], ["digitalocean_spend", 6, 6], ["github_notifications", 8, 8], ["icloud_reminder", 14, 14], ["macos_frontmost", 12, 12], ["reading", 8, 8], ["readwise_highlights", 8, 8], ["readwise_review", 3, 3], ["screenshot", 12, 12], ["slack_read", 5, 5], ["slack_send", 5, 5], ["terminal_exec", 4, 4], ["terminal_new_tab", 3, 3], ["weather", 4, 4], ["weather_forecast", 3, 3], ["web_search", 8, 8], ["edge", 95, 100], ["macos_system_info", 15, 16], ["shell", 38, 41], ["imessage_recent", 12, 13], ["apps", 9, 10], ["imessage_read", 8, 9], ["macos_browser_tabs", 8, 9], ["linkedin_messages", 7, 8], ["browser_extract", 6, 7], ["linkedin_profile", 6, 7], ["career", 10, 12], ["linkedin_jobs", 5, 6], ["cursor_status", 8, 10], ["cursor_terminal_status", 8, 10], ["media", 4, 5], ["youtube_liked", 4, 5], ["youtube_search", 4, 5], ["productivity", 27, 34], ["spotlight", 11, 14], ["communication", 24, 31], ["browser_screenshot", 3, 4], ["digitalocean_status", 6, 8], ["imessage_search", 3, 4], ["notion_create", 3, 4], ["notion_search", 6, 8], ["github_prs", 8, 11], ["appstore_downloads", 7, 10], ["development", 29, 43], ["cursor_diff", 2, 3], ["information", 4, 6], ["infrastructure", 4, 6], ["terminal_status", 6, 9], ["reminder", 5, 8], ["label", 9, 15], ["macos_apps", 10, 17], ["system", 35, 62], ["github_create_issue", 6, 11], ["email", 5, 10], ["email_personal", 3, 6], ["email_work", 3, 6]];
+const grid = document.getElementById("skillGrid");
+skills.forEach(([name, passed, total]) => {
+  const pct = total > 0 ? (passed / total * 100) : 0;
+  let statusClass, color;
+  if (pct === 100) { statusClass = "perfect"; color = "var(--green)"; }
+  else if (pct >= 75) { statusClass = "good"; color = "var(--yellow)"; }
+  else if (pct >= 50) { statusClass = "mid"; color = "var(--yellow)"; }
+  else { statusClass = "bad"; color = "var(--red)"; }
+  const row = document.createElement("div");
+  row.className = "skill-row";
+  row.innerHTML = `
+    <div class="status ${statusClass}"></div>
+    <div class="name">${name}</div>
+    <div class="bar-bg"><div class="bar-fg" style="width:${pct}%;background:${color}"></div></div>
+    <div class="pct" style="color:${color}">${pct.toFixed(0)}%</div>
+    <div class="count">${passed}/${total}</div>
+  `;
+  grid.appendChild(row);
+});
+</script>
+
+</body>
+</html>
