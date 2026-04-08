@@ -33,6 +33,11 @@ SKILL = {
         (r"\bcalendar\b", "calendar"),
         (r"\bwhat'?s\s+on\s+(?:my\s+)?(?:schedule|calendar)\b", "calendar"),
         (r"\bmeeting(?:s)?\s+today\b", "calendar"),
+        (r"\b(?:check|show|view|list)\s+(?:my\s+)?(?:schedule|events?|meetings?)\b", "calendar"),
+        (r"\b(?:what'?s|what\s+are)\s+my\s+(?:meetings?|events?)\b", "calendar"),
+        (r"\bevents?\s+(?:today|tomorrow|this\s+week|status)\b", "calendar"),
+        (r"\b(?:am\s+i|are\s+we)\s+free\b", "calendar"),
+        (r"\blist\s+(?:today|tomorrow)\b", "calendar"),
     ],
     "actions": [
         {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},

@@ -662,7 +662,7 @@ def score_healing_confidence(diagnosis: dict, patched_source: str) -> float:
 
 def validate_patch(original_source: str, patched_source: str, target_file: Path) -> tuple[bool, str]:
     """Validate a generated patch is safe and correct."""
-    from actions.extend import BLOCKLISTED_CALLS, BLOCKLISTED_IMPORTS
+    from actions.extend import BLOCKLISTED_BARE_CALLS, BLOCKLISTED_QUALIFIED_CALLS, BLOCKLISTED_IMPORTS
 
     # 1. AST parse
     try:
@@ -682,8 +682,12 @@ def validate_patch(original_source: str, patched_source: str, target_file: Path)
         if isinstance(node, ast.Call):
             from actions.extend import _get_call_name
             call_name = _get_call_name(node)
-            if call_name and any(b in call_name for b in BLOCKLISTED_CALLS):
-                return False, f"Blocked call: {call_name}"
+            if call_name:
+                bare_name = call_name.rsplit(".", 1)[-1]
+                if bare_name in BLOCKLISTED_BARE_CALLS:
+                    return False, f"Blocked call: {call_name}"
+                if any(call_name == b or call_name.startswith(b + ".") for b in BLOCKLISTED_QUALIFIED_CALLS):
+                    return False, f"Blocked call: {call_name}"
 
     # 3. Size guard — patched function shouldn't be >2x original
     orig_lines = len(original_source.splitlines())
