@@ -125,12 +125,21 @@ async def init_server():
     if row:
         server.OWNER_CHAT_ID = int(row[0])
 
-    from config import LLM_BACKEND
+    from config import LLM_BACKEND, CLAUDE_BASE_URL, CLAUDE_API_KEY_HEADER
     if LLM_BACKEND == "claude":
-        import anthropic
         api_key = server.get_secret("anthropic-api-key")
         if api_key:
-            server.claude = anthropic.AsyncAnthropic(api_key=api_key)
+            if CLAUDE_BASE_URL:
+                # Taskforce proxy — uses OpenAI-compatible client (matches server startup)
+                from openai import AsyncOpenAI
+                server._taskforce_client = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=CLAUDE_BASE_URL,
+                    default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+                )
+            else:
+                import anthropic
+                server.claude = anthropic.AsyncAnthropic(api_key=api_key)
 
     from skills import get_registry
     get_registry()

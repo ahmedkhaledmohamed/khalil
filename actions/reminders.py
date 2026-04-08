@@ -21,9 +21,11 @@ SKILL = {
         (r"\b(?:show|list|what\s+are)\s+(?:my\s+)?reminders?\b", "reminder_list"),
         (r"\b(?:upcoming|pending|active)\s+reminders?\b", "reminder_list"),
         # Create patterns
-        (r"\bremind\s+me\b", "reminder"),
+        (r"\bremind\s+(?:me|us|him|her)\b", "reminder"),
+        (r"\bremind\b.*\b(?:to|about|at|in)\b", "reminder"),
         (r"\bset\s+(?:a\s+)?reminder\b", "reminder"),
-        (r"\bdon'?t\s+(?:let\s+me\s+)?forget\b", "reminder"),
+        (r"\breminder\s+(?:to|for|about)\b", "reminder"),
+        (r"\bdon'?t\s+(?:let\s+me\s+)?forg?[ea]t\b", "reminder"),
     ],
     "actions": [
         {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder",
