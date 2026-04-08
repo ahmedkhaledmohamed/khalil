@@ -98,6 +98,13 @@ BLOCKED_PATTERNS = [
     r"\bkillall\s+finder\b",
     r"\bkillall\s+dock\b",
     r"\bkillall\s+systemuiserver\b",
+    # Git safety — never push directly to main or force push
+    r"\bgit\s+push\b.*\bmain\b",
+    r"\bgit\s+push\b.*\bmaster\b",
+    r"\bgit\s+push\s+-f\b",
+    r"\bgit\s+push\s+--force\b",
+    r"\bgit\s+reset\s+--hard\b",
+    r"\bgit\s+branch\s+-D\b",      # force-delete branches
 ]
 
 SAFE_PREFIXES = [

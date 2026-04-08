@@ -381,8 +381,26 @@ def merge_pr(repo: str, pr_number: int, method: str = "squash") -> str:
 
 
 def create_pr(repo: str, title: str, branch: str = "", body: str = "") -> str:
-    """Create a PR using gh CLI. Returns PR URL or error."""
-    log.info("Creating PR in %s: %s", repo, title)
+    """Create a PR using gh CLI. Returns PR URL or error.
+
+    Pre-flight checks:
+    - Verifies the branch exists on the remote before attempting PR creation
+    - Never accepts a pr_number parameter (GitHub assigns numbers automatically)
+    """
+    log.info("Creating PR in %s: %s (branch=%s)", repo, title, branch or "current")
+
+    # Pre-flight: verify branch exists on remote
+    if branch:
+        check = subprocess.run(
+            ["gh", "api", f"repos/{repo}/branches/{branch}"],
+            capture_output=True, text=True, timeout=15,
+        )
+        if check.returncode != 0:
+            return (
+                f"❌ Branch '{branch}' not found on {repo}. "
+                f"Did you push it? Run: git push -u origin {branch}"
+            )
+
     cmd = ["gh", "pr", "create", "--title", title, "--repo", repo]
     if branch:
         cmd.extend(["--head", branch])
