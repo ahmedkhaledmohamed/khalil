@@ -422,7 +422,14 @@ async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT,
             # Run the remaining segments with the new cwd
             remaining = cmd[cmd.index(segments[1]):]
             cmd = remaining
-        # If cd target doesn't exist, let the full command fail naturally
+        else:
+            # Reject the entire chain — running with wrong cwd is worse than failing
+            return {
+                "returncode": 1,
+                "stdout": "",
+                "stderr": f"cd: no such directory: {cd_dir}\nCommand aborted — target directory doesn't exist.",
+                "timed_out": False,
+            }
 
     def _run():
         try:

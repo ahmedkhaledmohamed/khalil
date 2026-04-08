@@ -12,6 +12,7 @@ import ast
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 
 from llm_client import get_llm_client, call_llm_sync
@@ -572,17 +573,35 @@ IMPORTS: <any new imports needed, one per line, or "none">
             return None
         code = "\n---FUNCTION---\n".join(patches)
     else:
-        # Extract single code block
-        if "```python" in text:
-            code = text.split("```python")[1].split("```")[0].strip()
+        # Extract single code block — use regex for robustness against truncation
+        code_match = re.search(r"```python\s*\n(.+?)```", text, re.DOTALL)
+        if code_match:
+            code = code_match.group(1).strip()
+        elif "```python" in text:
+            # Fallback: no closing marker (likely truncated at token limit)
+            code = text.split("```python", 1)[1].strip()
+            if code.count("(") != code.count(")") or code.count("{") != code.count("}"):
+                log.error("Healing patch appears truncated (unbalanced brackets)")
+                return None
         elif "```" in text:
-            code = text.split("```")[1].split("```")[0].strip()
+            code_match2 = re.search(r"```\s*\n(.+?)```", text, re.DOTALL)
+            code = code_match2.group(1).strip() if code_match2 else text.split("```")[1].split("```")[0].strip()
         else:
             log.error("No code block found in healing response")
             return None
 
     if new_imports:
         code = new_imports + "\n\n" + code
+
+    # Reject patches that are suspiciously shorter than the original
+    _orig_src = primary_source.get("source", "") if not multi_function else ""
+    if _orig_src:
+        original_lines = _orig_src.count("\n")
+        patched_lines = code.count("\n")
+        if original_lines > 10 and patched_lines < original_lines * 0.5:
+            log.error("Healing patch too short (%d lines vs original %d) — likely truncated",
+                      patched_lines, original_lines)
+            return None
 
     return code, explanation
 
