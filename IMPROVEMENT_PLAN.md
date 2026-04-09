@@ -17,7 +17,7 @@ Introduce `HandlerResponse` dataclass (`.text`, `.success`, `.metadata`) and a w
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** ConvBench
 - **Files:** `server.py` (handle_message_generic)
 
-### 3. Fix 8 Broken Skills (Timeout Cluster)
+### 3. Fix 8 Broken Skills (Timeout Cluster) ✅ (PR #223)
 `claude_code_status`, `terminal_exec`, `tmux_*` (5), `voice_*` (2), `workflow_*` (3) all at 0%. Add availability guards that return clear "unavailable" messages when prerequisites aren't met (no tmux session, no ffmpeg, no Claude Code binary). Turns timeouts into fast, informative failures. Eliminates 145 failures.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench, GAIA
 - **Files:** `actions/tmux_control.py`, `actions/terminal.py`, `actions/claude_code.py`, `actions/voice.py`, `actions/workflows.py`
