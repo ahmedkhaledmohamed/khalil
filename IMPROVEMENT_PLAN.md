@@ -23,7 +23,7 @@ Introduce `HandlerResponse` dataclass (`.text`, `.success`, `.metadata`) and a w
 - **Files:** `actions/tmux_control.py`, `actions/terminal.py`, `actions/claude_code.py`, `actions/voice.py`, `actions/workflows.py`
 - **Unlocks:** 8, 18
 
-### 4. LLM Timeout Retry with Fast Fallback
+### 4. LLM Timeout Retry with Fast Fallback ✅ (PR #224)
 P95 = 54.57s. Reduce per-model timeout to 8s first attempt, implement 15s total "latency budget" across fallback chain, return cached/degraded response if budget expires. Add streaming partial responses so user sees output within 2s.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
 - **Files:** `server.py` (ask_llm, _fallback_to_claude, LLM_TIMEOUT), `resilience.py`
