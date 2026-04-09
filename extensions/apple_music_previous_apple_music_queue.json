@@ -1,0 +1,9 @@
+{
+    "name": "apple_music_previous_apple_music_queue",
+    "command": "prevqueue",
+    "description": "Actions 'apple_music_previous' and 'apple_music_queue' used together 35x — integration opportunity",
+    "action_module": "actions.apple_music_previous_apple_music_queue",
+    "handler_function": "handle_prevqueue",
+    "generated_at": "2026-04-07T12:00:00",
+    "generated_for": "Actions 'apple_music_previous' and 'apple_music_queue' used together 35x — integration opportunity"
+}
