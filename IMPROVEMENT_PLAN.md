@@ -100,7 +100,7 @@ No metric for failure-to-resolution time. Add timestamps: failure detected -> he
 
 ## Theme 4: INTELLIGENCE — Make Khalil Smarter
 
-### 15. Golden Case Coverage for 32 Untested Skills
+### 15. Golden Case Coverage for 32 Untested Skills ✅ (PR #227)
 32 skills have zero golden cases. Generate 3-5 per skill: 1 happy-path per action type + 1 edge case. Target: 100-160 new golden cases in `fixtures/golden.yaml`. The single biggest eval quality investment.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench, GAIA
 - **Files:** `eval/fixtures/golden.yaml`, `eval/cases.py`, `eval/case_gen.py`
