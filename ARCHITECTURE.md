@@ -446,6 +446,7 @@ gantt
     Dev State Poll      :00:00, 1440min
     Email Sync          :00:00, 1440min
     Meeting Prep/Follow :00:00, 1440min
+```
 
 ## External Integrations
 
