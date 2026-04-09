@@ -339,6 +339,15 @@ def save_message(chat_id: int, role: str, content: str,
     )
     db_conn.commit()
 
+    # Cache embedding for user messages (fire-and-forget, enables semantic similarity)
+    if role == "user" and message_type == "text" and content:
+        try:
+            asyncio.get_event_loop().call_soon(
+                lambda c=content: asyncio.ensure_future(_cache_msg_embedding(c))
+            )
+        except Exception:
+            pass  # No event loop (eval, CLI, etc.)
+
     # Rolling summarization: trigger if unsummarized messages exceed threshold
     _check_summarization_needed(chat_id)
 
@@ -429,10 +438,26 @@ async def _summarize_session(chat_id: int):
 
 
 def _compute_topic_similarity(text_a: str, text_b: str) -> float:
-    """#66: Simple word-overlap similarity between two texts. Returns 0.0-1.0."""
+    """Topic similarity: embedding cosine (if cached) → Jaccard fallback.
+
+    Uses pre-computed embeddings from _msg_embedding_cache when available,
+    which gives much better semantic matching (e.g., "what's the status" ≈
+    "how did it go"). Falls back to word-overlap Jaccard when embeddings
+    aren't cached yet.
+    """
+    # Try embedding-based cosine similarity first
+    emb_a = _msg_embedding_cache.get(text_a)
+    emb_b = _msg_embedding_cache.get(text_b)
+    if emb_a is not None and emb_b is not None:
+        dot = sum(a * b for a, b in zip(emb_a, emb_b))
+        norm_a = sum(a * a for a in emb_a) ** 0.5
+        norm_b = sum(b * b for b in emb_b) ** 0.5
+        if norm_a > 0 and norm_b > 0:
+            return max(0.0, dot / (norm_a * norm_b))
+
+    # Fallback: Jaccard word overlap
     words_a = set(text_a.lower().split())
     words_b = set(text_b.lower().split())
-    # Remove common stopwords
     stopwords = {"the", "a", "an", "is", "are", "was", "were", "i", "you", "my", "your",
                  "it", "this", "that", "to", "of", "in", "for", "on", "with", "and", "or"}
     words_a -= stopwords
@@ -442,6 +467,28 @@ def _compute_topic_similarity(text_a: str, text_b: str) -> float:
     intersection = words_a & words_b
     union = words_a | words_b
     return len(intersection) / len(union) if union else 0.0
+
+
+# Embedding cache for recent messages (populated async, consumed sync)
+_msg_embedding_cache: dict[str, list[float]] = {}
+_MSG_EMBEDDING_CACHE_MAX = 100
+
+
+async def _cache_msg_embedding(text: str):
+    """Fire-and-forget: embed a message and cache for similarity lookups."""
+    if not text or len(text) < 5 or text in _msg_embedding_cache:
+        return
+    try:
+        from knowledge.embedder import embed_text
+        emb = await embed_text(text[:500])  # cap length for efficiency
+        if emb:
+            _msg_embedding_cache[text] = emb
+            # Evict oldest if cache too large
+            if len(_msg_embedding_cache) > _MSG_EMBEDDING_CACHE_MAX:
+                oldest_key = next(iter(_msg_embedding_cache))
+                del _msg_embedding_cache[oldest_key]
+    except Exception:
+        pass  # Ollama unavailable — Jaccard fallback will be used
 
 
 def get_conversation_history(chat_id: int) -> str:
