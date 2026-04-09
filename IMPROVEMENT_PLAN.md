@@ -29,7 +29,7 @@ P95 = 54.57s. Reduce per-model timeout to 8s first attempt, implement 15s total 
 - **Files:** `server.py` (ask_llm, _fallback_to_claude, LLM_TIMEOUT), `resilience.py`
 - **Unlocks:** 7, 17
 
-### 5. Shell Path Hallucination Guard
+### 5. Shell Path Hallucination Guard ✅ (PR #219)
 47 failures in 48h from hallucinated file paths. Add pre-execution path validation: regex-detect paths in commands, verify via `os.path.exists()`, suggest corrections via fuzzy match against cached home directory tree.
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** GAIA (factual grounding), NIST AI RMF
 - **Files:** `actions/shell.py` (execute_shell, classify_command)
