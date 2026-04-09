@@ -1754,6 +1754,7 @@ async def call_llm_with_tools(
                 tools=tools,
                 tool_choice=_tc,
                 timeout=CLAUDE_TIMEOUT,
+                temperature=0.0,  # #17: deterministic tool selection to reduce variance
             )
         except Exception as e:
             log.error("Tool-use LLM call failed (iteration %d): %s", iteration, e)
@@ -1856,6 +1857,7 @@ async def call_llm_with_tools(
                     messages=messages,
                     tool_choice="none",
                     timeout=CLAUDE_TIMEOUT,
+                    temperature=0.0,
                 )
                 _retry_text = _synth_resp.choices[0].message.content or ""
                 if _retry_text and len(_retry_text) > len(final_text):
@@ -1891,6 +1893,7 @@ async def call_llm_with_tools(
                         messages=messages,
                         tool_choice="none",
                         timeout=CLAUDE_TIMEOUT,
+                        temperature=0.0,
                     )
                     final_text = _synth_resp.choices[0].message.content or ""
                     log.info("Synthesis retry produced %d chars", len(final_text))
@@ -1950,6 +1953,7 @@ async def call_llm_with_tools(
             messages=messages,
             tool_choice="none",
             timeout=CLAUDE_TIMEOUT,
+            temperature=0.0,
         )
         final_text = _final_resp.choices[0].message.content or ""
         if final_text:
