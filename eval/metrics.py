@@ -52,6 +52,8 @@ class MetricsSnapshot:
     abandonment_rate: float | None = None
     total_sessions: int = 0
     abandoned_sessions: int = 0
+    # Per-tool accuracy breakdown (τ-bench inspired)
+    per_tool_metrics: dict = field(default_factory=dict)  # {tool: {calls, failures, success_rate}}
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -197,6 +199,39 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- Per-Tool Accuracy Breakdown ---
+    try:
+        # Total calls per tool from capability_usage signals
+        usage_rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as tool, COUNT(*) as cnt "
+            "FROM interaction_signals WHERE signal_type = 'capability_usage' "
+            "AND context IS NOT NULL GROUP BY tool ORDER BY cnt DESC"
+        ).fetchall()
+
+        # Failures per tool
+        failure_rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as tool, COUNT(*) as cnt "
+            "FROM interaction_signals "
+            "WHERE signal_type IN ('tool_failure', 'action_execution_failure') "
+            "AND context IS NOT NULL GROUP BY tool"
+        ).fetchall()
+        failure_map = {r["tool"]: r["cnt"] for r in failure_rows if r["tool"]}
+
+        for row in usage_rows:
+            tool = row["tool"]
+            if not tool:
+                continue
+            calls = row["cnt"]
+            failures = failure_map.get(tool, 0)
+            success_rate = (calls - failures) / calls if calls > 0 else 0
+            snapshot.per_tool_metrics[tool] = {
+                "calls": calls,
+                "failures": failures,
+                "success_rate": round(success_rate, 3),
+            }
+    except Exception:
+        pass
+
     conn.close()
     return snapshot
 
@@ -241,6 +276,16 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
             print(f"  {name:30s} {pct:>8s}  ({detail})  target: {target}")
         else:
             print(f"  {name:30s}      N/A  ({detail})")
+
+    # Per-tool breakdown
+    if snapshot.per_tool_metrics:
+        print(f"\n  {'Per-Tool Accuracy':30s}")
+        print(f"  {'─' * 55}")
+        sorted_tools = sorted(snapshot.per_tool_metrics.items(), key=lambda x: x[1]["calls"], reverse=True)
+        for tool, data in sorted_tools[:15]:
+            rate = f"{data['success_rate']:.0%}"
+            status = "✓" if data["success_rate"] >= 0.9 else "⚠" if data["success_rate"] >= 0.75 else "✗"
+            print(f"  {status} {tool:25s} {rate:>5s}  ({data['calls']} calls, {data['failures']} failures)")
 
     print(f"{'=' * 60}")
 
