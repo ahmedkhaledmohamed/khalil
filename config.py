@@ -124,6 +124,12 @@ OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
 # Timezone
 TIMEZONE = os.getenv("KHALIL_TIMEZONE", "America/Toronto")
 
+# Conversation tuning
+CONVERSATION_CONTEXT_WINDOW = int(os.getenv("KHALIL_CONTEXT_WINDOW", "30"))
+CONVERSATION_MIN_WINDOW = int(os.getenv("KHALIL_MIN_WINDOW", "8"))
+SUMMARIZE_THRESHOLD = int(os.getenv("KHALIL_SUMMARIZE_THRESHOLD", "15"))
+SESSION_GAP_SECONDS = int(os.getenv("KHALIL_SESSION_GAP_SECONDS", "7200"))
+
 # Family/shared calendar — set to a Google Calendar ID to include family events
 # in morning briefs and scheduling conflict detection.
 # Find the ID in Google Calendar → Settings → <calendar> → "Calendar ID"

@@ -234,10 +234,31 @@ async def _reply_with_keyboard(ctx: MessageContext, text: str, reply_markup, par
         await ctx.reply(text, parse_mode=parse_mode)
 
 
-CONVERSATION_CONTEXT_WINDOW = 30  # max messages sent to LLM for context (tool calls burn 2 rows each)
-CONVERSATION_MIN_WINDOW = 8      # minimum messages to include
-SUMMARIZE_THRESHOLD = 15         # unsummarized messages before triggering summary
-SESSION_GAP_SECONDS = 7200       # 2 hours = new session
+from config import (
+    CONVERSATION_CONTEXT_WINDOW,
+    CONVERSATION_MIN_WINDOW,
+    SUMMARIZE_THRESHOLD,
+    SESSION_GAP_SECONDS,
+)
+
+# --- Rate limiting ---
+import time as _time_mod
+_user_msg_times: dict[int, list[float]] = {}
+_RATE_LIMIT_MAX = 10   # messages per window
+_RATE_LIMIT_WINDOW = 60.0  # seconds
+
+
+def _check_rate_limit(chat_id: int) -> bool:
+    """Return True if within rate limit, False if throttled."""
+    now = _time_mod.monotonic()
+    times = _user_msg_times.get(chat_id, [])
+    times = [t for t in times if now - t < _RATE_LIMIT_WINDOW]
+    if len(times) >= _RATE_LIMIT_MAX:
+        return False
+    times.append(now)
+    _user_msg_times[chat_id] = times
+    return True
+
 
 # --- Khalil identity block (shared across all system prompts) ---
 KHALIL_IDENTITY = (
@@ -301,8 +322,14 @@ def save_message(chat_id: int, role: str, content: str,
                 asyncio.get_event_loop().call_soon(
                     lambda cid=chat_id: asyncio.ensure_future(_summarize_session(cid))
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("Session gap detection failed: %s", e)
+
+    # Truncate oversized content to prevent DB bloat
+    _MAX_MSG_CONTENT = 8000
+    if content and len(content) > _MAX_MSG_CONTENT:
+        log.info("Truncating %s message from %d to %d chars", role, len(content), _MAX_MSG_CONTENT)
+        content = content[:_MAX_MSG_CONTENT]
 
     db_conn.execute(
         "INSERT INTO conversations (chat_id, role, content, message_type, metadata) VALUES (?, ?, ?, ?, ?)",
@@ -446,6 +473,27 @@ def get_conversation_history(chat_id: int) -> str:
 
     lines = [f"{r[0].title()}: {r[1]}" for r in rows]
     return "Recent conversation:\n" + "\n".join(lines)
+
+
+def _detect_re_ask(chat_id: int, query: str) -> bool:
+    """Detect if user is re-asking a recent question (implicit quality signal)."""
+    try:
+        row = db_conn.execute(
+            "SELECT content, timestamp FROM conversations "
+            "WHERE chat_id = ? AND role = 'user' AND message_type = 'text' "
+            "ORDER BY id DESC LIMIT 1",
+            (chat_id,),
+        ).fetchone()
+        if not row:
+            return False
+        prev_content, ts = row
+        from datetime import datetime as _dt
+        last_time = _dt.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        if (_dt.utcnow() - last_time).total_seconds() > 600:
+            return False
+        return _compute_topic_similarity(query, prev_content) > 0.5
+    except Exception:
+        return False
 
 
 async def get_conversation_context(chat_id: int, query: str) -> str:
@@ -865,6 +913,11 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                     _bp_resp = await _bp_client.chat.completions.create(
                         model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
                     )
+                    try:
+                        from learning import record_signal
+                        record_signal("llm_fallback", {"primary": "claude", "provider": _bp_attr, "model": _bp_model, "reason": "circuit_breaker"})
+                    except Exception:
+                        pass
                     return _bp_resp.choices[0].message.content
                 except Exception:
                     continue
@@ -923,6 +976,10 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                             model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
                         )
                         log.info("Claude failed, fell back to %s (%s)", _bp_model, _bp_attr)
+                        try:
+                            record_signal("llm_fallback", {"primary": "claude", "provider": _bp_attr, "model": _bp_model, "reason": "retry_exhausted"})
+                        except Exception:
+                            pass
                         return _bp_resp.choices[0].message.content
                     except Exception as _bp_e:
                         log.warning("Backup %s failed: %s", _bp_model, _bp_e)
@@ -1133,6 +1190,10 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
                         model=_bp_model, max_tokens=1500, messages=_backup_msgs, timeout=CLAUDE_TIMEOUT,
                     )
                     log.info("Streaming fallback: %s succeeded", _bp_model)
+                    try:
+                        record_signal("llm_fallback", {"primary": "claude", "provider": _bp_attr, "model": _bp_model, "reason": "streaming_timeout"})
+                    except Exception:
+                        pass
                     yield _bp_resp.choices[0].message.content
                     return
                 except Exception as _bp_e:
@@ -5047,6 +5108,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not query or not query.strip():
         return
 
+    # Rate limiting
+    chat_id = update.effective_chat.id
+    if not _check_rate_limit(chat_id):
+        await update.message.reply_text("⏱️ Too many messages — please wait a moment.")
+        return
+
     # Check for pending voice confirmation
     if await _handle_voice_confirmation(query, update, context):
         return
@@ -5156,14 +5223,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         # Build context from all sources (with timeout protection for P95)
+        _t_ctx_start = _time_mod.monotonic()
         try:
             results = await asyncio.wait_for(hybrid_search(query, limit=6), timeout=10.0)
         except asyncio.TimeoutError:
             log.warning("hybrid_search timed out after 10s for query: %s", query[:80])
             results = []
+        _t_search = _time_mod.monotonic() - _t_ctx_start
         archive_context = truncate_context(results) if results else "No relevant archive data found."
         personal_context = get_relevant_context(query, max_chars=2000)
+        _t_ctx_mid = _time_mod.monotonic()
         conversation_context = await get_conversation_context(chat_id, query)
+        _t_context = _time_mod.monotonic() - _t_ctx_mid
 
         full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
         if conversation_context:
@@ -5219,9 +5290,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
+        _t_llm_start = _time_mod.monotonic()
         display_response = await call_llm_with_tools(
             query, full_context, chat_id, progress_msg, channel,
         )
+        _t_llm = _time_mod.monotonic() - _t_llm_start
+
+        # Record component latency breakdown for P95 diagnosis
+        try:
+            from learning import record_signal
+            record_signal("response_latency_breakdown", {
+                "search_ms": int(_t_search * 1000),
+                "context_ms": int(_t_context * 1000),
+                "llm_ms": int(_t_llm * 1000),
+                "total_ms": int((_time_mod.monotonic() - _msg_start) * 1000),
+            })
+        except Exception:
+            pass
     except Exception as e:
         log.error("Message handler failed for query '%s': %s", query[:100], e, exc_info=True)
         display_response = "Sorry, I hit an internal error processing that. Please try again."
@@ -5279,6 +5364,12 @@ async def handle_message_generic(ctx: MessageContext):
         return
 
     chat_id = ctx.chat_id
+
+    # Rate limiting
+    if not _check_rate_limit(chat_id):
+        await ctx.reply("⏱️ Too many messages — please wait a moment.")
+        return
+
     # Enable auto-save so action handler replies are recorded in conversation history
     ctx.auto_save_replies = True
     ctx._save_fn = save_message
@@ -5290,6 +5381,14 @@ async def handle_message_generic(ctx: MessageContext):
         )
 
     save_message(chat_id, "user", query)
+
+    # Detect re-asks (implicit quality signal)
+    if _detect_re_ask(chat_id, query):
+        try:
+            from learning import record_signal
+            record_signal("user_re_ask", {"query": query[:200]})
+        except Exception:
+            pass
 
     # 1. Skill-pattern matching → try direct dispatch before LLM or shell
     action_hint = _looks_like_action(query)

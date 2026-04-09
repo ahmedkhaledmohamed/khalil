@@ -72,7 +72,7 @@ async def web_search(query: str, max_results: int = 5) -> list[dict]:
         return await asyncio.to_thread(fn, query, max_results)
     except Exception as e:
         log.error("Web search failed: %s", e)
-        return [{"title": "Search error", "url": "", "snippet": str(e)}]
+        return []
 
 
 async def web_fetch(url: str, max_chars: int = 5000) -> str:
