@@ -1,0 +1,9 @@
+{
+    "name": "apple_music_play_item_media_play",
+    "command": "play",
+    "description": "Actions 'apple_music_play_item' and 'media_play' used together 32x — integration opportunity",
+    "action_module": "actions.apple_music_play_item_media_play",
+    "handler_function": "handle_play",
+    "generated_at": "2026-04-07T12:00:00",
+    "generated_for": "Actions 'apple_music_play_item' and 'media_play' used together 32x — integration opportunity"
+}
