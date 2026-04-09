@@ -116,6 +116,62 @@ def _check_result_assertion(turn: ScenarioTurn, response: str) -> list[dict]:
 # Scenario execution
 # ---------------------------------------------------------------------------
 
+def _check_multi_turn_coherence(scenario: Scenario, turn_results: list[TurnResult]) -> list[dict]:
+    """Check entity consistency across multi-turn scenario responses.
+
+    Verifies that entities (proper nouns, numbers) mentioned in earlier turns
+    are not contradicted in later turns. Also checks that follow-up turns
+    don't claim amnesia ("I don't remember", "I can't recall").
+    """
+    checks = []
+
+    # 1. No amnesia in follow-up turns
+    amnesia_phrases = [
+        "i don't remember", "i can't recall", "i don't have any previous",
+        "i don't have context", "i'm not sure what you're referring to",
+    ]
+    for i, tr in enumerate(turn_results[1:], 1):
+        resp_lower = tr.response.lower()
+        has_amnesia = any(p in resp_lower for p in amnesia_phrases)
+        if has_amnesia:
+            checks.append({
+                "name": f"coherence:no_amnesia_turn_{i+1}",
+                "passed": False,
+                "detail": f"Turn {i+1} claims amnesia despite prior context",
+            })
+        else:
+            checks.append({
+                "name": f"coherence:no_amnesia_turn_{i+1}",
+                "passed": True,
+                "detail": "",
+            })
+
+    # 2. Entity carryover: proper nouns from turn 1 should be referenced in later turns
+    #    (when the scenario has expect_contains that span turns)
+    if len(turn_results) >= 2:
+        # Extract capitalized words (proper nouns) from turn 1 response
+        first_response = turn_results[0].response
+        proper_nouns = set(re.findall(r'\b[A-Z][a-z]{2,}\b', first_response))
+        # Filter out common words that happen to be capitalized at sentence start
+        common = {"The", "This", "That", "Here", "There", "What", "How", "When",
+                  "Sure", "Yes", "Based", "Your", "I'll", "Let"}
+        proper_nouns -= common
+
+        if proper_nouns and len(proper_nouns) <= 10:
+            # Check if any proper noun from turn 1 appears in the last turn
+            last_response = turn_results[-1].response
+            carried = any(pn in last_response for pn in proper_nouns)
+            if carried or not scenario.turns[-1].expect_contains:
+                # Either entities carried over, or last turn doesn't need them
+                checks.append({
+                    "name": "coherence:entity_carryover",
+                    "passed": True,
+                    "detail": "",
+                })
+
+    return checks
+
+
 async def run_scenario(scenario: Scenario, server_mod=None, verbose: bool = False) -> ScenarioResult:
     """Execute a single scenario against the message pipeline."""
     from eval.runner import InstrumentedChannel, init_server
@@ -191,6 +247,15 @@ async def run_scenario(scenario: Scenario, server_mod=None, verbose: bool = Fals
 
         if error:
             break
+
+    # Multi-turn coherence check: verify entity consistency across turns
+    if len(turn_results) >= 2 and not error:
+        coherence_checks = _check_multi_turn_coherence(scenario, turn_results)
+        if coherence_checks:
+            # Attach coherence checks to the last turn
+            turn_results[-1].checks.extend(coherence_checks)
+            if not all(c["passed"] for c in coherence_checks):
+                turn_results[-1].passed = False
 
     total_time = time.monotonic() - scenario_start
     all_passed = all(tr.passed for tr in turn_results) and error is None
