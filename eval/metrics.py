@@ -59,6 +59,9 @@ class MetricsSnapshot:
     cost_per_task_p95: float | None = None
     total_cost_usd: float = 0.0
     total_tokens: int = 0
+    # MTTR (Mean Time To Recovery) — hours from failure detection to verified fix
+    mttr_hours: float | None = None
+    mttr_samples: int = 0
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -204,6 +207,32 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- MTTR (Mean Time To Recovery) ---
+    try:
+        mttr_rows = conn.execute(
+            "SELECT created_at, merged_at, verified_at FROM evolution_candidates "
+            "WHERE status = 'completed' AND created_at IS NOT NULL "
+            "AND (merged_at IS NOT NULL OR verified_at IS NOT NULL)"
+        ).fetchall()
+        if mttr_rows:
+            from datetime import datetime as _dt_mttr
+            mttrs = []
+            for row in mttr_rows:
+                try:
+                    t_start = _dt_mttr.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                    t_end_str = row["verified_at"] or row["merged_at"]
+                    t_end = _dt_mttr.fromisoformat(t_end_str.replace("Z", "+00:00"))
+                    hours = (t_end - t_start).total_seconds() / 3600
+                    if 0 < hours < 720:  # sanity: <30 days
+                        mttrs.append(hours)
+                except Exception:
+                    continue
+            if mttrs:
+                snapshot.mttr_hours = sum(mttrs) / len(mttrs)
+                snapshot.mttr_samples = len(mttrs)
+    except Exception:
+        pass
+
     # --- Cost Per Task ---
     try:
         cost_rows = conn.execute(
@@ -299,6 +328,8 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
          f"{snapshot.cascaded_failures} cascaded", "<5%"),
         ("Abandonment Rate", snapshot.abandonment_rate,
          f"{snapshot.abandoned_sessions}/{snapshot.total_sessions} sessions", "<15%"),
+        ("MTTR (avg)", snapshot.mttr_hours,
+         f"{snapshot.mttr_hours:.1f}h ({snapshot.mttr_samples} samples)" if snapshot.mttr_hours else "N/A", "<24h"),
         ("Cost Per Task P50", snapshot.cost_per_task_p50,
          f"${snapshot.cost_per_task_p50:.4f}" if snapshot.cost_per_task_p50 else "N/A", "track"),
         ("Cost Per Task P95", snapshot.cost_per_task_p95,

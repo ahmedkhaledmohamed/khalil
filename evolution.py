@@ -59,6 +59,8 @@ class EvolutionCandidate:
     pr_url: str = ""
     failure_count: int = 0
     created_at: str = ""
+    merged_at: str = ""      # #13: MTTR tracking — when PR was merged
+    verified_at: str = ""    # #13: MTTR tracking — when fix was verified
 
     def __post_init__(self):
         if not self.created_at:
@@ -101,9 +103,20 @@ def ensure_evolution_table():
             failure_count INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             executed_at TEXT,
-            pr_url TEXT DEFAULT ''
+            pr_url TEXT DEFAULT '',
+            merged_at TEXT,
+            verified_at TEXT
         )
     """)
+    # Migrate existing tables: add columns if missing
+    try:
+        conn.execute("ALTER TABLE evolution_candidates ADD COLUMN merged_at TEXT")
+    except Exception:
+        pass  # Column already exists
+    try:
+        conn.execute("ALTER TABLE evolution_candidates ADD COLUMN verified_at TEXT")
+    except Exception:
+        pass  # Column already exists
     conn.commit()
     conn.close()
 
