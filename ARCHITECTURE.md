@@ -1,5 +1,219 @@
 # Khalil — System Architecture
 
+## Full Ecosystem
+
+```mermaid
+graph TB
+    %% ── Client Layer ──────────────────────────────────────
+    subgraph Clients["Clients"]
+        TG["Telegram Bot<br/>(primary)"]
+        SL[Slack Bot]
+        DC[Discord Bot]
+        WA[WhatsApp Webhook]
+        REST[FastAPI REST]
+        MCPS["MCP Server<br/>(Claude Code / IDEs)"]
+    end
+
+    %% ── Channel Abstraction ───────────────────────────────
+    subgraph Gateway["Channel Gateway"]
+        CR[Channel Registry<br/>auto-discovers available channels]
+        MC[MessageContext<br/>channel · chat_id · user_id · reply]
+    end
+
+    TG & SL & DC & WA & REST --> CR --> MC
+    MCPS -.->|"stdio"| MC
+
+    %% ── Processing Pipeline ───────────────────────────────
+    subgraph Pipeline["Processing Pipeline"]
+        direction TB
+        ID["Intent Detection<br/>regex patterns vs fallback"]
+
+        subgraph FastPath["Fast Path"]
+            FP["Pattern Match<br/>→ direct handler<br/>(no LLM)"]
+        end
+
+        subgraph ToolLoop["Tool-Use Loop (max 5 iter)"]
+            CTX["Context Assembly<br/>knowledge · history · live state · session"]
+            PROMPT["Build Prompt<br/>+ ~12 filtered tool schemas"]
+            LLM_CALL["Call LLM"]
+            EXEC_TOOL["Execute Tool Call<br/>→ append result → loop"]
+        end
+
+        ID -->|"regex hit"| FP
+        ID -->|"complex / fallback"| CTX --> PROMPT --> LLM_CALL
+        LLM_CALL -->|"tool_use"| EXEC_TOOL -->|"result"| LLM_CALL
+    end
+
+    MC --> ID
+
+    %% ── LLM Layer ─────────────────────────────────────────
+    subgraph LLMLayer["LLM Layer"]
+        MR["Model Router<br/>FAST · STANDARD · COMPLEX"]
+        subgraph Providers["Providers"]
+            TF["Taskforce Proxy<br/>(Spotify)"]
+            Claude["Claude Opus / Sonnet"]
+            GPT["GPT-5.2<br/>(fallback)"]
+            Gemini["Gemini 2.5 Pro<br/>(fallback)"]
+        end
+        OL["Ollama Local<br/>qwen3:14b"]
+        CB["Circuit Breaker<br/>auto-failover"]
+    end
+
+    LLM_CALL --> MR
+    MR --> TF --> Claude
+    TF -.-> GPT
+    TF -.-> Gemini
+    MR -->|"sensitive / offline"| OL
+    CB --- TF
+
+    %% ── Skill & Action Dispatch ───────────────────────────
+    subgraph Dispatch["Skill & Action Dispatch"]
+        SR["Skill Registry<br/>87 skills · patterns · keywords"]
+        TC["Tool Catalog<br/>generate OpenAI-format schemas"]
+        AUTO["Autonomy Controller<br/>READ ✓ · WRITE ? · DANGEROUS ✕"]
+        GUARD["Guardian<br/>Claude Haiku safety review"]
+    end
+
+    FP --> SR
+    EXEC_TOOL --> SR
+    SR --> AUTO --> GUARD
+    TC --> PROMPT
+
+    %% ── Action Modules ────────────────────────────────────
+    subgraph Actions["Action Modules (87)"]
+        subgraph AG["Google APIs"]
+            Gmail["Gmail<br/>read · compose · labels"]
+            GCal["Calendar<br/>events · scheduling"]
+            GDrive["Drive · Tasks"]
+            YT[YouTube]
+        end
+        subgraph AA["Apple Native"]
+            AM["Music · Reminders"]
+            AN["Notes · HealthKit"]
+            HK[HomeKit]
+        end
+        subgraph AD["Dev Tools"]
+            GH["GitHub<br/>PRs · issues · notifications"]
+            Shell["Shell · Terminal · Tmux"]
+            CC["Claude Code<br/>via TTY"]
+            DO[DigitalOcean]
+        end
+        subgraph AC["Communication"]
+            SlackA[Slack]
+            iMsg[iMessage]
+        end
+        subgraph AK["Media & Knowledge"]
+            Spot[Spotify]
+            Not[Notion]
+            RW[Readwise]
+            Web["Web Search<br/>DuckDuckGo"]
+        end
+        subgraph AS["System"]
+            Weather[Weather]
+            GUI["GUI Automation"]
+            Pomodoro[Pomodoro]
+            Voice[Voice / TTS]
+        end
+    end
+
+    GUARD -->|"approved"| Actions
+
+    %% ── MCP Client ────────────────────────────────────────
+    subgraph MCPClient["MCP Client (consumes)"]
+        MCM[MCP Client Manager]
+        Hub["the-hub<br/>(personal tools)"]
+        WHb["work-hub<br/>(Spotify tools)"]
+    end
+
+    SR --> MCM --> Hub & WHb
+
+    %% ── Auth Layer ────────────────────────────────────────
+    subgraph Auth["Auth & Tokens"]
+        OA["OAuth Manager<br/>10+ token files<br/>proactive refresh"]
+        KR["macOS Keyring<br/>API keys · bot tokens"]
+    end
+
+    Actions --> OA & KR
+
+    %% ── Intelligence Layer ────────────────────────────────
+    subgraph Intelligence["Intelligence Layer (background)"]
+        AL["Agent Loop<br/>sense → think → filter → act<br/>every 5 min"]
+        EVO["Evolution Engine<br/>4× daily"]
+        HEAL["Self-Healing<br/>failure fingerprint → patch"]
+        EXT["Self-Extension<br/>gap detect → generate module"]
+    end
+
+    AL -->|"opportunities"| SR
+    EVO --> HEAL & EXT
+    HEAL & EXT -->|"GitHub PRs"| GH
+
+    %% ── Scheduled Jobs ────────────────────────────────────
+    subgraph Scheduler["APScheduler"]
+        MB["Morning Brief · 8 AM"]
+        FIN["Financial Check · 1st & 15th"]
+        WK["Weekly Summary · Sun 6 PM"]
+        REF["Friday Reflection"]
+        REM["Reminder Check · every 60s"]
+        ES["Email Sync · every 6h"]
+    end
+
+    Scheduler -->|"triggers"| SR
+
+    %% ── Data Layer ────────────────────────────────────────
+    subgraph Data["Data Layer — SQLite + sqlite-vec"]
+        DB[("khalil.db<br/>WAL mode")]
+        DOCS["documents<br/>+ 768-d embeddings<br/>(nomic-embed-text)"]
+        CONV[conversations]
+        SIG["interaction_signals"]
+        PREF["learned_preferences"]
+        EVOC["evolution_candidates"]
+        REMS[reminders]
+        AUDIT[audit_log]
+        ANALYTICS[tool_analytics]
+    end
+
+    CTX -->|"hybrid search"| DB
+    Actions -->|"read / write"| DB
+    SIG -->|"feeds"| EVO
+    OL -->|"embeddings"| DOCS
+    DB --- DOCS & CONV & SIG & PREF & EVOC & REMS & AUDIT & ANALYTICS
+
+    %% ── Knowledge Sources ─────────────────────────────────
+    subgraph Sources["Indexed Knowledge Sources"]
+        SG["Gmail & Drive<br/>archives"]
+        SR2["Personal Repo<br/>work · career · goals<br/>finance · projects"]
+        SW["Spotify Work Repos<br/>ClientMessaging · product specs"]
+        SN["Notion · Readwise<br/>Google Tasks"]
+    end
+
+    Sources -->|"indexer + embedder"| DOCS
+
+    %% ── Response ──────────────────────────────────────────
+    LLM_CALL -->|"final text"| REPLY["Stream Response<br/>to user via channel"]
+    FP --> REPLY
+    REPLY --> MC
+
+    %% ── Post-Interaction ──────────────────────────────────
+    REPLY -->|"record signal"| SIG
+    REPLY -->|"save message"| CONV
+    REPLY -->|"log action"| AUDIT
+
+    %% ── Styling ───────────────────────────────────────────
+    classDef client fill:#4A90D9,color:#fff,stroke:#2E6BA6
+    classDef llm fill:#8B5CF6,color:#fff,stroke:#6D3FC0
+    classDef action fill:#10B981,color:#fff,stroke:#059669
+    classDef data fill:#F59E0B,color:#fff,stroke:#D97706
+    classDef intel fill:#EF4444,color:#fff,stroke:#DC2626
+    classDef auth fill:#6B7280,color:#fff,stroke:#4B5563
+
+    class TG,SL,DC,WA,REST,MCPS client
+    class MR,TF,Claude,GPT,Gemini,OL,CB llm
+    class Gmail,GCal,GDrive,YT,AM,AN,HK,GH,Shell,CC,DO,SlackA,iMsg,Spot,Not,RW,Web,Weather,GUI,Pomodoro,Voice action
+    class DB,DOCS,CONV,SIG,PREF,EVOC,REMS,AUDIT,ANALYTICS data
+    class AL,EVO,HEAL,EXT intel
+    class OA,KR auth
+```
+
 ## High-Level Overview
 
 ```mermaid
