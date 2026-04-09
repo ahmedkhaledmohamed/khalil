@@ -54,6 +54,11 @@ class MetricsSnapshot:
     abandoned_sessions: int = 0
     # Per-tool accuracy breakdown (τ-bench inspired)
     per_tool_metrics: dict = field(default_factory=dict)  # {tool: {calls, failures, success_rate}}
+    # Cost tracking
+    cost_per_task_p50: float | None = None
+    cost_per_task_p95: float | None = None
+    total_cost_usd: float = 0.0
+    total_tokens: int = 0
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -199,6 +204,32 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- Cost Per Task ---
+    try:
+        cost_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.cost_usd') AS REAL) as cost "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'llm_token_usage' AND context IS NOT NULL "
+            "ORDER BY cost"
+        ).fetchall()
+        if cost_rows:
+            costs = [r["cost"] for r in cost_rows if r["cost"] is not None and r["cost"] > 0]
+            if costs:
+                n = len(costs)
+                snapshot.cost_per_task_p50 = costs[n // 2]
+                snapshot.cost_per_task_p95 = costs[int(n * 0.95)]
+                snapshot.total_cost_usd = sum(costs)
+
+        token_rows = conn.execute(
+            "SELECT SUM(CAST(json_extract(context, '$.prompt_tokens') AS INTEGER) + "
+            "CAST(json_extract(context, '$.completion_tokens') AS INTEGER)) as total "
+            "FROM interaction_signals WHERE signal_type = 'llm_token_usage'"
+        ).fetchone()
+        if token_rows and token_rows["total"]:
+            snapshot.total_tokens = token_rows["total"]
+    except Exception:
+        pass
+
     # --- Per-Tool Accuracy Breakdown ---
     try:
         # Total calls per tool from capability_usage signals
@@ -268,6 +299,10 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
          f"{snapshot.cascaded_failures} cascaded", "<5%"),
         ("Abandonment Rate", snapshot.abandonment_rate,
          f"{snapshot.abandoned_sessions}/{snapshot.total_sessions} sessions", "<15%"),
+        ("Cost Per Task P50", snapshot.cost_per_task_p50,
+         f"${snapshot.cost_per_task_p50:.4f}" if snapshot.cost_per_task_p50 else "N/A", "track"),
+        ("Cost Per Task P95", snapshot.cost_per_task_p95,
+         f"${snapshot.cost_per_task_p95:.4f}" if snapshot.cost_per_task_p95 else "N/A", "track"),
     ]
 
     for name, value, detail, target in metrics:
