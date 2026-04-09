@@ -545,7 +545,7 @@ IMPORTS: <any new imports needed, one per line, or "none">
         text = call_llm_sync(
             client, client_type, CLAUDE_MODEL_COMPLEX,
             "You are a Python expert fixing bugs in an existing codebase. Output ONLY the format requested.",
-            prompt, max_tokens=4000 if multi_function else 2000,
+            prompt, max_tokens=4000 if multi_function else 3000,
         ).strip()
     except Exception as e:
         log.error("LLM API failed for healing patch: %s", e)
@@ -599,9 +599,30 @@ IMPORTS: <any new imports needed, one per line, or "none">
         original_lines = _orig_src.count("\n")
         patched_lines = code.count("\n")
         if original_lines > 10 and patched_lines < original_lines * 0.5:
-            log.error("Healing patch too short (%d lines vs original %d) — likely truncated",
-                      patched_lines, original_lines)
-            return None
+            log.warning("Healing patch too short (%d lines vs original %d) — retrying with higher token limit",
+                        patched_lines, original_lines)
+            # Retry once with higher token limit
+            try:
+                text2 = call_llm_sync(
+                    client, client_type, CLAUDE_MODEL_COMPLEX,
+                    "You are a Python expert fixing bugs. Output the COMPLETE function — do not truncate.",
+                    prompt, max_tokens=6000,
+                ).strip()
+                code_match2 = re.search(r"```python\s*\n(.+?)```", text2, re.DOTALL)
+                if code_match2:
+                    code = code_match2.group(1).strip()
+                    patched_lines = code.count("\n")
+                    if patched_lines >= original_lines * 0.5:
+                        log.info("Retry succeeded — patch now %d lines", patched_lines)
+                    else:
+                        log.error("Retry still truncated (%d lines vs original %d)", patched_lines, original_lines)
+                        return None
+                else:
+                    log.error("Retry produced no code block")
+                    return None
+            except Exception as e:
+                log.error("Retry LLM call failed: %s", e)
+                return None
 
     return code, explanation
 
@@ -894,7 +915,7 @@ async def run_self_healing(triggers: list[dict], channel, chat_id: int):
         guardian_blocked = False
         try:
             from actions.guardian import review_code_patch, GuardianVerdict
-            guardian_result = await review_code_patch(patched_func, primary["file"])
+            guardian_result = await review_code_patch(patched_func, primary["file"], original_code=original_source)
             if guardian_result.verdict == GuardianVerdict.BLOCK:
                 guardian_blocked = True
                 log.warning("Guardian blocked healing patch for %s: %s", fingerprint, guardian_result.reason)
