@@ -3078,6 +3078,8 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             from skills import get_registry
             handler = get_registry().get_handler(action)
             if handler is not None:
+                # Track reply state before handler runs
+                _had_reply_before = getattr(ctx, '_replied', False)
                 try:
                     result = await asyncio.wait_for(
                         handler(action, intent, ctx),
@@ -3087,10 +3089,21 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
                     log.error("Skill handler timed out for %s (30s)", action)
                     await ctx.reply(f"⚠️ {action} timed out after 30s. Try again or check /health.")
                     return True
+                except Exception as handler_err:
+                    log.error("Skill handler raised for %s: %s", action, handler_err)
+                    await ctx.reply(f"⚠️ {action} encountered an error: {handler_err}")
+                    return True
                 if result:
+                    # Handler claimed success — ensure user got a response
+                    if not getattr(ctx, '_replied', False) and not _had_reply_before:
+                        log.warning("Handler %s returned True but never called ctx.reply()", action)
+                        await ctx.reply(f"✅ {action} completed.")
+                    return True
+                # Handler returned falsy — if it did reply, treat as handled
+                if getattr(ctx, '_replied', False) and not _had_reply_before:
                     return True
         except Exception as e:
-            log.error("Skill handler failed for %s: %s", action, e)
+            log.error("Skill dispatch failed for %s: %s", action, e)
             await ctx.reply(f"⚠️ {action} failed: {e}")
             # Fall through to legacy dispatch / LLM for a helpful response
 
