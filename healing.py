@@ -385,6 +385,31 @@ def build_diagnosis(trigger: dict) -> dict | None:
 
 # --- Patch Generation ---
 
+
+def _is_truncated(code: str) -> bool:
+    """Detect if generated code was truncated mid-output.
+
+    Checks: unbalanced brackets/parens/braces, ast.parse failure, ends mid-string.
+    """
+    # Bracket balance
+    if code.count("(") != code.count(")"):
+        return True
+    if code.count("[") != code.count("]"):
+        return True
+    if code.count("{") != code.count("}"):
+        return True
+    # Ends with an incomplete statement (common truncation signatures)
+    stripped = code.rstrip()
+    if stripped.endswith(("=", ",", "(", "[", "{", "\\", "+")):
+        return True
+    # AST parse test
+    try:
+        ast.parse(code)
+    except SyntaxError:
+        return True
+    return False
+
+
 async def generate_healing_patch(diagnosis: dict) -> tuple[str, str] | None:
     """Use Claude Opus to generate a fixed function. Returns (patched_source, explanation) or None.
 
@@ -545,7 +570,7 @@ IMPORTS: <any new imports needed, one per line, or "none">
         text = call_llm_sync(
             client, client_type, CLAUDE_MODEL_COMPLEX,
             "You are a Python expert fixing bugs in an existing codebase. Output ONLY the format requested.",
-            prompt, max_tokens=4000 if multi_function else 3000,
+            prompt, max_tokens=8000 if multi_function else 6000,
         ).strip()
     except Exception as e:
         log.error("LLM API failed for healing patch: %s", e)
@@ -580,9 +605,9 @@ IMPORTS: <any new imports needed, one per line, or "none">
         elif "```python" in text:
             # Fallback: no closing marker (likely truncated at token limit)
             code = text.split("```python", 1)[1].strip()
-            if code.count("(") != code.count(")") or code.count("{") != code.count("}"):
-                log.error("Healing patch appears truncated (unbalanced brackets)")
-                return None
+            if _is_truncated(code):
+                log.warning("Healing patch appears truncated, will retry with higher token limit")
+                # Fall through to the retry logic below
         elif "```" in text:
             code_match2 = re.search(r"```\s*\n(.+?)```", text, re.DOTALL)
             code = code_match2.group(1).strip() if code_match2 else text.split("```")[1].split("```")[0].strip()
@@ -592,6 +617,32 @@ IMPORTS: <any new imports needed, one per line, or "none">
 
     if new_imports:
         code = new_imports + "\n\n" + code
+
+    # Truncation check — retry once with higher token limit if detected
+    if _is_truncated(code):
+        log.warning("Generated patch is truncated (ast.parse fails or unbalanced brackets), retrying")
+        try:
+            text_retry = call_llm_sync(
+                client, client_type, CLAUDE_MODEL_COMPLEX,
+                "You are a Python expert fixing bugs. Output the COMPLETE function — do not truncate. "
+                "Ensure all brackets, parentheses, and strings are properly closed.",
+                prompt, max_tokens=10000,
+            ).strip()
+            code_retry = re.search(r"```python\s*\n(.+?)```", text_retry, re.DOTALL)
+            if code_retry:
+                retry_code = code_retry.group(1).strip()
+                if not _is_truncated(retry_code):
+                    log.info("Truncation retry succeeded")
+                    code = retry_code
+                else:
+                    log.error("Truncation retry still truncated")
+                    return None
+            else:
+                log.error("Truncation retry produced no code block")
+                return None
+        except Exception as e:
+            log.error("Truncation retry LLM call failed: %s", e)
+            return None
 
     # Reject patches that are suspiciously shorter than the original
     _orig_src = primary_source.get("source", "") if not multi_function else ""
@@ -606,7 +657,7 @@ IMPORTS: <any new imports needed, one per line, or "none">
                 text2 = call_llm_sync(
                     client, client_type, CLAUDE_MODEL_COMPLEX,
                     "You are a Python expert fixing bugs. Output the COMPLETE function — do not truncate.",
-                    prompt, max_tokens=6000,
+                    prompt, max_tokens=10000,
                 ).strip()
                 code_match2 = re.search(r"```python\s*\n(.+?)```", text2, re.DOTALL)
                 if code_match2:
