@@ -44,7 +44,7 @@ P95 = 54.57s. Reduce per-model timeout to 8s first attempt, implement 15s total 
 
 ## Theme 2: SELF-HEALING — Make the Loop Self-Sustaining
 
-### 7. Guardian Calibration — Reduce False Block Rate
+### 7. Guardian Calibration — Reduce False Block Rate ✅ (PR #225)
 Guardian blocks 75% of generated patches. The CODE_REVIEW_PROMPT is overly broad. Fix: (a) whitelist safe patterns for Khalil's own codebase (subprocess to osascript/tmux/brew is expected); (b) require structured JSON output; (c) add confidence score — only BLOCK when >0.8; (d) track guardian false-positive rate.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** Anthropic Constitutional AI, NIST AI RMF
 - **Files:** `actions/guardian.py` (CODE_REVIEW_PROMPT, _parse_verdict, review_code_patch)
