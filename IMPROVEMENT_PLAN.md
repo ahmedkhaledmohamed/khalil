@@ -72,7 +72,7 @@ Single aggregate tool_success_rate (84.4%) hides which tools are broken. Extend 
 - **Files:** `eval/metrics.py` (compute_metrics, MetricsSnapshot)
 - **Unlocks:** 1, 17
 
-### 11. Hallucination Detection Metric
+### 11. Hallucination Detection Metric ✅ (PR #233)
 No metric for factual accuracy. Implement lightweight grounding check: extract entities/numbers from response, verify they appear in retrieved context. Compute grounding_ratio = entities_grounded / entities_total. Log as signal. Pure string matching, no LLM needed.
 - **Effort:** M | **Impact:** MEDIUM | **Benchmark:** GAIA (factuality), Ragas (faithfulness)
 - **Files:** `evolution.py` (post_interaction_check), `eval/metrics.py`, `eval/validators.py`
