@@ -19,6 +19,22 @@ from config import DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.github_notifications_imessage_recent")
 
+SKILL = {
+    "name": "github_notifications_imessage_recent",
+    "description": "Unified communications dashboard — GitHub notifications + recent iMessages",
+    "category": "extension",
+    "patterns": [
+        (r"\b(?:comms|communications)\s*(?:dashboard)?", "comms_all"),
+        (r"\bshow\s+(?:my\s+)?(?:notifications|comms)", "comms_all"),
+        (r"\b(?:github\s+notifications?\s+and\s+(?:i?messages?|texts?))", "comms_all"),
+        (r"\bwhat(?:'s| is)\s+(?:new|unread)\s+(?:in\s+)?(?:comms|messages)", "comms_all"),
+    ],
+    "actions": [
+        {"type": "comms_all", "handler": "handle_comms", "description": "Show GitHub notifications + recent iMessages", "keywords": "comms communications notifications messages imessage github dashboard"},
+    ],
+    "examples": ["Show my comms", "What's new in notifications and messages?", "Communications dashboard"],
+}
+
 _tables_ensured = False
 
 
@@ -125,8 +141,11 @@ def _filter_by_keyword(items: list[dict], keyword: str, fields: list[str]) -> li
 async def _fetch_github() -> list[dict]:
     """Fetch GitHub notifications, gracefully handle failures."""
     try:
-        from actions.github_api import get_notifications
+        from actions.github_api import get_notifications  # lazy: optional dependency
         return await get_notifications(unread_only=True)
+    except ImportError:
+        log.warning("github_api module not available")
+        return []
     except Exception as e:
         log.warning("Failed to fetch GitHub notifications: %s", e)
         return []
@@ -135,12 +154,15 @@ async def _fetch_github() -> list[dict]:
 async def _fetch_imessage() -> tuple[list[str], list[dict]]:
     """Fetch recent iMessage contacts and messages, gracefully handle failures."""
     try:
-        from actions.imessage import get_recent_contacts, get_recent_messages
+        from actions.imessage import get_recent_contacts, get_recent_messages  # lazy: optional dependency
         contacts, messages = await asyncio.gather(
             get_recent_contacts(limit=15),
             get_recent_messages(limit=10),
         )
         return contacts, messages
+    except ImportError:
+        log.warning("imessage module not available")
+        return [], []
     except Exception as e:
         log.warning("Failed to fetch iMessages: %s", e)
         return [], []
@@ -241,7 +263,7 @@ async def handle_comms(update, context):
                 {"title": n.get("title", ""), "detail": n.get("repo", "")}
                 for n in data["github_notifications"]
             ]
-            asyncio.get_event_loop().create_task(
+            asyncio.create_task(
                 asyncio.to_thread(_cache_results, cache_items, "github")
             )
 
