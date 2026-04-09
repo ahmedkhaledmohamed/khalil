@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -612,6 +613,64 @@ def _check_evolution_outcomes():
         log.debug("_check_evolution_outcomes failed: %s", e)
 
 
+# --- Hallucination Detection ---
+
+# Regex for extracting factual entities: numbers, dates, emails, URLs, proper nouns
+_ENTITY_PATTERNS = [
+    re.compile(r'\b\d{1,2}[:/]\d{2}\s*(?:AM|PM|am|pm)?\b'),  # times
+    re.compile(r'\b\d{4}-\d{2}-\d{2}\b'),  # ISO dates
+    re.compile(r'\b\d+(?:\.\d+)?%\b'),  # percentages
+    re.compile(r'\$\d+(?:,\d{3})*(?:\.\d{2})?\b'),  # dollar amounts
+    re.compile(r'\b\d+(?:,\d{3})+\b'),  # large numbers with commas
+    re.compile(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)+\b'),  # proper nouns (2+ words)
+]
+
+
+def _check_grounding(response: str, context_sources: list[str]) -> dict | None:
+    """Check if factual entities in the response appear in the provided context.
+
+    Returns {ratio, total, grounded, ungrounded} or None if no entities found.
+    Pure string matching — no LLM calls.
+    """
+    if not response or len(response) < 30:
+        return None
+
+    # Build context corpus from all sources
+    context_lower = " ".join(context_sources).lower() if context_sources else ""
+    if not context_lower:
+        return None
+
+    # Extract entities from response
+    entities = set()
+    for pattern in _ENTITY_PATTERNS:
+        for match in pattern.finditer(response):
+            entity = match.group().strip()
+            if len(entity) > 2:
+                entities.add(entity)
+
+    if not entities:
+        return None
+
+    # Check grounding
+    grounded = 0
+    ungrounded_list = []
+    for entity in entities:
+        if entity.lower() in context_lower:
+            grounded += 1
+        else:
+            ungrounded_list.append(entity)
+
+    total = len(entities)
+    ratio = grounded / total if total > 0 else 1.0
+
+    return {
+        "ratio": round(ratio, 3),
+        "total": total,
+        "grounded": grounded,
+        "ungrounded": ungrounded_list,
+    }
+
+
 # --- Post-Interaction Hook ---
 
 async def post_interaction_check(
@@ -670,7 +729,17 @@ async def post_interaction_check(
         if tool_results:
             _check_tool_result_adequacy(query, response, tool_results, record_signal)
 
-        # 6. Latency already recorded by server.py, no need to duplicate
+        # 6. Hallucination detection — check if factual claims are grounded in context
+        grounding = _check_grounding(response, tool_results or [])
+        if grounding is not None:
+            record_signal("grounding_check", {
+                "grounding_ratio": grounding["ratio"],
+                "entities_total": grounding["total"],
+                "entities_grounded": grounding["grounded"],
+                "ungrounded": grounding["ungrounded"][:3],  # sample
+            })
+
+        # 7. Latency already recorded by server.py, no need to duplicate
 
     except Exception as e:
         log.debug("post_interaction_check failed: %s", e)

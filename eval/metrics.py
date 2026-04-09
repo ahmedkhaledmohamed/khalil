@@ -62,6 +62,9 @@ class MetricsSnapshot:
     # MTTR (Mean Time To Recovery) — hours from failure detection to verified fix
     mttr_hours: float | None = None
     mttr_samples: int = 0
+    # Hallucination / grounding
+    grounding_ratio_avg: float | None = None
+    grounding_checks: int = 0
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -207,6 +210,21 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- Grounding / Hallucination Rate ---
+    try:
+        grounding_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.grounding_ratio') AS REAL) as ratio "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'grounding_check' AND context IS NOT NULL"
+        ).fetchall()
+        if grounding_rows:
+            ratios = [r["ratio"] for r in grounding_rows if r["ratio"] is not None]
+            if ratios:
+                snapshot.grounding_ratio_avg = sum(ratios) / len(ratios)
+                snapshot.grounding_checks = len(ratios)
+    except Exception:
+        pass
+
     # --- MTTR (Mean Time To Recovery) ---
     try:
         mttr_rows = conn.execute(
@@ -328,6 +346,8 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
          f"{snapshot.cascaded_failures} cascaded", "<5%"),
         ("Abandonment Rate", snapshot.abandonment_rate,
          f"{snapshot.abandoned_sessions}/{snapshot.total_sessions} sessions", "<15%"),
+        ("Grounding Ratio", snapshot.grounding_ratio_avg,
+         f"{snapshot.grounding_checks} checks" if snapshot.grounding_checks else "N/A", ">95%"),
         ("MTTR (avg)", snapshot.mttr_hours,
          f"{snapshot.mttr_hours:.1f}h ({snapshot.mttr_samples} samples)" if snapshot.mttr_hours else "N/A", "<24h"),
         ("Cost Per Task P50", snapshot.cost_per_task_p50,
