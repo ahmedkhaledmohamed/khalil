@@ -33,6 +33,12 @@ SKILL = {
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle voice-related intents."""
+    # Availability guard: check macOS say command
+    if action == "voice_tts":
+        import shutil
+        if not shutil.which("say"):
+            await ctx.reply("Text-to-speech is not available (macOS `say` command not found).")
+            return True
     if action == "voice_tts":
         text = intent.get("query", "").strip()
         # Strip the "say" prefix
