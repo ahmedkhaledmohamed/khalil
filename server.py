@@ -5598,7 +5598,17 @@ async def handle_message_generic(ctx: MessageContext):
             except Exception:
                 pass
 
-    response = await ask_claude(query, full_context)
+    # Conversational mode: no skill matched, optimize for quality dialogue
+    _conv_extra = (
+        "CONVERSATION MODE: No action skill matched this query. "
+        "Respond as a thoughtful, knowledgeable personal assistant. "
+        "Be warm but concise. Draw on the provided context to personalize your response. "
+        "If the user is making small talk, engage naturally. "
+        "If they're asking a knowledge question, answer directly from context or general knowledge. "
+        "Do NOT suggest the user run commands or check things manually — if you can't help, say so. "
+        "Do NOT include [CAPABILITY_GAP] tags for conversational queries.\n\n"
+    )
+    response = await ask_claude(query, full_context, system_extra=_conv_extra)
 
     # Extract capability gap tags BEFORE stripping from display
     _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
