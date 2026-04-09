@@ -1,0 +1,93 @@
+name: Eval Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'eval/**'
+      - 'actions/**'
+      - 'agents/**'
+
+jobs:
+  syntax-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml pytest
+
+      - name: Syntax check — all Python files
+        run: |
+          python -c "
+          import ast, pathlib, sys
+          errors = []
+          for f in pathlib.Path('.').rglob('*.py'):
+              if '.venv' in str(f) or '__pycache__' in str(f):
+                  continue
+              try:
+                  ast.parse(f.read_text())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              sys.exit(1)
+          print(f'All {len(list(pathlib.Path(\".\").rglob(\"*.py\")))} Python files parse OK')
+          "
+
+      - name: Validate golden.yaml
+        run: |
+          python -c "
+          import yaml
+          data = yaml.safe_load(open('eval/fixtures/golden.yaml'))
+          total = sum(len(v) for v in data.values())
+          print(f'Golden cases: {total} across {len(data)} categories')
+          assert total > 400, f'Expected >400 golden cases, got {total}'
+          "
+
+      - name: Swarm gate tests
+        run: |
+          cd $GITHUB_WORKSPACE
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from orchestrator import looks_like_multi_step
+
+          # Should trigger
+          assert looks_like_multi_step('Check weather, email Sarah, and update calendar')
+          assert looks_like_multi_step('Prep for standup and also review PRs')
+          assert looks_like_multi_step('Summarize emails, check calendar, draft update')
+
+          # Should NOT trigger
+          assert not looks_like_multi_step('Hello')
+          assert not looks_like_multi_step('What is the weather?')
+
+          print('Swarm gate tests: 5/5 passed')
+          "
+
+      - name: Post eval summary as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### Eval Gate Results
+            - ✅ Syntax check passed (all .py files)
+            - ✅ Golden YAML valid
+            - ✅ Swarm gate tests passed
+
+            > Full frozen eval (851 cases) requires local Ollama — run manually before merge:
+            > \`python -m eval --cases eval/fixtures/cases.json --parallel\``;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
