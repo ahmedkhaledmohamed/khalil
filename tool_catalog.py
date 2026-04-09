@@ -336,10 +336,13 @@ def filter_tools_for_query(query: str, registry, all_tools: list[dict]) -> list[
                         selected.add(companion)
                 break
 
-    # If nothing matched, include a broader set
+    # If nothing specific matched, add top-scoring tools instead of dumping all 50+
     if len(selected) <= len(_CORE_TOOLS):
-        # Fall back to all tools (let the LLM decide)
-        return all_tools
+        log.info("Tool filter: no specific match for '%s' — adding top-scored tools", query[:50])
+        remaining = [(s, a) for s, a in scored if a not in selected and a in tool_index]
+        remaining.sort(key=lambda x: x[0], reverse=True)
+        for _s, action_type in remaining[:5]:
+            selected.add(action_type)
 
     result = [tool_index[name] for name in selected if name in tool_index]
     log.info("Filtered %d → %d tools for query: %s", len(all_tools), len(result), query[:50])

@@ -114,14 +114,14 @@ def record_signal(signal_type: str, context: dict | None = None, value: float = 
             result = hook(signal_type, context)
             if asyncio.iscoroutine(result):
                 asyncio.get_event_loop().create_task(result)
-        except Exception:
-            pass  # Hooks must not break signal recording
+        except Exception as e:
+            log.debug("Signal hook %s failed: %s", getattr(hook, '__name__', 'unknown'), e)
 
     # M6: Closed-loop learning — check if signal triggers a behavior change
     try:
         _process_signal_action(signal_type, context)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("Signal action processing failed for %s: %s", signal_type, e)
 
 
 # ---------------------------------------------------------------------------
