@@ -1,0 +1,9 @@
+{
+    "name": "digitalocean_spend_digitalocean_status",
+    "command": "do",
+    "description": "Actions 'digitalocean_spend' and 'digitalocean_status' used together 50x — integration opportunity",
+    "action_module": "actions.digitalocean_spend_digitalocean_status",
+    "handler_function": "handle_do",
+    "generated_at": "2026-04-09T12:00:00",
+    "generated_for": "Actions 'digitalocean_spend' and 'digitalocean_status' used together 50x — integration opportunity"
+}
