@@ -90,7 +90,7 @@ No metric for failure-to-resolution time. Add timestamps: failure detected -> he
 - **Files:** `evolution.py` (EvolutionCandidate), `eval/metrics.py`
 - **Unlocks:** 9
 
-### 14. Multi-Turn Coherence Scoring
+### 14. Multi-Turn Coherence Scoring ✅ (PR #234)
 16 scenarios exist but lack a coherence metric. Add `MultiTurnCoherenceEval`: after all turns, check entity consistency across turns (does "Forward that email" resolve correctly?). Add `multi_turn_coherence_score` to MetricsSnapshot.
 - **Effort:** M | **Impact:** MEDIUM | **Benchmark:** ConvBench, Ragas, DeepEval
 - **Files:** `eval/judge.py`, `eval/scenario_runner.py`, `eval/scenarios.py`
