@@ -1,0 +1,9 @@
+{
+    "name": "blog_add_blog_check",
+    "command": "blog",
+    "description": "Actions 'blog_add' and 'blog_check' used together 50x — integration opportunity",
+    "action_module": "actions.blog_add_blog_check",
+    "handler_function": "handle_blog",
+    "generated_at": "2026-04-08T12:00:00",
+    "generated_for": "Actions 'blog_add' and 'blog_check' used together 50x — integration opportunity"
+}
