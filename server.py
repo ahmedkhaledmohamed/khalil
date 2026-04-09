@@ -73,6 +73,23 @@ def _redact_sensitive(text: str) -> str:
     return text
 
 
+def _should_try_swarm(query: str) -> bool:
+    """Cheap heuristic: should we attempt parallel agent decomposition?
+
+    Returns True only for queries that look multi-intent (conjunctions, comma-separated
+    verbs, etc.). Avoids the expensive LLM decomposition call for simple queries.
+    """
+    if not SWARM_ENABLED:
+        return False
+    if len(query) < 40:
+        return False
+    try:
+        from orchestrator import looks_like_multi_step
+        return looks_like_multi_step(query)
+    except Exception:
+        return False
+
+
 class _JsonFormatter(logging.Formatter):
     """Simple JSON log formatter with sensitive data redaction."""
     def format(self, record):
@@ -5537,6 +5554,42 @@ async def handle_message_generic(ctx: MessageContext):
             "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
             + full_context
         )
+
+    # Swarm check: for multi-intent queries, try parallel agent decomposition
+    if _should_try_swarm(query):
+        try:
+            from agents.coordinator import decompose_to_swarm, run_swarm, synthesize_results
+            sub_agents = await decompose_to_swarm(query, full_context, ask_claude)
+            if sub_agents:
+                log.info("Swarm decomposition: %d agents for query: %s", len(sub_agents), query[:80])
+                await progress_msg.edit("\U0001f41d Running parallel agents...")
+                swarm_result = await run_swarm(sub_agents)
+                response = await synthesize_results(query, swarm_result, ask_claude)
+                try:
+                    from learning import record_signal
+                    record_signal("swarm_used", {
+                        "query": query[:200],
+                        "agent_count": len(sub_agents),
+                        "success_count": len(swarm_result.results),
+                        "error_count": len(swarm_result.errors),
+                        "elapsed_ms": swarm_result.elapsed_ms,
+                    })
+                except Exception:
+                    pass
+                save_message(chat_id, "assistant", response)
+                try:
+                    await progress_msg.edit(response)
+                except Exception:
+                    await progress_msg.delete()
+                    await ctx.channel.send_message(chat_id, response)
+                return
+        except Exception as e:
+            log.warning("Swarm decomposition failed, falling through to standard path: %s", e)
+            try:
+                from learning import record_signal
+                record_signal("swarm_failed", {"query": query[:200], "error": str(e)[:200]})
+            except Exception:
+                pass
 
     response = await ask_claude(query, full_context)
 

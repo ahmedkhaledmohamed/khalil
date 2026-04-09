@@ -2565,3 +2565,39 @@ doc_extract:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+# --- Agent Swarm Orchestration ---
+swarm:
+  # Multi-intent queries that SHOULD benefit from parallel decomposition
+  - query: "Check weather, email Sarah, and update my calendar"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: complex
+  - query: "Prep for my standup and review PRs"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+  - query: "Summarize my emails, check calendar, and draft a status update"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: complex
+
+  # Simple queries that should NOT trigger swarm
+  - query: "What's the weather?"
+    expected_action: weather
+    expected_contains: ["temperature"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Hello"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Send an email to John"
+    expected_action: email
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: moderate
