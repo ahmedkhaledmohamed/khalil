@@ -84,7 +84,7 @@ No cost visibility. Capture `usage.prompt_tokens` and `usage.completion_tokens` 
 - **Files:** `server.py` (ask_llm, call_llm_with_tools), `eval/metrics.py`, `model_router.py`
 - **Unlocks:** 16
 
-### 13. Recovery Time (MTTR) Metric
+### 13. Recovery Time (MTTR) Metric ✅ (PR #232)
 No metric for failure-to-resolution time. Add timestamps: failure detected -> heal PR created -> PR merged -> verified. MTTR = first to last. Store in evolution_candidates table. Target: <24h critical, <7d non-critical.
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** METR
 - **Files:** `evolution.py` (EvolutionCandidate), `eval/metrics.py`
