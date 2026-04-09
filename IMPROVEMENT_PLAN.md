@@ -78,7 +78,7 @@ No metric for factual accuracy. Implement lightweight grounding check: extract e
 - **Files:** `evolution.py` (post_interaction_check), `eval/metrics.py`, `eval/validators.py`
 - **Unlocks:** 14
 
-### 12. Cost-Per-Task Tracking
+### 12. Cost-Per-Task Tracking ✅ (PR #231)
 No cost visibility. Capture `usage.prompt_tokens` and `usage.completion_tokens` from API responses, multiply by provider pricing, record alongside latency signal. Add `cost_per_task_p50/p95` to MetricsSnapshot. Enables cost-aware routing.
 - **Effort:** S | **Impact:** LOW | **Benchmark:** TheAgentCompany
 - **Files:** `server.py` (ask_llm, call_llm_with_tools), `eval/metrics.py`, `model_router.py`
