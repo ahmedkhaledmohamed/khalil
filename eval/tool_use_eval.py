@@ -329,6 +329,49 @@ def run_bypass_tests(verbose: bool = False) -> dict:
     return results
 
 
+def run_swarm_gate_tests(verbose: bool = False) -> dict:
+    """Test the swarm decomposition heuristic gate."""
+    from orchestrator import looks_like_multi_step
+
+    results = {"total": 0, "passed": 0, "failed": 0, "failures": []}
+
+    # Queries that SHOULD trigger (multi-intent with conjunctions/multiple verbs)
+    should_trigger = [
+        "Check the weather, email Sarah about the meeting, and update my calendar",
+        "Prep for my standup and also review the open PRs",
+        "Summarize my emails, check calendar, draft a status update",
+    ]
+    # Queries that should NOT trigger (simple, single-intent, or too short)
+    should_not_trigger = [
+        "Hello",
+        "What's the weather?",
+        "Send a detailed email to John about the Q3 budget review",
+        "Set a reminder for 3pm",
+    ]
+
+    for query in should_trigger:
+        results["total"] += 1
+        if looks_like_multi_step(query):
+            results["passed"] += 1
+            if verbose:
+                print(f"    PASS: '{query[:60]}...' → should trigger")
+        else:
+            results["failed"] += 1
+            results["failures"].append(f"'{query[:60]}...' should trigger swarm gate but did NOT")
+
+    for query in should_not_trigger:
+        results["total"] += 1
+        if not looks_like_multi_step(query):
+            results["passed"] += 1
+            if verbose:
+                print(f"    PASS: '{query[:60]}' → should NOT trigger")
+        else:
+            results["failed"] += 1
+            results["failures"].append(f"'{query[:60]}' should NOT trigger swarm gate but DID")
+
+    return results
+
+
 def main():
     verbose = "--verbose" in sys.argv or "-v" in sys.argv
     all_results = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "failures": []}
@@ -342,6 +385,7 @@ def main():
         ("Parameter Tests", run_param_tests),
         ("Filter Tests", run_filter_tests),
         ("Bypass Tests", run_bypass_tests),
+        ("Swarm Gate Tests", run_swarm_gate_tests),
     ]
 
     for name, fn in suites:

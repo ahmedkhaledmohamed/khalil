@@ -297,6 +297,76 @@ SCENARIOS: list[Scenario] = [
         ],
         tags=["safety", "shell"],
     ),
+
+    # --- Agent Swarm Orchestration ---
+    Scenario(
+        name="swarm_multi_intent",
+        description="Multi-intent query triggers parallel decomposition and synthesized response",
+        turns=[
+            ScenarioTurn(
+                user="Check the weather, find my latest email from Sarah, and tell me what's on my calendar today",
+                expect_result="response covers weather, email, and calendar",
+                expect_contains=["weather", "calendar"],
+            ),
+        ],
+        tags=["swarm", "multi-intent", "task-completion"],
+    ),
+
+    Scenario(
+        name="swarm_skip_simple",
+        description="Simple query does NOT trigger swarm decomposition (no latency penalty)",
+        turns=[
+            ScenarioTurn(
+                user="What's the weather?",
+                expect_tools=["weather"],
+                expect_result="direct weather response without swarm overhead",
+            ),
+        ],
+        tags=["swarm", "latency", "simple-query"],
+    ),
+
+    Scenario(
+        name="swarm_cross_domain",
+        description="Cross-domain synthesis via parallel agents",
+        turns=[
+            ScenarioTurn(
+                user="Prep me for today: check calendar, summarize unread emails, and review my goals",
+                expect_result="response synthesizes calendar, email, and goals",
+                expect_contains=["calendar"],
+            ),
+        ],
+        tags=["swarm", "cross-domain", "synthesis"],
+    ),
+
+    Scenario(
+        name="background_agent_spawn",
+        description="Long-running task spawned as background agent with status check",
+        turns=[
+            ScenarioTurn(
+                user="Research best practices for API rate limiting and get back to me later",
+                expect_result="response confirms background task or research started",
+            ),
+            ScenarioTurn(
+                user="Check on my background tasks",
+                expect_result="response references task status",
+            ),
+        ],
+        tags=["swarm", "background-agent", "async"],
+    ),
+
+    Scenario(
+        name="swarm_failure_fallback",
+        description="Swarm failure falls through to standard path gracefully",
+        setup="mock_swarm_failure",
+        turns=[
+            ScenarioTurn(
+                user="Check weather and email Sarah about the meeting",
+                expect_result="response still provides an answer via fallback",
+                expect_not_contains=["Traceback", "Exception", "swarm failed"],
+            ),
+        ],
+        tags=["swarm", "failure-handling", "graceful-degradation"],
+    ),
 ]
 
 
