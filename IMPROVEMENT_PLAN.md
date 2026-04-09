@@ -155,7 +155,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 - **Files:** `eval/runner.py` (run_case), `eval/judge.py` (HeuristicEval, DeterministicEval)
 - **Unlocks:** 15, 9
 
-### 23. Continuous Eval (CI Gate)
+### 23. Continuous Eval (CI Gate) ✅ (PR #229)
 Eval runs are manual. Add GitHub Actions workflow: run frozen case eval on every PR, compare against previous pass rate, block merge if >1pp drop, post summary as PR comment.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** TheAgentCompany
 - **Files:** `eval/__main__.py`, `eval/gap_analysis.py` (diff_reports), new: `.github/workflows/eval.yml`
