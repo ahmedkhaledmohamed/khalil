@@ -12,7 +12,7 @@ Introduce `HandlerResponse` dataclass (`.text`, `.success`, `.metadata`) and a w
 - **Files:** `skills.py`, `server.py` (handle_action_intent), `eval/gap_analysis.py`
 - **Unlocks:** 7, 12, 22
 
-### 2. Graceful Empty/Whitespace Input Handling
+### 2. Graceful Empty/Whitespace Input Handling ✅ (PR #218)
 `handle_message_generic` silently returns on empty input (line ~5423). Add explicit friendly response for empty, whitespace, and 1-2 char inputs. Eliminates 100 eval failures.
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** ConvBench
 - **Files:** `server.py` (handle_message_generic)
