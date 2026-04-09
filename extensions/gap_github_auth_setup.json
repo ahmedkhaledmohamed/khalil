@@ -1,0 +1,9 @@
+{
+    "name": "gap_github_auth_setup",
+    "command": "ghauth",
+    "description": "Capability gap: Automated GitHub authentication setup",
+    "action_module": "actions.gap_github_auth_setup",
+    "handler_function": "handle_ghauth",
+    "generated_at": "2026-04-09T12:00:00",
+    "generated_for": "Capability gap: Automated GitHub authentication setup"
+}
