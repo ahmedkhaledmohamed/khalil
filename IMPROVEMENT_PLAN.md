@@ -50,7 +50,7 @@ Guardian blocks 75% of generated patches. The CODE_REVIEW_PROMPT is overly broad
 - **Files:** `actions/guardian.py` (CODE_REVIEW_PROMPT, _parse_verdict, review_code_patch)
 - **Unlocks:** 8, 9
 
-### 8. Self-Healing Patch Truncation Fix
+### 8. Self-Healing Patch Truncation Fix ✅ (PR #220)
 Healing generates patches with `max_tokens=1500`, causing mid-line truncation that guardian correctly blocks. Raise to 4000, add truncation detector (check for balanced brackets/parens), re-request continuation if truncated, validate with `ast.parse()` before guardian review.
 - **Effort:** S | **Impact:** HIGH | **Benchmark:** Microsoft Failure Taxonomy
 - **Files:** `healing.py` (generate_healing_patch, validate_patch), `llm_client.py`
