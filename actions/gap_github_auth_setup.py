@@ -23,7 +23,28 @@ from config import DB_PATH, KEYRING_SERVICE, TIMEZONE
 
 log = logging.getLogger("khalil.actions.gap_github_auth_setup")
 
-_KEY_GITHUB = "github-token"
+SKILL = {
+    "name": "gap_github_auth_setup",
+    "description": "GitHub authentication — store, verify, and manage Personal Access Tokens",
+    "category": "extension",
+    "patterns": [
+        (r"\b(?:set\s*up|setup|configure|add)\s+(?:github|gh)\s+(?:token|auth|pat)", "ghauth_setup"),
+        (r"\bgithub\s+(?:auth|authentication|token)\s+(?:setup|configure|status)", "ghauth_status"),
+        (r"\bverify\s+(?:my\s+)?github\s+(?:token|auth|pat)", "ghauth_verify"),
+        (r"\bremove\s+(?:my\s+)?github\s+(?:token|auth|pat)", "ghauth_remove"),
+        (r"\b(?:store|save)\s+(?:github|gh)\s+(?:pat|token|credentials)", "ghauth_setup"),
+    ],
+    "actions": [
+        {"type": "ghauth_setup", "handler": "handle_ghauth", "description": "Store a GitHub PAT", "keywords": "github token setup configure store pat"},
+        {"type": "ghauth_status", "handler": "handle_ghauth", "description": "Check GitHub auth status", "keywords": "github auth status check token"},
+        {"type": "ghauth_verify", "handler": "handle_ghauth", "description": "Verify GitHub token validity", "keywords": "github token verify check valid"},
+        {"type": "ghauth_remove", "handler": "handle_ghauth", "description": "Remove stored GitHub token", "keywords": "github token remove delete"},
+    ],
+    "examples": ["Set up my GitHub token", "Verify my GitHub auth", "GitHub token status", "Remove GitHub token"],
+}
+
+# Keyring keys — aligned with github_api.py which uses "github-pat"
+_KEY_GITHUB = "github-pat"
 _KEY_GHE = "github-enterprise-token"
 _API_GITHUB = "https://api.github.com"
 _API_GHE = "https://ghe.spotify.net/api/v3"
