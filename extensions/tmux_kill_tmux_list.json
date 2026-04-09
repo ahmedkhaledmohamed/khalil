@@ -1,0 +1,9 @@
+{
+    "name": "tmux_kill_tmux_list",
+    "command": "tmux",
+    "description": "Actions 'tmux_kill' and 'tmux_list' used together 28x — integration opportunity",
+    "action_module": "actions.tmux_kill_tmux_list",
+    "handler_function": "handle_tmux",
+    "generated_at": "2026-04-08T12:00:00",
+    "generated_for": "Actions 'tmux_kill' and 'tmux_list' used together 28x — integration opportunity"
+}
