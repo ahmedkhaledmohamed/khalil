@@ -149,7 +149,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 
 ## Theme 6: EVAL INFRASTRUCTURE
 
-### 22. Eval Stability Layer (Deterministic Seeding)
+### 22. Eval Stability Layer (Deterministic Seeding) ✅ (PR #228)
 111 phantom regressions from LLM variance. Fix: `temperature=0.0` for eval calls, semantic equivalence mode in heuristic evaluator, retry failed cases once, store raw LLM response for root-cause analysis.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** DeepEval
 - **Files:** `eval/runner.py` (run_case), `eval/judge.py` (HeuristicEval, DeterministicEval)
