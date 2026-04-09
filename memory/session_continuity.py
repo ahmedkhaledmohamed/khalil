@@ -220,7 +220,7 @@ def get_session_continuity(chat_id: int, query: str) -> str:
             if tool_ctx:
                 parts.append(tool_ctx)
             _clear_restart_flag()
-            log.info("Post-restart context injected for chat %d", chat_id)
+            log.info("Post-restart context injected for chat %s", chat_id)
 
         result = "\n".join(parts)
         if len(parts) <= 1:
