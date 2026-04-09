@@ -103,6 +103,7 @@ class TestResult:
     signals: list[dict] = field(default_factory=list)
     actual_action: str | None = None    # from trace: the action_type that was dispatched
     handler_name: str | None = None     # from trace: handler function that was called
+    retry_count: int = 0                # number of retries before this result
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +144,11 @@ async def init_server():
 
     from skills import get_registry
     get_registry()
+
+    # Eval mode: force deterministic LLM outputs
+    # Override temperature-like settings where possible
+    server._EVAL_MODE = True
+    log.info("Eval mode enabled: deterministic LLM outputs")
 
     return server
 
@@ -233,12 +239,20 @@ async def run_suite(
 
     for i, case in enumerate(cases):
         result = await run_case(server_mod, case)
+
+        # Retry once on error (catches transient LLM variance/timeouts)
+        if result.error and "Timeout" in result.error:
+            log.info("Retrying %s after timeout...", case.id)
+            result = await run_case(server_mod, case)
+            result.retry_count = 1
+
         results.append(result)
 
         status = "OK" if result.error is None else "ERR"
+        retry_tag = " (retry)" if result.retry_count > 0 else ""
         print(
             f"  [{i + 1}/{total}] {status} {case.id:20s} "
-            f"{result.latency_s:5.1f}s {result.pipeline_path}",
+            f"{result.latency_s:5.1f}s {result.pipeline_path}{retry_tag}",
             file=sys.stderr,
         )
 

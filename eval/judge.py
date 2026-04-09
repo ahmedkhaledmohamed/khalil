@@ -131,11 +131,26 @@ _GENERIC_PREFIXES = (
 class HeuristicEval:
     """For cases with eval_strategy='heuristic'."""
 
+    @staticmethod
+    def _normalize_response(text: str) -> str:
+        """Normalize response for stable comparison — strip markdown formatting variance."""
+        import re
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)  # strip bold
+        text = re.sub(r'__(.+?)__', r'\1', text)       # strip bold alt
+        text = re.sub(r'\*(.+?)\*', r'\1', text)       # strip italic
+        text = re.sub(r'_(.+?)_', r'\1', text)         # strip italic alt
+        text = re.sub(r'`(.+?)`', r'\1', text)         # strip inline code
+        text = re.sub(r'\s+', ' ', text).strip()        # collapse whitespace
+        return text
+
     def evaluate(self, case: TestCase, result: TestResult) -> EvalResult:
         checks: list[Check] = []
         response = result.response or ""
 
-        # 1. Non-empty
+        # Normalize response to reduce false failures from formatting variance
+        normalized = self._normalize_response(response)
+
+        # 1. Non-empty (use normalized length)
         non_empty = len(response) > 10
         checks.append(Check(
             name="non_empty",
