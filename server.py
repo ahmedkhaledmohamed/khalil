@@ -1766,6 +1766,29 @@ async def call_llm_with_tools(
 
         choice = response.choices[0]
         msg = choice.message
+
+        # #12: Track token usage and cost per iteration
+        _usage = getattr(response, 'usage', None)
+        if _usage:
+            _prompt_tok = getattr(_usage, 'prompt_tokens', 0) or 0
+            _completion_tok = getattr(_usage, 'completion_tokens', 0) or 0
+            # Approximate pricing (per 1M tokens): Sonnet input=$3, output=$15; Opus input=$15, output=$75
+            _is_opus = "opus" in (_routed_model or "").lower()
+            _input_rate = 15.0 if _is_opus else 3.0  # per 1M tokens
+            _output_rate = 75.0 if _is_opus else 15.0
+            _cost_usd = (_prompt_tok * _input_rate + _completion_tok * _output_rate) / 1_000_000
+            try:
+                from learning import record_signal
+                record_signal("llm_token_usage", {
+                    "model": _routed_model,
+                    "prompt_tokens": _prompt_tok,
+                    "completion_tokens": _completion_tok,
+                    "cost_usd": round(_cost_usd, 6),
+                    "iteration": iteration,
+                })
+            except Exception:
+                pass
+
         log.info("Tool-use iteration %d: finish_reason=%s, tool_calls=%s, content_len=%d",
                  iteration, choice.finish_reason,
                  [tc.function.name for tc in msg.tool_calls] if msg.tool_calls else None,
