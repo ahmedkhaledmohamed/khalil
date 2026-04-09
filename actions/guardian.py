@@ -34,16 +34,21 @@ CODE_REVIEW_PROMPT = """\
 You are a security guardian reviewing a code patch before it's applied.
 
 Target file: {target_file}
-Diff:
+{original_context}
+Patch:
 ```
 {diff}
 ```
 
-Check for:
+Check for NEW security risks introduced by the patch:
 1. Destructive operations (file deletion, data wiping)
 2. Security issues (eval, exec, shell injection, credential exposure)
-3. Import of dangerous modules (subprocess, ctypes, socket, os.system)
-4. Network calls to unknown endpoints
+3. Import of dangerous modules NOT already present in the original code
+4. Network calls to unknown endpoints NOT already present in the original code
+
+IMPORTANT: If the original code already uses subprocess, osascript, or similar calls,
+the patch using them is NOT a new risk. Only flag genuinely NEW dangerous patterns.
+If the patch is syntactically incomplete or truncated, use BLOCK.
 
 Respond with exactly one line in this format:
 VERDICT: ALLOW|BLOCK|NEEDS_CONFIRMATION
@@ -123,14 +128,19 @@ async def review_tool_call(action_type: str, command: str, context: dict) -> Gua
         )
 
 
-async def review_code_patch(diff: str, target_file: str) -> GuardianResult:
+async def review_code_patch(diff: str, target_file: str, original_code: str = "") -> GuardianResult:
     """Review a generated code patch before it's applied.
 
     Checks for destructive operations, security issues, and dangerous imports.
+    If original_code is provided, guardian only flags NEW risks (not pre-existing patterns).
     """
+    original_context = ""
+    if original_code:
+        original_context = f"Original code being replaced:\n```\n{original_code[:2000]}\n```\n"
     prompt = CODE_REVIEW_PROMPT.format(
         target_file=target_file,
         diff=diff[:3000],  # cap diff size for fast review
+        original_context=original_context,
     )
 
     try:
