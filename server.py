@@ -712,8 +712,9 @@ def _get_mcp_tools_text() -> str:
         return ""
 
 
-LLM_TIMEOUT = 45.0  # seconds — reduced from 90s; fail fast to fallback for P95
-CLAUDE_TIMEOUT = 15.0  # aggressive — fail fast, fall back to GPT/Gemini
+LLM_TIMEOUT = 20.0  # seconds — Ollama local (fast when running)
+CLAUDE_TIMEOUT = 8.0  # per-model timeout — fail fast, try next provider
+FALLBACK_BUDGET = 15.0  # total seconds for the entire fallback chain
 _ollama_recovery_attempted = False
 
 
@@ -797,11 +798,19 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
     """Fall back through LLM provider chain when primary is down.
 
     Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → GPT-5.2 → Gemini 2.5 Flash → cached.
+    Uses a total latency budget (FALLBACK_BUDGET) — gives up after budget expires.
     """
+    import time as _fb_time
+    _budget_start = _fb_time.monotonic()
+
+    def _budget_remaining() -> float:
+        return max(0, FALLBACK_BUDGET - (_fb_time.monotonic() - _budget_start))
+
     # Try Ollama cloud model first (free, no API key needed)
-    kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
-    if kimi_result:
-        return kimi_result
+    if _budget_remaining() > 2:
+        kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
+        if kimi_result:
+            return kimi_result
 
     # Use Taskforce client if available, else native Anthropic
     _use_taskforce = _taskforce_client is not None
@@ -826,32 +835,41 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
     _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
 
     for model in _FALLBACK_MODELS:
+        _remaining = _budget_remaining()
+        if _remaining < 1:
+            log.warning("Fallback budget exhausted (%.1fs), skipping remaining models", FALLBACK_BUDGET)
+            break
+        _timeout = min(CLAUDE_TIMEOUT, _remaining)
         try:
             if _use_taskforce:
                 response = await client.chat.completions.create(
-                    model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+                    model=model, max_tokens=1500, messages=_msgs, timeout=_timeout,
                 )
                 text = response.choices[0].message.content
             else:
                 response = await client.messages.create(
                     model=model, max_tokens=1500, system=system,
-                    messages=[{"role": "user", "content": user_message}], timeout=CLAUDE_TIMEOUT,
+                    messages=[{"role": "user", "content": user_message}], timeout=_timeout,
                 )
                 text = response.content[0].text
-            log.info("Fell back to %s (Ollama unavailable)", model)
+            log.info("Fell back to %s (Ollama unavailable) in %.1fs", model, FALLBACK_BUDGET - _budget_remaining())
             return text
         except Exception as e:
             log.warning("Fallback model %s failed: %s", model, e)
             continue
 
-    # Try backup providers (OpenAI, Google) via Taskforce
+    # Try backup providers (OpenAI, Google) — only if budget remains
     for client_attr, model in _BACKUP_PROVIDERS:
+        _remaining = _budget_remaining()
+        if _remaining < 1:
+            log.warning("Fallback budget exhausted, skipping backup providers")
+            break
         backup_client = globals().get(client_attr)
         if not backup_client:
             continue
         try:
             response = await backup_client.chat.completions.create(
-                model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+                model=model, max_tokens=1500, messages=_msgs, timeout=min(CLAUDE_TIMEOUT, _remaining),
             )
             text = response.choices[0].message.content
             log.info("Fell back to backup provider %s (%s)", model, client_attr)
@@ -860,7 +878,7 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
             log.warning("Backup provider %s (%s) failed: %s", model, client_attr, e)
             continue
 
-    # All models failed — try cached response
+    # All models failed or budget exhausted — try cached response
     return _get_cached_response(query)
 
 
