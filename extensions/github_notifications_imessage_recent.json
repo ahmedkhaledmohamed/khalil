@@ -1,0 +1,9 @@
+{
+    "name": "github_notifications_imessage_recent",
+    "command": "comms",
+    "description": "Actions 'github_notifications' and 'imessage_recent' used together 76x — integration opportunity",
+    "action_module": "actions.github_notifications_imessage_recent",
+    "handler_function": "handle_comms",
+    "generated_at": "2026-04-09T00:00:00+00:00",
+    "generated_for": "Actions 'github_notifications' and 'imessage_recent' used together 76x — integration opportunity"
+}
