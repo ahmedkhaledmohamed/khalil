@@ -5170,8 +5170,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         OWNER_CHAT_ID = ctx.chat_id
         _persist_owner_chat_id(OWNER_CHAT_ID)
 
-    query = update.message.text if update.message else None
+    query = (update.message.text if update.message else None)
     if not query or not query.strip():
+        if update.message:
+            await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
+        return
+    query = query.strip()
+    if len(query) < 2:
+        await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
         return
 
     # Rate limiting
@@ -5436,8 +5442,9 @@ async def handle_message_generic(ctx: MessageContext):
     _msg_start = _time.monotonic()
 
     global OWNER_CHAT_ID
-    query = ctx.incoming.text if ctx.incoming else ""
-    if not query or not query.strip():
+    query = (ctx.incoming.text if ctx.incoming else "").strip()
+    if not query or len(query) < 2:
+        await ctx.reply("I didn't catch that — what can I help you with?")
         return
 
     chat_id = ctx.chat_id
