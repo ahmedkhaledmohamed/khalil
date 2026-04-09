@@ -598,7 +598,7 @@ def _get_mcp_tools_text() -> str:
         return ""
 
 
-LLM_TIMEOUT = 90.0  # seconds — qwen3 thinking model can be slow
+LLM_TIMEOUT = 45.0  # seconds — reduced from 90s; fail fast to fallback for P95
 CLAUDE_TIMEOUT = 15.0  # aggressive — fail fast, fall back to GPT/Gemini
 _ollama_recovery_attempted = False
 
@@ -5044,7 +5044,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _persist_owner_chat_id(OWNER_CHAT_ID)
 
     query = update.message.text if update.message else None
-    if not query:
+    if not query or not query.strip():
         return
 
     # Check for pending voice confirmation
@@ -5155,8 +5155,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
     try:
-        # Build context from all sources
-        results = await hybrid_search(query, limit=6)
+        # Build context from all sources (with timeout protection for P95)
+        try:
+            results = await asyncio.wait_for(hybrid_search(query, limit=6), timeout=10.0)
+        except asyncio.TimeoutError:
+            log.warning("hybrid_search timed out after 10s for query: %s", query[:80])
+            results = []
         archive_context = truncate_context(results) if results else "No relevant archive data found."
         personal_context = get_relevant_context(query, max_chars=2000)
         conversation_context = await get_conversation_context(chat_id, query)
@@ -5192,13 +5196,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             log.debug("Proactive context injection failed: %s", e)
 
-        # Live state injection
+        # Live state injection (with timeout — external APIs can hang)
         try:
             from state.collector import collect_live_state, format_for_prompt
-            live = await collect_live_state()
+            live = await asyncio.wait_for(collect_live_state(), timeout=5.0)
             live_context = format_for_prompt(live)
             if live_context:
                 full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
+        except asyncio.TimeoutError:
+            log.warning("Live state collection timed out after 5s")
         except Exception as e:
             log.warning("Live state collection failed: %s", e)
 
@@ -5269,7 +5275,7 @@ async def handle_message_generic(ctx: MessageContext):
 
     global OWNER_CHAT_ID
     query = ctx.incoming.text if ctx.incoming else ""
-    if not query:
+    if not query or not query.strip():
         return
 
     chat_id = ctx.chat_id
