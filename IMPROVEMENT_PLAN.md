@@ -66,7 +66,7 @@ Currently fire-and-forget. Implement: (a) store PR number in evolution_candidate
 
 ## Theme 3: OBSERVABILITY — Measure What Matters
 
-### 10. Per-Tool Accuracy Breakdown
+### 10. Per-Tool Accuracy Breakdown ✅ (PR #226)
 Single aggregate tool_success_rate (84.4%) hides which tools are broken. Extend `metrics.py` to compute per-tool: success_rate, avg_latency, call_count from conversations table. Enables targeted investment.
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** tau-bench
 - **Files:** `eval/metrics.py` (compute_metrics, MetricsSnapshot)
