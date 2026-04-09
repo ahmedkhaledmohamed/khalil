@@ -112,7 +112,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 - **Files:** `model_router.py`, `config.py`, `server.py` (ask_llm)
 - **Unlocks:** 4
 
-### 17. LLM Response Variance Mitigation
+### 17. LLM Response Variance Mitigation ✅ (PR #230)
 111 regressions in Run #9 from model variance. Fix: (a) `temperature=0.0` for all tool-use calls; (b) expand `_TOOL_DESCRIPTIONS` to all 50+ tools with explicit examples; (c) pin system prompt formatting order; (d) response normalization before eval comparison.
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench
 - **Files:** `tool_catalog.py`, `server.py` (call_llm_with_tools), `eval/validators.py`
