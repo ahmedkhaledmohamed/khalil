@@ -313,6 +313,23 @@ from config import DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.{name}")
 
+SKILL = {{
+    "name": "{name}",
+    "description": "{description}",
+    "category": "extension",
+    "patterns": [
+        (r"\\b(?:add|create|new)\\s+{name}", "{name}_add"),
+        (r"\\b(?:list|show|all)\\s+{name}", "{name}_list"),
+        (r"\\b(?:remove|delete)\\s+{name}", "{name}_remove"),
+    ],
+    "actions": [
+        {{"type": "{name}_add", "handler": "cmd_{command}", "description": "Add a {name} entry", "keywords": "add create new {name}"}},
+        {{"type": "{name}_list", "handler": "cmd_{command}", "description": "List {name} entries", "keywords": "list show all {name}"}},
+        {{"type": "{name}_remove", "handler": "cmd_{command}", "description": "Remove a {name} entry", "keywords": "remove delete {name}"}},
+    ],
+    "examples": ["Add a new {name}", "Show all {name}s", "Remove {name}"],
+}}
+
 _tables_created = False
 
 def _get_conn() -> sqlite3.Connection:
@@ -377,6 +394,19 @@ from config import KEYRING_SERVICE
 
 log = logging.getLogger("khalil.actions.{name}")
 
+SKILL = {{
+    "name": "{name}",
+    "description": "{description}",
+    "category": "extension",
+    "patterns": [
+        (r"\\b{name}\\b", "{name}"),
+    ],
+    "actions": [
+        {{"type": "{name}", "handler": "cmd_{command}", "description": "{description}", "keywords": "{name} {command}"}},
+    ],
+    "examples": ["Check {name} status"],
+}}
+
 async def _fetch_data(endpoint: str, params: dict | None = None) -> dict:
     api_key = keyring.get_password(KEYRING_SERVICE, "{name}-api-key")
     if not api_key:
@@ -405,6 +435,21 @@ from datetime import datetime
 from config import DB_PATH
 
 log = logging.getLogger("khalil.actions.{name}")
+
+SKILL = {{
+    "name": "{name}",
+    "description": "{description}",
+    "category": "extension",
+    "patterns": [
+        (r"\\b{name}\\s+(?:status|check)", "{name}_status"),
+        (r"\\b(?:poll|refresh)\\s+{name}", "{name}_poll"),
+    ],
+    "actions": [
+        {{"type": "{name}_status", "handler": "cmd_{command}", "description": "Check {name} status", "keywords": "status check {name}"}},
+        {{"type": "{name}_poll", "handler": "cmd_{command}", "description": "Run {name} poll", "keywords": "poll refresh {name}"}},
+    ],
+    "examples": ["Check {name} status", "Poll {name}"],
+}}
 
 _tables_created = False
 
@@ -575,6 +620,27 @@ from config import DB_PATH, TIMEZONE
 
 log = logging.getLogger("khalil.actions.MODULE_NAME")
 
+# --- Skill registration (enables natural language discovery) ---
+
+SKILL = {
+    "name": "MODULE_NAME",
+    "description": "ACTION_DESCRIPTION",
+    "category": "extension",
+    "patterns": [
+        # Add regex patterns that match user intent to action types
+        # (r"pattern here", "action_type"),
+    ],
+    "actions": [
+        {
+            "type": "MODULE_NAME",
+            "handler": "cmd_COMMAND",
+            "description": "ACTION_DESCRIPTION",
+            "keywords": "keyword1 keyword2",
+        },
+    ],
+    "examples": [],
+}
+
 
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
@@ -589,16 +655,18 @@ def ensure_tables(conn: sqlite3.Connection):
 
 
 # --- Core functions ---
-# TODO: Implement the capability
+# Implement reusable logic here. Import from existing actions/ modules
+# when possible instead of reimplementing (e.g., from actions.shell import ...).
 
 
-# --- Telegram command handler ---
+# --- Command handler ---
 
 async def cmd_COMMAND(update, context):
     """Handle /COMMAND command."""
-    args = context.args
-    # TODO: Implement command handling
-    await update.message.reply_text("COMMAND_DESCRIPTION")
+    args = context.args or []
+    # Parse subcommands, call core functions, format response
+    msg = "Result"
+    await update.message.reply_text(msg)
 '''
 
 
@@ -641,16 +709,40 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         "1. Follow the EXACT patterns from the reference module below\n"
         "2. Use SQLite for any persistent state (via `config.DB_PATH`)\n"
         "3. Include an `ensure_tables(conn)` function that creates any needed tables\n"
-        f"4. Include an async `cmd_{spec['command']}(update, context)` function as the Telegram handler\n"
+        f"4. Include an async `cmd_{spec['command']}(update, context)` handler\n"
         "5. Handle subcommands via `context.args` (e.g., /command add ..., /command list)\n"
         "6. Use `logging.getLogger(f'khalil.actions.{name}')` for logging\n"
         "7. Import only from stdlib, `config`, and existing khalil modules\n"
-        "8. Include helpful reply_text messages\n"
-        "9. Handle errors gracefully\n"
-        "10. Keep it under 200 lines\n"
-        "11. Extensions can optionally accept a KhalilContext object (from actions.extend) "
-        "which provides: db (sqlite3 conn), ask_llm (async callable), notify (async callable), "
-        "search(query, limit), and record_signal(type, context). Use it instead of raw internal imports when possible.\n\n"
+        "8. Handle errors gracefully with clear user-facing messages\n"
+        "9. Keep it under 200 lines\n\n"
+        "**SKILL DICT (Required for natural language discovery)**:\n"
+        "Every action module MUST include a module-level SKILL dict so Khalil can match\n"
+        "natural language queries to this capability. Structure:\n"
+        "```python\n"
+        "SKILL = {\n"
+        '    "name": "module_name",\n'
+        '    "description": "One-line description of what this does",\n'
+        '    "category": "extension",\n'
+        '    "patterns": [\n'
+        '        (r"regex pattern matching user intent", "action_type"),\n'
+        "    ],\n"
+        '    "actions": [\n'
+        "        {\n"
+        f'            "type": "action_type",\n'
+        f'            "handler": "cmd_{spec["command"]}",\n'
+        '            "description": "What this action does",\n'
+        '            "keywords": "space separated keywords",\n'
+        "        },\n"
+        "    ],\n"
+        '    "examples": ["Example user query 1", "Example user query 2"],\n'
+        "}\n"
+        "```\n"
+        "Include 3-5 regex patterns covering common ways users would ask for this capability.\n\n"
+        "**REUSE EXISTING CODE**:\n"
+        "Import from existing actions/ modules when possible instead of reimplementing.\n"
+        "For example, if this capability involves GitHub, import from actions.github_api.\n"
+        "If it involves Apple Music, import from actions.apple_music.\n"
+        "Do NOT rewrite AppleScript/shell commands that already exist in other modules.\n\n"
         "**QUALITY RULES**:\n"
         "- For matching/filtering: use word-boundary regex (re.search with \\b), not substring matching\n"
         "- For write operations (labeling, sending, modifying, deleting): include a preview/dry-run subcommand that shows what would happen without doing it\n"
@@ -730,13 +822,34 @@ def _build_claude_code_prompt(spec: dict) -> str:
         "from config import DB_PATH, KEYRING_SERVICE, TIMEZONE\n"
         f'log = logging.getLogger("khalil.actions.{name}")\n'
         "\n"
+        "# SKILL dict — REQUIRED for natural language discovery\n"
+        "SKILL = {\n"
+        f'    "name": "{name}",\n'
+        f'    "description": "{spec["description"]}",\n'
+        '    "category": "extension",\n'
+        '    "patterns": [\n'
+        '        # 3-5 regex patterns matching natural language intent\n'
+        f'        (r"regex matching user query", "{name}"),\n'
+        "    ],\n"
+        '    "actions": [\n'
+        "        {\n"
+        f'            "type": "{name}",\n'
+        f'            "handler": "handle_{command}",\n'
+        f'            "description": "{spec["description"]}",\n'
+        f'            "keywords": "{name} {command}",\n'
+        "        },\n"
+        "    ],\n"
+        '    "examples": ["Example natural language query"],\n'
+        "}\n"
+        "\n"
         "def ensure_tables(conn: sqlite3.Connection):\n"
         '    """Create tables. Called once at startup."""\n'
         "    conn.execute('CREATE TABLE IF NOT EXISTS ...')\n"
         "    conn.commit()\n"
         "\n"
-        "# --- Core sync functions (called via asyncio.to_thread) ---\n"
-        "# --- Async wrappers ---\n"
+        "# --- Core functions ---\n"
+        "# Import from existing actions/ modules when possible.\n"
+        "# Do NOT reimplement functions that already exist.\n"
         "\n"
         f"async def handle_{command}(update, context):\n"
         f'    """Handle /{command} command."""\n'
