@@ -6,7 +6,7 @@ Khalil is at 83.9% frozen eval pass rate (target >85%), with P95 latency at 54.5
 
 ## Theme 1: RELIABILITY — Fix What Is Broken
 
-### 1. Handler Output Normalization Layer
+### 1. Handler Output Normalization Layer ✅ (PR #222)
 Introduce `HandlerResponse` dataclass (`.text`, `.success`, `.metadata`) and a wrapper that normalizes every handler return. Raw text gets wrapped, exceptions get caught, None produces "empty result." Directly addresses the #1 failure mode (2,098 `handler_bad_output` failures).
 - **Effort:** M | **Impact:** HIGH | **Benchmark:** Microsoft Failure Taxonomy
 - **Files:** `skills.py`, `server.py` (handle_action_intent), `eval/gap_analysis.py`
