@@ -1152,9 +1152,9 @@ async def summarize_conversations(ask_llm_fn, min_messages: int = 20) -> list[di
                     log.debug("Summary embedding failed: %s", e)
 
                 summaries.append({"chat_id": chat_id, "message_count": len(messages), "summary": summary[:200]})
-                log.info("Summarized conversation for chat %d (%d messages)", chat_id, len(messages))
+                log.info("Summarized conversation for chat %s (%d messages)", chat_id, len(messages))
         except Exception as e:
-            log.warning("Conversation summarization failed for chat %d: %s", chat_id, e)
+            log.warning("Conversation summarization failed for chat %s: %s", chat_id, e)
 
     return summaries
 
@@ -1235,11 +1235,11 @@ async def extract_memories(chat_id: int, summary_text: str, ask_llm_fn) -> list[
             except Exception as e:
                 log.warning("Memory embedding failed: %s", e)
 
-        log.info("Extracted %d memories from chat %d", len(stored), chat_id)
+        log.info("Extracted %d memories from chat %s", len(stored), chat_id)
         return stored
 
     except Exception as e:
-        log.warning("Memory extraction failed for chat %d: %s", chat_id, e)
+        log.warning("Memory extraction failed for chat %s: %s", chat_id, e)
         return []
 
 
