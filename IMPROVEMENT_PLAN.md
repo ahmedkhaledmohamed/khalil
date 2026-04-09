@@ -34,7 +34,7 @@ P95 = 54.57s. Reduce per-model timeout to 8s first attempt, implement 15s total 
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** GAIA (factual grounding), NIST AI RMF
 - **Files:** `actions/shell.py` (execute_shell, classify_command)
 
-### 6. Conversational Mode Quality Floor
+### 6. Conversational Mode Quality Floor ✅ (PR #221)
 0% pass rate on 100 conversational cases. The system prompt is tuned for action dispatch, not dialogue. Add a dedicated conversational system prompt variant when no skill pattern matches, optimized for quality conversation.
 - **Effort:** S | **Impact:** MEDIUM | **Benchmark:** ConvBench, DeepEval
 - **Files:** `server.py` (handle_message_generic, _build_system_prompt)
