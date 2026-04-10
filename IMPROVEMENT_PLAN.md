@@ -128,7 +128,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 
 ## Theme 5: SAFETY AND TRUST
 
-### 19. Audit Trail with Provenance Chain
+### 19. Audit Trail with Provenance Chain ✅ (PR #235)
 `data/audit_trail.jsonl` exists but is dead. Tool calls saved to conversations table lack provenance (which signal triggered it, which model, guardian verdict). Write structured JSONL per tool execution: timestamp, query, tool, args, guardian verdict, model, latency, result summary, autonomy level. Add `/audit [last N]` command.
 - **Effort:** M | **Impact:** MEDIUM | **Benchmark:** NIST AI RMF (transparency, accountability)
 - **Files:** `server.py` (_execute_tool_call), `data/audit_trail.jsonl`, `autonomy.py`
