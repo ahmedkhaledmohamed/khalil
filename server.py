@@ -1832,22 +1832,24 @@ async def call_llm_with_tools(
     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
 
-        # Research-loop prevention: after 3 iterations of read-only calls,
-        # nudge the LLM to start building instead of searching further
-        if iteration == 3 and _progress_steps:
+        # Research-loop prevention: after 2 iterations of read-only calls,
+        # force the LLM to start building with an explicit shell write instruction
+        if iteration == 2 and _progress_steps:
             _read_cmds = {"grep", "find", "cat", "ls", "head", "tail", "rg", "wc", "echo"}
             _all_read = all(
                 any(cmd in step for cmd in _read_cmds) or "search_knowledge" in step
                 for step in _progress_steps
             )
             if _all_read:
-                log.info("Research-loop detected at iteration 3 — injecting build nudge")
+                log.info("Research-loop detected at iteration 2 — injecting build nudge")
                 messages.append({
                     "role": "user",
                     "content": (
-                        "You've spent 3 iterations gathering information. You have enough context now. "
-                        "START CREATING the artifact using shell to write files (cat > file << 'EOF'). "
-                        "Do not search or read further — use what you already have."
+                        "STOP RESEARCHING. You have enough context from the tool results above. "
+                        "Your NEXT tool call MUST be shell() to WRITE a file. Use this pattern:\n"
+                        "shell(command=\"cat > /path/to/file.html << 'HTMLEOF'\\n<full file content here>\\nHTMLEOF\")\n"
+                        "Write the COMPLETE file in ONE command. Do NOT search, read, grep, or plan. "
+                        "Do NOT respond with text — call the shell tool to write the file NOW."
                     ),
                 })
 
