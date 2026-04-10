@@ -105,6 +105,7 @@ OLLAMA_LLM_MODEL = "qwen3:14b"
 # Claude API (used when LLM_BACKEND = "claude")
 CLAUDE_MODEL = "claude-opus-4-20250514"
 CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"
+CLAUDE_MODEL_FAST = "claude-sonnet-4-20250514"  # #16: cost-aware routing for greetings/lookups
 MAX_CONTEXT_TOKENS = 8000
 # Taskforce proxy — set KHALIL_CLAUDE_BASE_URL to override the Anthropic API endpoint
 # e.g. "https://hendrix-genai.spotify.net/taskforce/anthropic"
