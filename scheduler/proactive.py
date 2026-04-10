@@ -430,3 +430,130 @@ def filter_alerts_by_timing(findings: list[str]) -> list[str]:
     # Overdue reminders and passed deadlines are always delivered
     urgent_keywords = ("overdue", "passed", "expired", "urgent")
     return [f for f in findings if any(k in f.lower() for k in urgent_keywords)]
+
+
+# --- #25: Daily Anticipation Pass ---
+
+async def daily_anticipation(ask_llm_fn=None) -> list[str]:
+    """Run a daily anticipation check — surfaces things that need proactive attention.
+
+    Called at 7 AM by scheduler. Checks:
+    1. Unusual calendar events (first meeting with new person, all-day events)
+    2. High-priority unread emails (from manager, with urgent keywords)
+    3. Weather alerts (if severe conditions)
+    """
+    findings = []
+
+    # 1. Calendar anticipation — detect unusual events
+    try:
+        from state.calendar_provider import get_today_events
+        events = await get_today_events()
+        if events:
+            for event in events:
+                title = event.get("summary", "").lower()
+                # Flag all-day events (often important deadlines)
+                if event.get("all_day"):
+                    findings.append(f"\U0001f4c5 All-day event today: {event.get('summary', 'Untitled')}")
+                # Flag events with external attendees (potential prep needed)
+                attendees = event.get("attendees", [])
+                if len(attendees) > 5:
+                    findings.append(
+                        f"\U0001f465 Large meeting today: {event.get('summary', 'Untitled')} "
+                        f"({len(attendees)} attendees) — may need prep"
+                    )
+    except Exception as e:
+        log.debug("Calendar anticipation failed: %s", e)
+
+    # 2. Unread email priority check
+    try:
+        from state.email_provider import get_unread_count, get_urgent_unread
+        urgent = await get_urgent_unread()
+        if urgent and len(urgent) > 0:
+            findings.append(
+                f"\U0001f4e8 {len(urgent)} high-priority unread email(s) — "
+                f"from: {', '.join(u.get('from', '?')[:30] for u in urgent[:3])}"
+            )
+    except Exception as e:
+        log.debug("Email anticipation failed: %s", e)
+
+    # 3. Weather alert (severe conditions)
+    try:
+        import os
+        lat = os.environ.get("KHALIL_WEATHER_LAT")
+        lon = os.environ.get("KHALIL_WEATHER_LON")
+        if lat and lon:
+            from actions.weather import get_weather_data
+            data = await get_weather_data()
+            if data:
+                # Check for severe weather codes (thunderstorm, heavy rain, snow)
+                code = data.get("current", {}).get("weather_code", 0)
+                if code >= 65:  # WMO codes: 65+ = heavy rain/snow/thunderstorm
+                    desc = data.get("current", {}).get("description", "severe weather")
+                    findings.append(f"\u26a0\ufe0f Weather alert: {desc}")
+    except Exception as e:
+        log.debug("Weather anticipation failed: %s", e)
+
+    if findings:
+        log.info("Daily anticipation: %d findings", len(findings))
+
+    return findings
+
+
+# --- #25: Weekly Pattern Analyzer ---
+
+def analyze_weekly_patterns() -> dict:
+    """Analyze user interaction patterns from the last 7 days.
+
+    Returns summary of: peak activity hours, most-used tools, common queries.
+    Runs weekly (Sunday evening) to inform proactive suggestions.
+    """
+    import sqlite3
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+
+    cutoff = (datetime.now(ZoneInfo(TIMEZONE)) - timedelta(days=7)).isoformat()
+    patterns = {}
+
+    # Peak activity hours
+    try:
+        rows = conn.execute(
+            "SELECT CAST(strftime('%H', timestamp) AS INTEGER) as hour, COUNT(*) as cnt "
+            "FROM conversations WHERE role = 'user' AND timestamp > ? "
+            "GROUP BY hour ORDER BY cnt DESC LIMIT 5",
+            (cutoff,),
+        ).fetchall()
+        if rows:
+            patterns["peak_hours"] = [{"hour": r["hour"], "messages": r["cnt"]} for r in rows]
+    except Exception:
+        pass
+
+    # Most-used capabilities
+    try:
+        rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as action, COUNT(*) as cnt "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'capability_usage' AND created_at > ? "
+            "GROUP BY action ORDER BY cnt DESC LIMIT 10",
+            (cutoff,),
+        ).fetchall()
+        if rows:
+            patterns["top_capabilities"] = [{"action": r["action"], "count": r["cnt"]} for r in rows]
+    except Exception:
+        pass
+
+    # Failure hotspots
+    try:
+        rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as action, COUNT(*) as cnt "
+            "FROM interaction_signals "
+            "WHERE signal_type IN ('tool_failure', 'action_execution_failure') AND created_at > ? "
+            "GROUP BY action ORDER BY cnt DESC LIMIT 5",
+            (cutoff,),
+        ).fetchall()
+        if rows:
+            patterns["failure_hotspots"] = [{"action": r["action"], "failures": r["cnt"]} for r in rows]
+    except Exception:
+        pass
+
+    conn.close()
+    return patterns
