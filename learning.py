@@ -2818,6 +2818,48 @@ def auto_extract_preferences() -> list[dict]:
     return extracted
 
 
+# --- Implicit Preference Detection (#18) ---
+
+# Patterns that indicate user preferences from their messages
+_BREVITY_SIGNALS = _re_module.compile(
+    r"\b(brief|short|concise|tldr|tl;dr|summary only|just the answer|quick)\b", _re_module.IGNORECASE
+)
+_DETAIL_SIGNALS = _re_module.compile(
+    r"\b(detail|elaborate|explain|in depth|thorough|comprehensive|full)\b", _re_module.IGNORECASE
+)
+_STRUCTURE_SIGNALS = _re_module.compile(
+    r"\b(bullet|list|table|step.by.step|numbered|structured)\b", _re_module.IGNORECASE
+)
+_CORRECTION_SHORTER = _re_module.compile(
+    r"\b(too long|shorter|less detail|more concise|cut.it.down)\b", _re_module.IGNORECASE
+)
+_CORRECTION_LONGER = _re_module.compile(
+    r"\b(too short|more detail|not enough|elaborate more|expand)\b", _re_module.IGNORECASE
+)
+
+
+def detect_implicit_preferences(query: str) -> list[dict]:
+    """Detect user preferences implied by their message. Returns list of {key, value} dicts.
+
+    No LLM call — pure regex. Signals are recorded and aggregated into preferences
+    when they recur 3+ times (via auto_extract_preferences_from_signals).
+    """
+    detected = []
+
+    if _BREVITY_SIGNALS.search(query):
+        detected.append({"key": "response_length", "value": "brief"})
+    if _DETAIL_SIGNALS.search(query):
+        detected.append({"key": "response_length", "value": "detailed"})
+    if _STRUCTURE_SIGNALS.search(query):
+        detected.append({"key": "response_format", "value": "structured"})
+    if _CORRECTION_SHORTER.search(query):
+        detected.append({"key": "response_length", "value": "brief"})
+    if _CORRECTION_LONGER.search(query):
+        detected.append({"key": "response_length", "value": "detailed"})
+
+    return detected
+
+
 # --- Routine Drift Detection ---
 
 def get_recent_user_intents(hours: int = 24) -> list[str]:
