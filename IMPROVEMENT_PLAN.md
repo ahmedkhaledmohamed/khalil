@@ -161,7 +161,7 @@ Eval runs are manual. Add GitHub Actions workflow: run frozen case eval on every
 - **Files:** `eval/__main__.py`, `eval/gap_analysis.py` (diff_reports), new: `.github/workflows/eval.yml`
 - **Unlocks:** 7, 9
 
-### 24. Scenario Coverage Expansion (GAIA-style)
+### 24. Scenario Coverage Expansion (GAIA-style) ✅ (PR #244)
 16 scenarios vs GAIA's 466. Expand to 50+: long-horizon multi-tool chains, cross-session context, ambiguous intent requiring clarification, error recovery mid-task, multi-channel flows.
 - **Effort:** L | **Impact:** MEDIUM | **Benchmark:** GAIA, TheAgentCompany
 - **Files:** `eval/scenarios.py`, `eval/scenario_runner.py`
