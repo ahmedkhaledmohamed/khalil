@@ -31,7 +31,7 @@ REASON: <one sentence>
 """
 
 CODE_REVIEW_PROMPT = """\
-You are a security guardian reviewing a code patch before it's applied.
+You are a security guardian reviewing a code patch for Khalil, a personal AI assistant.
 
 Target file: {target_file}
 {original_context}
@@ -46,9 +46,19 @@ Check for NEW security risks introduced by the patch:
 3. Import of dangerous modules NOT already present in the original code
 4. Network calls to unknown endpoints NOT already present in the original code
 
-IMPORTANT: If the original code already uses subprocess, osascript, or similar calls,
-the patch using them is NOT a new risk. Only flag genuinely NEW dangerous patterns.
-If the patch is syntactically incomplete or truncated, use BLOCK.
+IMPORTANT CONTEXT — these are SAFE and expected in Khalil:
+- subprocess calls to: osascript, tmux, brew, mdfind, say, open, git, gh, pgrep, lsof
+- httpx/aiohttp calls to: api.github.com, api.telegram.org, localhost, api.openai.com
+- keyring access for credential retrieval
+- sqlite3 database operations
+- asyncio.create_subprocess_exec for shell commands
+- os.path, shutil, pathlib file operations (read/write to ~/Developer/ or /tmp/)
+
+Only BLOCK if you have HIGH confidence (>80%) that the patch introduces a genuinely
+dangerous NEW pattern not in the original code. When in doubt, use ALLOW — false blocks
+are more harmful than false allows in this codebase.
+
+If the patch is syntactically incomplete or truncated (unbalanced brackets), use BLOCK.
 
 Respond with exactly one line in this format:
 VERDICT: ALLOW|BLOCK|NEEDS_CONFIRMATION
@@ -119,6 +129,18 @@ async def review_tool_call(action_type: str, command: str, context: dict) -> Gua
         text = call_llm_sync(client, client_type, GUARDIAN_MODEL, "", prompt, max_tokens=150)
         result = _parse_verdict(text)
         log.info("Guardian review: %s %s — %s (%s)", action_type, command[:60], result.verdict.value, result.reason)
+
+        # Record guardian decision as signal
+        try:
+            from learning import record_signal
+            record_signal("guardian_tool_review", {
+                "action_type": action_type,
+                "verdict": result.verdict.value,
+                "reason": result.reason[:200],
+            })
+        except Exception:
+            pass
+
         return result
     except Exception as e:
         log.error("Guardian review failed: %s — defaulting to NEEDS_CONFIRMATION", e)
@@ -149,6 +171,18 @@ async def review_code_patch(diff: str, target_file: str, original_code: str = ""
         text = call_llm_sync(client, client_type, GUARDIAN_MODEL, "", prompt, max_tokens=150)
         result = _parse_verdict(text)
         log.info("Guardian code review: %s — %s (%s)", target_file, result.verdict.value, result.reason)
+
+        # Record guardian decision as signal for tracking false-positive rate
+        try:
+            from learning import record_signal
+            record_signal("guardian_code_review", {
+                "target_file": target_file,
+                "verdict": result.verdict.value,
+                "reason": result.reason[:200],
+            })
+        except Exception:
+            pass
+
         return result
     except Exception as e:
         log.error("Guardian code review failed: %s — defaulting to NEEDS_CONFIRMATION", e)

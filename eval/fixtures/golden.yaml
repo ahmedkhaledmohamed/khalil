@@ -2565,3 +2565,245 @@ doc_extract:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
+
+# --- Agent Swarm Orchestration ---
+swarm:
+  # Multi-intent queries that SHOULD benefit from parallel decomposition
+  - query: "Check weather, email Sarah, and update my calendar"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: complex
+  - query: "Prep for my standup and review PRs"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: moderate
+  - query: "Summarize my emails, check calendar, and draft a status update"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: complex
+
+  # Simple queries that should NOT trigger swarm
+  - query: "What's the weather?"
+    expected_action: weather
+    expected_contains: ["temperature"]
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Hello"
+    expected_action: null
+    expected_contains: []
+    expected_path: conversational
+    complexity: trivial
+  - query: "Send an email to John"
+    expected_action: email
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: moderate
+
+# --- Missing Categories: Golden Cases for 12 Untested Skills ---
+
+apple_notes:
+  - query: "Search my Apple Notes for meeting notes"
+    expected_action: apple_notes_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Create a new note called Shopping List"
+    expected_action: apple_notes_create
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Show my recent notes"
+    expected_action: apple_notes_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+meetings:
+  - query: "Prep me for my next meeting"
+    expected_action: meeting_prep
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What meetings do I have today?"
+    expected_action: calendar
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Generate a brief for my 2pm call"
+    expected_action: meeting_prep
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+fitness:
+  - query: "Sync my fitness data"
+    expected_action: fitness_sync
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What were my steps today?"
+    expected_action: health_steps
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my sleep data from last night"
+    expected_action: health_sleep
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+projects:
+  - query: "What's the status of Tiny Grounds?"
+    expected_action: project_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "List my projects"
+    expected_action: project_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Update Zia project with new milestone"
+    expected_action: project_update
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+work:
+  - query: "Show my sprint dashboard"
+    expected_action: work_sprint
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What am I working on this week?"
+    expected_action: work_sprint
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show my work summary"
+    expected_action: work_summary
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+finance:
+  - query: "Show my investment portfolio"
+    expected_action: finance_portfolio
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Any financial deadlines coming up?"
+    expected_action: finance_deadlines
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's my RSU vesting schedule?"
+    expected_action: finance_portfolio
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+media_player:
+  - query: "Play a local music file"
+    expected_action: media_play
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Stop the current media"
+    expected_action: media_stop
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "List my downloaded music"
+    expected_action: media_list
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+dev_tools:
+  - query: "Is Claude Code running?"
+    expected_action: claude_code_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show Cursor IDE status"
+    expected_action: cursor_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What's running in my terminal?"
+    expected_action: terminal_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+goals:
+  - query: "Show my Q2 goals"
+    expected_action: goals_view
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Add a new goal: ship Bezier MVP"
+    expected_action: goals_add
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "How am I doing on my goals?"
+    expected_action: goals_review
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+
+drive:
+  - query: "Search Google Drive for budget spreadsheet"
+    expected_action: drive_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Open my planning doc in Drive"
+    expected_action: drive_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "Find the Q3 roadmap document"
+    expected_action: drive_search
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+machine:
+  - query: "Take a screenshot"
+    expected_action: screenshot
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "What app is in the foreground?"
+    expected_action: frontmost_app
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+  - query: "Show system info"
+    expected_action: system_info
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial
+
+coding:
+  - query: "Write a Python function to parse CSV"
+    expected_action: code_task
+    expected_contains: []
+    expected_path: llm_intent
+    complexity: complex
+  - query: "Review the diff in my current branch"
+    expected_action: code_diff
+    expected_contains: []
+    expected_path: direct_action
+    complexity: moderate
+  - query: "What's the status of my coding agent?"
+    expected_action: code_status
+    expected_contains: []
+    expected_path: direct_action
+    complexity: trivial

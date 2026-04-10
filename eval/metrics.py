@@ -52,6 +52,22 @@ class MetricsSnapshot:
     abandonment_rate: float | None = None
     total_sessions: int = 0
     abandoned_sessions: int = 0
+    # Per-tool accuracy breakdown (τ-bench inspired)
+    per_tool_metrics: dict = field(default_factory=dict)  # {tool: {calls, failures, success_rate}}
+    # Cost tracking
+    cost_per_task_p50: float | None = None
+    cost_per_task_p95: float | None = None
+    total_cost_usd: float = 0.0
+    total_tokens: int = 0
+    # MTTR (Mean Time To Recovery) — hours from failure detection to verified fix
+    mttr_hours: float | None = None
+    mttr_samples: int = 0
+    # Hallucination / grounding
+    grounding_ratio_avg: float | None = None
+    grounding_checks: int = 0
+    # Satisfaction index (implicit NPS proxy)
+    satisfaction_index: float | None = None
+    satisfaction_samples: int = 0
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -197,6 +213,121 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- Satisfaction Index ---
+    try:
+        sat_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.quality_score') AS REAL) as score "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'interaction_quality' AND context IS NOT NULL"
+        ).fetchall()
+        if sat_rows:
+            scores = [r["score"] for r in sat_rows if r["score"] is not None]
+            if scores:
+                snapshot.satisfaction_index = round(sum(scores) / len(scores), 3)
+                snapshot.satisfaction_samples = len(scores)
+    except Exception:
+        pass
+
+    # --- Grounding / Hallucination Rate ---
+    try:
+        grounding_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.grounding_ratio') AS REAL) as ratio "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'grounding_check' AND context IS NOT NULL"
+        ).fetchall()
+        if grounding_rows:
+            ratios = [r["ratio"] for r in grounding_rows if r["ratio"] is not None]
+            if ratios:
+                snapshot.grounding_ratio_avg = sum(ratios) / len(ratios)
+                snapshot.grounding_checks = len(ratios)
+    except Exception:
+        pass
+
+    # --- MTTR (Mean Time To Recovery) ---
+    try:
+        mttr_rows = conn.execute(
+            "SELECT created_at, merged_at, verified_at FROM evolution_candidates "
+            "WHERE status = 'completed' AND created_at IS NOT NULL "
+            "AND (merged_at IS NOT NULL OR verified_at IS NOT NULL)"
+        ).fetchall()
+        if mttr_rows:
+            from datetime import datetime as _dt_mttr
+            mttrs = []
+            for row in mttr_rows:
+                try:
+                    t_start = _dt_mttr.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                    t_end_str = row["verified_at"] or row["merged_at"]
+                    t_end = _dt_mttr.fromisoformat(t_end_str.replace("Z", "+00:00"))
+                    hours = (t_end - t_start).total_seconds() / 3600
+                    if 0 < hours < 720:  # sanity: <30 days
+                        mttrs.append(hours)
+                except Exception:
+                    continue
+            if mttrs:
+                snapshot.mttr_hours = sum(mttrs) / len(mttrs)
+                snapshot.mttr_samples = len(mttrs)
+    except Exception:
+        pass
+
+    # --- Cost Per Task ---
+    try:
+        cost_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.cost_usd') AS REAL) as cost "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'llm_token_usage' AND context IS NOT NULL "
+            "ORDER BY cost"
+        ).fetchall()
+        if cost_rows:
+            costs = [r["cost"] for r in cost_rows if r["cost"] is not None and r["cost"] > 0]
+            if costs:
+                n = len(costs)
+                snapshot.cost_per_task_p50 = costs[n // 2]
+                snapshot.cost_per_task_p95 = costs[int(n * 0.95)]
+                snapshot.total_cost_usd = sum(costs)
+
+        token_rows = conn.execute(
+            "SELECT SUM(CAST(json_extract(context, '$.prompt_tokens') AS INTEGER) + "
+            "CAST(json_extract(context, '$.completion_tokens') AS INTEGER)) as total "
+            "FROM interaction_signals WHERE signal_type = 'llm_token_usage'"
+        ).fetchone()
+        if token_rows and token_rows["total"]:
+            snapshot.total_tokens = token_rows["total"]
+    except Exception:
+        pass
+
+    # --- Per-Tool Accuracy Breakdown ---
+    try:
+        # Total calls per tool from capability_usage signals
+        usage_rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as tool, COUNT(*) as cnt "
+            "FROM interaction_signals WHERE signal_type = 'capability_usage' "
+            "AND context IS NOT NULL GROUP BY tool ORDER BY cnt DESC"
+        ).fetchall()
+
+        # Failures per tool
+        failure_rows = conn.execute(
+            "SELECT json_extract(context, '$.action') as tool, COUNT(*) as cnt "
+            "FROM interaction_signals "
+            "WHERE signal_type IN ('tool_failure', 'action_execution_failure') "
+            "AND context IS NOT NULL GROUP BY tool"
+        ).fetchall()
+        failure_map = {r["tool"]: r["cnt"] for r in failure_rows if r["tool"]}
+
+        for row in usage_rows:
+            tool = row["tool"]
+            if not tool:
+                continue
+            calls = row["cnt"]
+            failures = failure_map.get(tool, 0)
+            success_rate = (calls - failures) / calls if calls > 0 else 0
+            snapshot.per_tool_metrics[tool] = {
+                "calls": calls,
+                "failures": failures,
+                "success_rate": round(success_rate, 3),
+            }
+    except Exception:
+        pass
+
     conn.close()
     return snapshot
 
@@ -233,6 +364,16 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
          f"{snapshot.cascaded_failures} cascaded", "<5%"),
         ("Abandonment Rate", snapshot.abandonment_rate,
          f"{snapshot.abandoned_sessions}/{snapshot.total_sessions} sessions", "<15%"),
+        ("Satisfaction Index", snapshot.satisfaction_index,
+         f"{snapshot.satisfaction_samples} samples" if snapshot.satisfaction_samples else "N/A", ">90%"),
+        ("Grounding Ratio", snapshot.grounding_ratio_avg,
+         f"{snapshot.grounding_checks} checks" if snapshot.grounding_checks else "N/A", ">95%"),
+        ("MTTR (avg)", snapshot.mttr_hours,
+         f"{snapshot.mttr_hours:.1f}h ({snapshot.mttr_samples} samples)" if snapshot.mttr_hours else "N/A", "<24h"),
+        ("Cost Per Task P50", snapshot.cost_per_task_p50,
+         f"${snapshot.cost_per_task_p50:.4f}" if snapshot.cost_per_task_p50 else "N/A", "track"),
+        ("Cost Per Task P95", snapshot.cost_per_task_p95,
+         f"${snapshot.cost_per_task_p95:.4f}" if snapshot.cost_per_task_p95 else "N/A", "track"),
     ]
 
     for name, value, detail, target in metrics:
@@ -241,6 +382,16 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
             print(f"  {name:30s} {pct:>8s}  ({detail})  target: {target}")
         else:
             print(f"  {name:30s}      N/A  ({detail})")
+
+    # Per-tool breakdown
+    if snapshot.per_tool_metrics:
+        print(f"\n  {'Per-Tool Accuracy':30s}")
+        print(f"  {'─' * 55}")
+        sorted_tools = sorted(snapshot.per_tool_metrics.items(), key=lambda x: x[1]["calls"], reverse=True)
+        for tool, data in sorted_tools[:15]:
+            rate = f"{data['success_rate']:.0%}"
+            status = "✓" if data["success_rate"] >= 0.9 else "⚠" if data["success_rate"] >= 0.75 else "✗"
+            print(f"  {status} {tool:25s} {rate:>5s}  ({data['calls']} calls, {data['failures']} failures)")
 
     print(f"{'=' * 60}")
 

@@ -1,0 +1,89 @@
+name: Eval Gate
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.py'
+      - 'eval/**'
+      - 'actions/**'
+      - 'agents/**'
+      - '**.yaml'
+      - '**.yml'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  syntax-and-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml pytest anthropic httpx
+
+      - name: Syntax check — all Python files
+        run: |
+          python -c "
+          import ast, pathlib, sys
+          errors = []
+          for f in pathlib.Path('.').rglob('*.py'):
+              if '.venv' in str(f) or '__pycache__' in str(f):
+                  continue
+              try:
+                  ast.parse(f.read_text())
+              except SyntaxError as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(f'ERROR: {e}')
+              sys.exit(1)
+          print(f'All {len(list(pathlib.Path(\".\").rglob(\"*.py\")))} Python files parse OK')
+          "
+
+      - name: Validate golden.yaml
+        run: |
+          python -c "
+          import yaml
+          data = yaml.safe_load(open('eval/fixtures/golden.yaml'))
+          total = sum(len(v) for v in data.values())
+          print(f'Golden cases: {total} across {len(data)} categories')
+          assert total > 400, f'Expected >400 golden cases, got {total}'
+          "
+
+      - name: Unit tests
+        run: |
+          python -m pytest tests/test_agent_orchestration.py -v --tb=short
+
+      - name: Tool-use eval (swarm gate + schema + param + filter + bypass)
+        run: |
+          python eval/tool_use_eval.py
+
+      - name: Post eval summary as PR comment
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `### Eval Gate Results
+            - ✅ Syntax check passed
+            - ✅ Golden YAML valid
+            - ✅ Unit tests passed
+            - ✅ Tool-use eval passed
+
+            > Full frozen eval (851 cases) requires local Ollama — run manually before merge:
+            > \`python -m eval --cases eval/fixtures/cases.json --parallel\``;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

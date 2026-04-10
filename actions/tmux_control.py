@@ -173,6 +173,12 @@ def _extract_command(query: str) -> str | None:
 
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle tmux control intents."""
+    # Availability guard: check if tmux binary exists
+    import shutil
+    if not shutil.which("tmux"):
+        await ctx.reply("tmux is not installed on this system.")
+        return True
+
     query = intent.get("query", "") or intent.get("user_query", "")
 
     if action == "tmux_list":

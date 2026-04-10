@@ -73,6 +73,23 @@ def _redact_sensitive(text: str) -> str:
     return text
 
 
+def _should_try_swarm(query: str) -> bool:
+    """Cheap heuristic: should we attempt parallel agent decomposition?
+
+    Returns True only for queries that look multi-intent (conjunctions, comma-separated
+    verbs, etc.). Avoids the expensive LLM decomposition call for simple queries.
+    """
+    if not SWARM_ENABLED:
+        return False
+    if len(query) < 40:
+        return False
+    try:
+        from orchestrator import looks_like_multi_step
+        return looks_like_multi_step(query)
+    except Exception:
+        return False
+
+
 class _JsonFormatter(logging.Formatter):
     """Simple JSON log formatter with sensitive data redaction."""
     def format(self, record):
@@ -695,8 +712,9 @@ def _get_mcp_tools_text() -> str:
         return ""
 
 
-LLM_TIMEOUT = 45.0  # seconds — reduced from 90s; fail fast to fallback for P95
-CLAUDE_TIMEOUT = 15.0  # aggressive — fail fast, fall back to GPT/Gemini
+LLM_TIMEOUT = 20.0  # seconds — Ollama local (fast when running)
+CLAUDE_TIMEOUT = 8.0  # per-model timeout — fail fast, try next provider
+FALLBACK_BUDGET = 15.0  # total seconds for the entire fallback chain
 _ollama_recovery_attempted = False
 
 
@@ -780,11 +798,19 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
     """Fall back through LLM provider chain when primary is down.
 
     Tries: Ollama cloud (kimi) → Claude Sonnet → Claude Haiku → GPT-5.2 → Gemini 2.5 Flash → cached.
+    Uses a total latency budget (FALLBACK_BUDGET) — gives up after budget expires.
     """
+    import time as _fb_time
+    _budget_start = _fb_time.monotonic()
+
+    def _budget_remaining() -> float:
+        return max(0, FALLBACK_BUDGET - (_fb_time.monotonic() - _budget_start))
+
     # Try Ollama cloud model first (free, no API key needed)
-    kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
-    if kimi_result:
-        return kimi_result
+    if _budget_remaining() > 2:
+        kimi_result = await _fallback_to_ollama_cloud(query, context, system, user_message)
+        if kimi_result:
+            return kimi_result
 
     # Use Taskforce client if available, else native Anthropic
     _use_taskforce = _taskforce_client is not None
@@ -809,32 +835,41 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
     _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
 
     for model in _FALLBACK_MODELS:
+        _remaining = _budget_remaining()
+        if _remaining < 1:
+            log.warning("Fallback budget exhausted (%.1fs), skipping remaining models", FALLBACK_BUDGET)
+            break
+        _timeout = min(CLAUDE_TIMEOUT, _remaining)
         try:
             if _use_taskforce:
                 response = await client.chat.completions.create(
-                    model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+                    model=model, max_tokens=1500, messages=_msgs, timeout=_timeout,
                 )
                 text = response.choices[0].message.content
             else:
                 response = await client.messages.create(
                     model=model, max_tokens=1500, system=system,
-                    messages=[{"role": "user", "content": user_message}], timeout=CLAUDE_TIMEOUT,
+                    messages=[{"role": "user", "content": user_message}], timeout=_timeout,
                 )
                 text = response.content[0].text
-            log.info("Fell back to %s (Ollama unavailable)", model)
+            log.info("Fell back to %s (Ollama unavailable) in %.1fs", model, FALLBACK_BUDGET - _budget_remaining())
             return text
         except Exception as e:
             log.warning("Fallback model %s failed: %s", model, e)
             continue
 
-    # Try backup providers (OpenAI, Google) via Taskforce
+    # Try backup providers (OpenAI, Google) — only if budget remains
     for client_attr, model in _BACKUP_PROVIDERS:
+        _remaining = _budget_remaining()
+        if _remaining < 1:
+            log.warning("Fallback budget exhausted, skipping backup providers")
+            break
         backup_client = globals().get(client_attr)
         if not backup_client:
             continue
         try:
             response = await backup_client.chat.completions.create(
-                model=model, max_tokens=1500, messages=_msgs, timeout=CLAUDE_TIMEOUT,
+                model=model, max_tokens=1500, messages=_msgs, timeout=min(CLAUDE_TIMEOUT, _remaining),
             )
             text = response.choices[0].message.content
             log.info("Fell back to backup provider %s (%s)", model, client_attr)
@@ -843,7 +878,7 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
             log.warning("Backup provider %s (%s) failed: %s", model, client_attr, e)
             continue
 
-    # All models failed — try cached response
+    # All models failed or budget exhausted — try cached response
     return _get_cached_response(query)
 
 
@@ -1500,27 +1535,54 @@ async def _execute_tool_call(tool_call) -> str:
     intent = {"action": action, **args, "tool_mode": True}
 
     t0 = _time.monotonic()
+    _audit_success = False
+    _audit_error = ""
+    _result_text = ""
     try:
         result = await asyncio.wait_for(
             handler(action, intent, capture_ctx),
             timeout=60,  # increased from 30s for shell/claude_code
         )
         elapsed = _time.monotonic() - t0
-        result_text = capture_ctx.get_result()
+        _result_text = capture_ctx.get_result()
         _record_tool_analytics(fn_name, json.dumps(args), True, elapsed)
-        return result_text
+        _audit_success = True
+        return _result_text
     except asyncio.TimeoutError:
         elapsed = _time.monotonic() - t0
+        _audit_error = "timeout"
         _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error="timeout")
-        return json.dumps({"error": True, "type": "timeout",
+        _result_text = json.dumps({"error": True, "type": "timeout",
                            "message": f"{fn_name} timed out after 60s",
                            "suggestion": "The operation took too long. Try a simpler request."})
+        return _result_text
     except Exception as e:
         elapsed = _time.monotonic() - t0
-        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=str(e)[:200])
-        return json.dumps({"error": True, "type": "execution_error",
-                           "message": f"{fn_name} failed: {str(e)[:200]}",
+        _audit_error = str(e)[:200]
+        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=_audit_error)
+        _result_text = json.dumps({"error": True, "type": "execution_error",
+                           "message": f"{fn_name} failed: {_audit_error}",
                            "suggestion": "Check the parameters and try again, or use an alternative approach."})
+        return _result_text
+    finally:
+        # #19: Audit trail — structured JSONL per tool execution
+        try:
+            _audit_entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "tool": fn_name,
+                "action": action,
+                "args_summary": json.dumps(args)[:200],
+                "success": _audit_success,
+                "error": _audit_error,
+                "latency_ms": int((_time.monotonic() - t0) * 1000),
+                "result_summary": _result_text[:200] if _result_text else "",
+            }
+            from config import DATA_DIR
+            _audit_path = DATA_DIR / "audit_trail.jsonl"
+            with open(_audit_path, "a") as _af:
+                _af.write(json.dumps(_audit_entry) + "\n")
+        except Exception:
+            pass  # Audit should never break tool execution
 
 
 def _check_required_params(tool_name: str, args: dict) -> list[str]:
@@ -1551,6 +1613,16 @@ def _record_tool_analytics(tool_name: str, params: str, success: bool,
         db_conn.commit()
     except Exception:
         pass  # analytics should never break tool execution
+
+    # #21: Update trust scores for autonomy promotion/demotion
+    try:
+        if autonomy:
+            if success:
+                autonomy.record_tool_success(tool_name)
+            else:
+                autonomy.record_tool_failure(tool_name)
+    except Exception:
+        pass
 
 
 def _get_failing_tools() -> str:
@@ -1719,6 +1791,7 @@ async def call_llm_with_tools(
                 tools=tools,
                 tool_choice=_tc,
                 timeout=CLAUDE_TIMEOUT,
+                temperature=0.0,  # #17: deterministic tool selection to reduce variance
             )
         except Exception as e:
             log.error("Tool-use LLM call failed (iteration %d): %s", iteration, e)
@@ -1730,6 +1803,29 @@ async def call_llm_with_tools(
 
         choice = response.choices[0]
         msg = choice.message
+
+        # #12: Track token usage and cost per iteration
+        _usage = getattr(response, 'usage', None)
+        if _usage:
+            _prompt_tok = getattr(_usage, 'prompt_tokens', 0) or 0
+            _completion_tok = getattr(_usage, 'completion_tokens', 0) or 0
+            # Approximate pricing (per 1M tokens): Sonnet input=$3, output=$15; Opus input=$15, output=$75
+            _is_opus = "opus" in (_routed_model or "").lower()
+            _input_rate = 15.0 if _is_opus else 3.0  # per 1M tokens
+            _output_rate = 75.0 if _is_opus else 15.0
+            _cost_usd = (_prompt_tok * _input_rate + _completion_tok * _output_rate) / 1_000_000
+            try:
+                from learning import record_signal
+                record_signal("llm_token_usage", {
+                    "model": _routed_model,
+                    "prompt_tokens": _prompt_tok,
+                    "completion_tokens": _completion_tok,
+                    "cost_usd": round(_cost_usd, 6),
+                    "iteration": iteration,
+                })
+            except Exception:
+                pass
+
         log.info("Tool-use iteration %d: finish_reason=%s, tool_calls=%s, content_len=%d",
                  iteration, choice.finish_reason,
                  [tc.function.name for tc in msg.tool_calls] if msg.tool_calls else None,
@@ -1821,6 +1917,7 @@ async def call_llm_with_tools(
                     messages=messages,
                     tool_choice="none",
                     timeout=CLAUDE_TIMEOUT,
+                    temperature=0.0,
                 )
                 _retry_text = _synth_resp.choices[0].message.content or ""
                 if _retry_text and len(_retry_text) > len(final_text):
@@ -1856,6 +1953,7 @@ async def call_llm_with_tools(
                         messages=messages,
                         tool_choice="none",
                         timeout=CLAUDE_TIMEOUT,
+                        temperature=0.0,
                     )
                     final_text = _synth_resp.choices[0].message.content or ""
                     log.info("Synthesis retry produced %d chars", len(final_text))
@@ -1915,6 +2013,7 @@ async def call_llm_with_tools(
             messages=messages,
             tool_choice="none",
             timeout=CLAUDE_TIMEOUT,
+            temperature=0.0,
         )
         final_text = _final_resp.choices[0].message.content or ""
         if final_text:
@@ -3061,6 +3160,8 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
             from skills import get_registry
             handler = get_registry().get_handler(action)
             if handler is not None:
+                # Track reply state before handler runs
+                _had_reply_before = getattr(ctx, '_replied', False)
                 try:
                     result = await asyncio.wait_for(
                         handler(action, intent, ctx),
@@ -3070,10 +3171,21 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
                     log.error("Skill handler timed out for %s (30s)", action)
                     await ctx.reply(f"⚠️ {action} timed out after 30s. Try again or check /health.")
                     return True
+                except Exception as handler_err:
+                    log.error("Skill handler raised for %s: %s", action, handler_err)
+                    await ctx.reply(f"⚠️ {action} encountered an error: {handler_err}")
+                    return True
                 if result:
+                    # Handler claimed success — ensure user got a response
+                    if not getattr(ctx, '_replied', False) and not _had_reply_before:
+                        log.warning("Handler %s returned True but never called ctx.reply()", action)
+                        await ctx.reply(f"✅ {action} completed.")
+                    return True
+                # Handler returned falsy — if it did reply, treat as handled
+                if getattr(ctx, '_replied', False) and not _had_reply_before:
                     return True
         except Exception as e:
-            log.error("Skill handler failed for %s: %s", action, e)
+            log.error("Skill dispatch failed for %s: %s", action, e)
             await ctx.reply(f"⚠️ {action} failed: {e}")
             # Fall through to legacy dispatch / LLM for a helpful response
 
@@ -5153,8 +5265,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         OWNER_CHAT_ID = ctx.chat_id
         _persist_owner_chat_id(OWNER_CHAT_ID)
 
-    query = update.message.text if update.message else None
+    query = (update.message.text if update.message else None)
     if not query or not query.strip():
+        if update.message:
+            await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
+        return
+    query = query.strip()
+    if len(query) < 2:
+        await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
         return
 
     # Rate limiting
@@ -5419,8 +5537,9 @@ async def handle_message_generic(ctx: MessageContext):
     _msg_start = _time.monotonic()
 
     global OWNER_CHAT_ID
-    query = ctx.incoming.text if ctx.incoming else ""
-    if not query or not query.strip():
+    query = (ctx.incoming.text if ctx.incoming else "").strip()
+    if not query or len(query) < 2:
+        await ctx.reply("I didn't catch that — what can I help you with?")
         return
 
     chat_id = ctx.chat_id
@@ -5538,7 +5657,53 @@ async def handle_message_generic(ctx: MessageContext):
             + full_context
         )
 
-    response = await ask_claude(query, full_context)
+    # Swarm check: for multi-intent queries, try parallel agent decomposition
+    if _should_try_swarm(query):
+        try:
+            from agents.coordinator import decompose_to_swarm, run_swarm, synthesize_results
+            sub_agents = await decompose_to_swarm(query, full_context, ask_claude)
+            if sub_agents:
+                log.info("Swarm decomposition: %d agents for query: %s", len(sub_agents), query[:80])
+                await progress_msg.edit("\U0001f41d Running parallel agents...")
+                swarm_result = await run_swarm(sub_agents)
+                response = await synthesize_results(query, swarm_result, ask_claude)
+                try:
+                    from learning import record_signal
+                    record_signal("swarm_used", {
+                        "query": query[:200],
+                        "agent_count": len(sub_agents),
+                        "success_count": len(swarm_result.results),
+                        "error_count": len(swarm_result.errors),
+                        "elapsed_ms": swarm_result.elapsed_ms,
+                    })
+                except Exception:
+                    pass
+                save_message(chat_id, "assistant", response)
+                try:
+                    await progress_msg.edit(response)
+                except Exception:
+                    await progress_msg.delete()
+                    await ctx.channel.send_message(chat_id, response)
+                return
+        except Exception as e:
+            log.warning("Swarm decomposition failed, falling through to standard path: %s", e)
+            try:
+                from learning import record_signal
+                record_signal("swarm_failed", {"query": query[:200], "error": str(e)[:200]})
+            except Exception:
+                pass
+
+    # Conversational mode: no skill matched, optimize for quality dialogue
+    _conv_extra = (
+        "CONVERSATION MODE: No action skill matched this query. "
+        "Respond as a thoughtful, knowledgeable personal assistant. "
+        "Be warm but concise. Draw on the provided context to personalize your response. "
+        "If the user is making small talk, engage naturally. "
+        "If they're asking a knowledge question, answer directly from context or general knowledge. "
+        "Do NOT suggest the user run commands or check things manually — if you can't help, say so. "
+        "Do NOT include [CAPABILITY_GAP] tags for conversational queries.\n\n"
+    )
+    response = await ask_claude(query, full_context, system_extra=_conv_extra)
 
     # Extract capability gap tags BEFORE stripping from display
     _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')

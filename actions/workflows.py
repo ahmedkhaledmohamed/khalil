@@ -145,8 +145,13 @@ async def run_workflow(workflow_name: str, ctx) -> list[str]:
             registry = get_registry()
             handler = registry.get_handler(action)
             if handler:
-                # Run the handler — it will reply to ctx
-                await handler(action, intent, ctx)
+                # Run the handler with per-step timeout to prevent cascading hangs
+                try:
+                    await asyncio.wait_for(handler(action, intent, ctx), timeout=15)
+                except asyncio.TimeoutError:
+                    results.append(f"Step {i}: {action} \u2014 timed out (15s)")
+                    log.warning("Workflow step %d (%s) timed out", i, action)
+                    continue
                 results.append(f"Step {i}: {action} \u2714")
             else:
                 results.append(f"Step {i}: {action} \u2014 no handler found")

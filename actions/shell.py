@@ -20,6 +20,54 @@ log = logging.getLogger("khalil.actions.shell")
 SHELL_TIMEOUT = 30
 MAX_OUTPUT_LENGTH = 3000
 
+# --- Path hallucination detection ---
+
+# Regex to find absolute paths in commands (skip flags like -/--xxx)
+_ABS_PATH_RE = re.compile(r'(?<!\w)(/(?:Users|home|tmp|var|opt|etc|usr|Applications|Volumes|Library|System)[/\w.\-~]+)')
+
+
+def _check_paths_exist(cmd: str, cwd: str | None = None) -> str | None:
+    """Check if absolute paths referenced in a command actually exist.
+
+    Returns an error message if a hallucinated path is found, None if all paths exist
+    or no absolute paths are referenced.
+    """
+    paths = _ABS_PATH_RE.findall(cmd)
+    if not paths:
+        return None
+
+    missing = []
+    for p in paths:
+        # Expand ~ and resolve relative to cwd
+        expanded = os.path.expanduser(p)
+        if not os.path.exists(expanded):
+            # Check parent dir — if the parent exists, the command might be creating the file
+            parent = os.path.dirname(expanded)
+            if os.path.isdir(parent):
+                continue  # Parent exists, file might be intended to be created
+            missing.append(p)
+
+    if not missing:
+        return None
+
+    # Build helpful error with suggestions
+    lines = [f"Path does not exist: {missing[0]}"]
+    # Try fuzzy match: check siblings of the parent
+    parent = os.path.dirname(missing[0])
+    grandparent = os.path.dirname(parent)
+    if os.path.isdir(grandparent):
+        try:
+            siblings = os.listdir(grandparent)
+            base = os.path.basename(parent)
+            close = [s for s in siblings if base.lower() in s.lower() or s.lower() in base.lower()]
+            if close:
+                suggestions = [os.path.join(grandparent, s) for s in close[:3]]
+                lines.append(f"Did you mean: {', '.join(suggestions)}?")
+        except OSError:
+            pass
+
+    return "\n".join(lines)
+
 # --- Per-chat working directory tracking ---
 
 _chat_cwd: dict[int, str] = {}
@@ -374,6 +422,17 @@ async def execute_shell(cmd: str, cwd: str = None, timeout: int = SHELL_TIMEOUT,
             "timed_out": False,
         }
     cmd = sanitized
+
+    # Check for hallucinated paths before execution
+    path_error = _check_paths_exist(cmd)
+    if path_error:
+        log.warning("Path hallucination detected in command: %s — %s", cmd[:80], path_error)
+        return {
+            "returncode": -3,
+            "stdout": "",
+            "stderr": path_error,
+            "timed_out": False,
+        }
 
     # Resolve working directory
     if not cwd and chat_id is not None:
