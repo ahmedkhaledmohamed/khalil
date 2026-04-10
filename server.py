@@ -640,9 +640,9 @@ async def get_conversation_context(chat_id: int, query: str) -> str:
                 try:
                     info = json.loads(meta) if meta else {}
                     tool_name = info.get("tool_name", "tool")
-                    lines.append(f"Tool ({tool_name}): {content[:500]}")
+                    lines.append(f"Tool ({tool_name}): {content[:2000]}")
                 except Exception:
-                    lines.append(f"Tool: {content[:500]}")
+                    lines.append(f"Tool: {content[:2000]}")
             else:
                 lines.append(f"{role.title()}: {content}")
         parts.append("[Source: recent messages]\n" + "\n".join(lines))
@@ -1358,8 +1358,8 @@ class _ToolCaptureContext:
         return "\n".join(self.captured) if self.captured else "(no output)"
 
 
-_MAX_TOOL_ITERATIONS = 8
-_MAX_TOOL_AUTO_ITERATIONS = 6  # iterations with tool_choice="auto" before forcing "none"
+_MAX_TOOL_ITERATIONS = 12  # raised from 8 — compound artifacts (presentations, multi-file) need ~10 calls
+_MAX_TOOL_AUTO_ITERATIONS = 10  # raised from 6 — 10 auto + 2 forced synthesis
 
 # Preamble detection: catch LLM responses that announce intent instead of delivering results
 _PREAMBLE_RE = re.compile(
@@ -5466,6 +5466,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
                 + full_context
             )
+
+        # Auto-resume: inject pending task context to prevent "what was I doing?" amnesia
+        _pending_task_extra = ""
+        try:
+            _pt_row = db_conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (f"pending_task_{chat_id}",)
+            ).fetchone()
+            if _pt_row:
+                _pt = json.loads(_pt_row[0])
+                _pending_task_extra = (
+                    f"\n[ACTIVE TASK] You have an unfinished task: {_pt['query'][:300]}\n"
+                    f"Tools already used: {', '.join(_pt.get('tools_used', [])[:8])}\n"
+                    "Continue from where you left off. Do NOT restart from scratch.\n"
+                    "Stay focused on this task. Do NOT switch to other projects.\n"
+                )
+                full_context = _pending_task_extra + full_context
+        except Exception:
+            pass
 
         # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
         _t_llm_start = _time_mod.monotonic()
