@@ -558,6 +558,22 @@ class AgentLoop:
         except Exception as e:
             log.debug("Background agents check failed: %s", e)
 
+        # #26: Check long-horizon task completion conditions
+        try:
+            from agents.coordinator import check_completion_conditions
+            completed_tasks = await check_completion_conditions()
+            for task in completed_tasks:
+                opportunities.append(Opportunity(
+                    id=f"long_horizon_{task['id']}",
+                    source="long_horizon_task",
+                    summary=f"\u2705 Long-horizon task completed: {task['task'][:60]} — {task['result'][:60]}",
+                    urgency=Urgency.MEDIUM,
+                    action_type=None,
+                    payload={"result": task["result"], "follow_up": task.get("follow_up")},
+                ))
+        except Exception as e:
+            log.debug("Long-horizon condition check failed: %s", e)
+
         # M9: Check temporal tasks every tick
         try:
             from temporal import check_temporal_tasks
