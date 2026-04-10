@@ -6201,6 +6201,18 @@ def _setup_scheduler():
         else:
             log.warning("Morning brief skipped: no channel or owner chat ID yet")
 
+    # #25: Daily anticipation pass — runs after morning brief
+    async def _daily_anticipation_job():
+        if _can_send():
+            try:
+                from scheduler.proactive import daily_anticipation
+                findings = await daily_anticipation(ask_llm_fn=ask_claude)
+                if findings:
+                    msg = "\U0001f52e **Daily Anticipation**\n\n" + "\n".join(findings)
+                    await channel.send_message(OWNER_CHAT_ID, msg)
+            except Exception as e:
+                log.warning("Daily anticipation failed: %s", e)
+
     async def _financial_alert_job():
         if _can_send():
             await send_financial_alert(channel, OWNER_CHAT_ID, ask_claude)
@@ -6230,6 +6242,14 @@ def _setup_scheduler():
         CronTrigger(hour=7, minute=0, timezone=TIMEZONE),
         id="morning_brief",
         name="Morning Brief",
+        replace_existing=True,
+    )
+
+    scheduler.add_job(
+        _daily_anticipation_job,
+        CronTrigger(hour=7, minute=10, timezone=TIMEZONE),
+        id="daily_anticipation",
+        name="#25: Daily Anticipation",
         replace_existing=True,
     )
 
