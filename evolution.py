@@ -815,7 +815,20 @@ async def post_interaction_check(
                 "ungrounded": grounding["ungrounded"][:3],  # sample
             })
 
-        # 7. Latency already recorded by server.py, no need to duplicate
+        # 7. Implicit preference detection from user query
+        try:
+            from learning import detect_implicit_preferences
+            implicit_prefs = detect_implicit_preferences(query)
+            for pref in implicit_prefs:
+                record_signal("implicit_preference", {
+                    "key": pref["key"],
+                    "value": pref["value"],
+                    "query_snippet": query[:100],
+                })
+        except Exception:
+            pass
+
+        # 8. Latency already recorded by server.py, no need to duplicate
 
     except Exception as e:
         log.debug("post_interaction_check failed: %s", e)
