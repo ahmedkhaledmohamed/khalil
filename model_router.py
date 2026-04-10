@@ -5,7 +5,7 @@ import re
 import sqlite3
 from enum import Enum
 
-from config import CLAUDE_MODEL, CLAUDE_MODEL_COMPLEX, DB_PATH
+from config import CLAUDE_MODEL, CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_FAST, DB_PATH
 
 log = logging.getLogger("khalil.model_router")
 
@@ -17,10 +17,11 @@ class ModelTier(Enum):
 
 
 # Default tier → model mapping
+# #16: FAST queries use Sonnet (cheaper, faster) instead of Opus
 MODEL_MAP: dict[ModelTier, str] = {
-    ModelTier.FAST: CLAUDE_MODEL,         # Taskforce is free — use best model for all tiers
-    ModelTier.STANDARD: CLAUDE_MODEL,
-    ModelTier.COMPLEX: CLAUDE_MODEL_COMPLEX,
+    ModelTier.FAST: CLAUDE_MODEL_FAST,    # Sonnet for greetings, simple lookups
+    ModelTier.STANDARD: CLAUDE_MODEL,     # Opus for standard queries
+    ModelTier.COMPLEX: CLAUDE_MODEL_COMPLEX,  # Opus for code gen, analysis
 }
 
 # Settings keys for DB overrides
