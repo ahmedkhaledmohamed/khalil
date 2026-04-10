@@ -8,6 +8,8 @@ on:
       - 'eval/**'
       - 'actions/**'
       - 'agents/**'
+      - '**.yaml'
+      - '**.yml'
 
 permissions:
   pull-requests: write
@@ -25,7 +27,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyyaml pytest
+          pip install pyyaml pytest anthropic httpx
 
       - name: Syntax check — all Python files
         run: |
@@ -56,25 +58,13 @@ jobs:
           assert total > 400, f'Expected >400 golden cases, got {total}'
           "
 
-      - name: Swarm gate tests
+      - name: Unit tests
         run: |
-          cd $GITHUB_WORKSPACE
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          from orchestrator import looks_like_multi_step
+          python -m pytest tests/test_agent_orchestration.py -v --tb=short
 
-          # Should trigger
-          assert looks_like_multi_step('Check weather, email Sarah, and update calendar')
-          assert looks_like_multi_step('Prep for standup and also review PRs')
-          assert looks_like_multi_step('Summarize emails, check calendar, draft update')
-
-          # Should NOT trigger
-          assert not looks_like_multi_step('Hello')
-          assert not looks_like_multi_step('What is the weather?')
-
-          print('Swarm gate tests: 5/5 passed')
-          "
+      - name: Tool-use eval (swarm gate + schema + param + filter + bypass)
+        run: |
+          python eval/tool_use_eval.py
 
       - name: Post eval summary as PR comment
         if: github.event_name == 'pull_request'
@@ -83,9 +73,10 @@ jobs:
         with:
           script: |
             const body = `### Eval Gate Results
-            - ✅ Syntax check passed (all .py files)
+            - ✅ Syntax check passed
             - ✅ Golden YAML valid
-            - ✅ Swarm gate tests passed
+            - ✅ Unit tests passed
+            - ✅ Tool-use eval passed
 
             > Full frozen eval (851 cases) requires local Ollama — run manually before merge:
             > \`python -m eval --cases eval/fixtures/cases.json --parallel\``;
