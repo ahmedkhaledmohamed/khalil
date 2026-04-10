@@ -29,6 +29,9 @@ SKILL = {
         (r"\brecent\s+(?:messages?|texts?|contacts?)\b", "imessage_recent"),
         (r"\bwho\s+(?:texted|messaged)\s+me\b", "imessage_recent"),
         (r"\bsearch\s+(?:my\s+)?(?:messages?|texts?|imessage)\b", "imessage_search"),
+        (r"\b(?:check|show|get)\s+(?:my\s+)?(?:messages?|texts?|iMessages?)\b", "imessage_read"),
+        (r"\b(?:show|list)\s+(?:my\s+)?(?:recent|latest)\s+(?:messages?|texts?|iMessages?)\b", "imessage_recent"),
+        (r"\b(?:latest|newest)\s+(?:messages?|texts?)\b", "imessage_recent"),
     ],
     "actions": [
         {"type": "imessage_read", "handler": "handle_intent", "keywords": "imessage messages texts read from contact", "description": "Read messages from a contact"},

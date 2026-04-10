@@ -35,6 +35,13 @@ SKILL = {
         (r"\bcheck\s+(?:my\s+)?work\s+(?:inbox|email|mail)\b", "email_work"),
         (r"\bsearch\s+(?:my\s+)?personal\s+email\b", "email_personal"),
         (r"\bcheck\s+(?:my\s+)?personal\s+(?:inbox|email|mail)\b", "email_personal"),
+        (r"\b(?:read|show|get|pull\s+up|look\s+at)\s+(?:my\s+)?(?:latest|new|recent)?\s*emails?\b", "email_personal"),
+        (r"\bany\s+(?:new|unread)?\s*emails?\b", "email_personal"),
+        (r"\b(?:check|show)\s+(?:my\s+)?(?:inbox|emails?|mail)\b", "email_personal"),
+        (r"\bemails?\s+from\s+\w+", "email_personal"),
+        (r"\b(?:important|urgent)\s+(?:emails?|mail)\b", "email_personal"),
+        (r"\bemails?\s+(?:from\s+)?(?:today|this\s+week|recent)\b", "email_personal"),
+        (r"\b(?:anything|something)\s+(?:in\s+)?(?:my\s+)?inbox\b", "email_personal"),
     ],
     "actions": [
         {"type": "email", "handler": "handle_intent", "keywords": "email send draft write about", "description": "Send or draft an email",

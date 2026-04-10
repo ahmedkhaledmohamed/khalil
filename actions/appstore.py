@@ -35,6 +35,10 @@ SKILL = {
         (r"\bapp\s+(?:downloads?|stats?)\b", "appstore_downloads"),
         (r"\bzia\s+(?:downloads?|stats?)\b", "appstore_downloads"),
         (r"\bhow\s+is\s+zia\b", "appstore_ratings"),
+        (r"\b(?:check|show)\s+(?:my\s+)?app\s+store\b", "appstore_ratings"),
+        (r"\bapp\s+store\s+(?:download|stats?|numbers?)\b", "appstore_downloads"),
+        (r"\b(?:new|any|latest)\s+reviews?\s+(?:for\s+)?zia\b", "appstore_ratings"),
+        (r"\bzia\s+(?:download\s+)?stats?\b", "appstore_downloads"),
     ],
     "actions": [
         {"type": "appstore_ratings", "handler": "handle_intent", "keywords": "app store rating reviews zia", "description": "App ratings and reviews"},
