@@ -56,7 +56,7 @@ Healing generates patches with `max_tokens=1500`, causing mid-line truncation th
 - **Files:** `healing.py` (generate_healing_patch, validate_patch), `llm_client.py`
 - **Unlocks:** 9
 
-### 9. Closed-Loop Heal Verification
+### 9. Closed-Loop Heal Verification ✅ (PR #236)
 Currently fire-and-forget. Implement: (a) store PR number in evolution_candidates; (b) check merge status via `gh pr view`; (c) re-run relevant eval cases post-merge; (d) auto-create "failed_heal" follow-up if eval still fails; (e) record improvement delta on success.
 - **Effort:** L | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
 - **Files:** `evolution.py` (_check_evolution_outcomes), `healing.py` (check_heal_outcomes), `eval/runner.py`
