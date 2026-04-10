@@ -19,6 +19,9 @@ SKILL = {
         (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),
         (r"\breminders?\s+app\b", "icloud_reminder"),
         (r"\bshow\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
+        (r"\bget\s+(?:my\s+)?(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
+        (r"\b(?:apple|icloud)\s+reminders?\s+due\s+today\b", "icloud_reminder"),
+        (r"\b(?:what|list)\s+(?:apple|icloud)\s+reminders?\b", "icloud_reminder"),
         (r"\bsync\s+(?:reminders?\s+)?(?:to\s+)?apple\b", "apple_reminders_sync"),
     ],
     "actions": [

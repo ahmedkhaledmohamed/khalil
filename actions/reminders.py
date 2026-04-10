@@ -26,6 +26,9 @@ SKILL = {
         (r"\bset\s+(?:a\s+)?reminder\b", "reminder"),
         (r"\breminder\s+(?:to|for|about)\b", "reminder"),
         (r"\bdon'?t\s+(?:let\s+me\s+)?forg?[ea]t\b", "reminder"),
+        (r"\bremind\s+me\s+tomorrow\s+to\b", "reminder"),
+        (r"\b(?:show|list)\s+(?:my\s+)?reminders?\b", "reminder_list"),
+        (r"\bdon'?t\s+let\s+me\s+forget\b", "reminder"),
     ],
     "actions": [
         {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder",

@@ -39,6 +39,8 @@ SKILL = {
         (r"\bjob\s+search\s+linkedin\b", "linkedin_jobs"),
         (r"\blinkedin\s+(?:views?|profile\s+views?)\b", "linkedin_profile"),
         (r"\bprofile\s+views?\b", "linkedin_profile"),
+        (r"\bcheck\s+linkedin\s+messages?\b", "linkedin_messages"),
+        (r"\banything\s+new\s+on\s+linkedin\b", "linkedin_messages"),
     ],
     "actions": [
         {"type": "linkedin_messages", "handler": "handle_intent", "keywords": "linkedin messages recruiter inmail", "description": "Recruiter messages"},

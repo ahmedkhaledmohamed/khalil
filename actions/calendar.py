@@ -38,6 +38,8 @@ SKILL = {
         (r"\bevents?\s+(?:today|tomorrow|this\s+week|status)\b", "calendar"),
         (r"\b(?:am\s+i|are\s+we)\s+free\b", "calendar"),
         (r"\blist\s+(?:today|tomorrow)\b", "calendar"),
+        (r"\bdo\s+i\s+have\s+(?:meetings?|events?)\s+today\b", "calendar"),
+        (r"\bcalendar\s+for\s+tomorrow\b", "calendar"),
     ],
     "actions": [
         {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
