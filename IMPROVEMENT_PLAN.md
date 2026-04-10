@@ -177,7 +177,7 @@ Agent loop is reactive (state changes only). Add: (a) daily anticipation pass at
 - **Files:** `agent_loop.py`, `scheduler/proactive.py`, `scheduler/planning.py`, `state/collector.py`
 - **Unlocks:** 18
 
-### 26. Long-Horizon Task Execution (>24h)
+### 26. Long-Horizon Task Execution (>24h) ✅ (PR #250)
 Orchestrator only handles synchronous single-turn tasks. Add: persistent task queue in DB, "task watcher" in agent loop polling every 5min, completion conditions (regex on state change, time elapsed, external event), notification + optional follow-up action on completion.
 - **Effort:** XL | **Impact:** HIGH | **Benchmark:** METR (96h tasks), TheAgentCompany
 - **Files:** `orchestrator.py`, `agent_loop.py`, new: `scheduler/tasks.py`
