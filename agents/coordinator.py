@@ -161,9 +161,17 @@ def _ensure_bg_table():
             context TEXT NOT NULL DEFAULT '{}',
             created_at TEXT NOT NULL,
             completed_at TEXT,
-            max_duration_s INTEGER NOT NULL DEFAULT 3600
+            max_duration_s INTEGER NOT NULL DEFAULT 3600,
+            completion_condition TEXT,
+            follow_up_action TEXT
         )
     """)
+    # Migrate existing tables
+    for col in ("completion_condition TEXT", "follow_up_action TEXT"):
+        try:
+            conn.execute(f"ALTER TABLE background_agents ADD COLUMN {col}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -172,10 +180,22 @@ def spawn_background_agent(
     task: str,
     context: dict | None = None,
     max_duration_s: int = 3600,
+    completion_condition: str | None = None,
+    follow_up_action: str | None = None,
 ) -> BackgroundAgent:
     """Spawn a background agent for a complex, long-running task.
 
     The agent is persisted in DB and checked by the agent loop each tick.
+
+    Args:
+        task: What the agent should do.
+        context: Optional context dict.
+        max_duration_s: Maximum lifetime in seconds (default 1 hour).
+        completion_condition: Optional condition string. Supported formats:
+            - "time:3600" — complete after N seconds
+            - "regex:pattern" — complete when pattern matches a state check
+            - "pr_merged:123" — complete when PR #123 is merged
+        follow_up_action: Optional action to execute on completion (e.g., "notify:Task done").
     """
     import uuid
     import sqlite3
@@ -192,10 +212,12 @@ def spawn_background_agent(
     )
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute(
-        "INSERT INTO background_agents (id, task, status, progress, context, created_at, max_duration_s) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO background_agents (id, task, status, progress, context, created_at, "
+        "max_duration_s, completion_condition, follow_up_action) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (agent.id, task, "running", "[]", json.dumps(context or {}),
-         datetime.now(timezone.utc).isoformat(), max_duration_s),
+         datetime.now(timezone.utc).isoformat(), max_duration_s,
+         completion_condition, follow_up_action),
     )
     conn.commit()
     conn.close()
@@ -293,6 +315,93 @@ async def run_background_agent(agent_id: str, ask_llm_fn) -> str:
     except Exception as e:
         update_background_agent(agent_id, status="failed", final_result=str(e)[:500])
         return f"Background agent failed: {e}"
+
+
+# --- #26: Long-Horizon Task Watcher ---
+
+async def check_completion_conditions() -> list[dict]:
+    """Check all running background agents for completion conditions.
+
+    Called by agent loop each tick. Returns list of completed agents with results.
+    """
+    import subprocess as _sp
+    import sqlite3
+    from config import DB_PATH
+    from datetime import datetime, timezone
+
+    _ensure_bg_table()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    rows = conn.execute(
+        "SELECT id, task, completion_condition, follow_up_action, created_at "
+        "FROM background_agents WHERE status = 'running' AND completion_condition IS NOT NULL"
+    ).fetchall()
+    conn.close()
+
+    completed = []
+
+    for row in rows:
+        condition = row["completion_condition"]
+        agent_id = row["id"]
+
+        try:
+            if condition.startswith("time:"):
+                # Time-based: complete after N seconds
+                seconds = int(condition.split(":", 1)[1])
+                created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+                elapsed = (datetime.now(timezone.utc) - created).total_seconds()
+                if elapsed >= seconds:
+                    update_background_agent(agent_id, status="completed",
+                                            final_result=f"Time condition met ({seconds}s elapsed)")
+                    completed.append({
+                        "id": agent_id, "task": row["task"],
+                        "follow_up": row["follow_up_action"],
+                        "result": f"Completed after {int(elapsed)}s",
+                    })
+
+            elif condition.startswith("pr_merged:"):
+                # PR merge check
+                pr_num = condition.split(":", 1)[1]
+                result = _sp.run(
+                    ["gh", "pr", "view", pr_num, "--json", "state"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0:
+                    state = json.loads(result.stdout).get("state", "").upper()
+                    if state == "MERGED":
+                        update_background_agent(agent_id, status="completed",
+                                                final_result=f"PR #{pr_num} merged")
+                        completed.append({
+                            "id": agent_id, "task": row["task"],
+                            "follow_up": row["follow_up_action"],
+                            "result": f"PR #{pr_num} merged",
+                        })
+
+            elif condition.startswith("regex:"):
+                # Regex on shell output — run a check command from context
+                import re as _re
+                pattern = condition.split(":", 1)[1]
+                # The check command should be in the context
+                agent_data = get_background_agents(status="running")
+                agent = next((a for a in agent_data if a["id"] == agent_id), None)
+                if agent:
+                    ctx = json.loads(agent.get("context", "{}")) if isinstance(agent.get("context"), str) else agent.get("context", {})
+                    check_cmd = ctx.get("check_command")
+                    if check_cmd:
+                        result = _sp.run(check_cmd, shell=True, capture_output=True, text=True, timeout=15)
+                        if _re.search(pattern, result.stdout):
+                            update_background_agent(agent_id, status="completed",
+                                                    final_result=f"Pattern matched: {pattern}")
+                            completed.append({
+                                "id": agent_id, "task": row["task"],
+                                "follow_up": row["follow_up_action"],
+                                "result": f"Condition met: {pattern}",
+                            })
+
+        except Exception as e:
+            log.debug("Condition check failed for %s: %s", agent_id, e)
+
+    return completed
 
 
 async def synthesize_results(query: str, swarm_result: SwarmResult, ask_llm_fn) -> str:
