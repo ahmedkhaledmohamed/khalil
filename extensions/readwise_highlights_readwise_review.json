@@ -1,0 +1,9 @@
+{
+    "name": "readwise_highlights_readwise_review",
+    "command": "readwise",
+    "description": "Actions 'readwise_highlights' and 'readwise_review' used together 88x — integration opportunity",
+    "action_module": "actions.readwise_highlights_readwise_review",
+    "handler_function": "handle_readwise",
+    "generated_at": "2026-04-10T12:00:00",
+    "generated_for": "Actions 'readwise_highlights' and 'readwise_review' used together 88x — integration opportunity"
+}
