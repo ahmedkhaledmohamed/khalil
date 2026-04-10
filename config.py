@@ -43,6 +43,9 @@ SIDE_PROJECT_DIRS = [
     Path.home() / "Developer" / "ParentingAssistantBackend",
     Path.home() / "Developer" / "compass-AI",
     Path.home() / "Developer" / "Personal" / "the-hub",
+    Path.home() / "Developer" / "Personal" / "me",
+    Path.home() / "Developer" / "Personal" / "sdm-interview-prep",
+    Path.home() / "Developer" / "Personal" / "llm-dissection",
 ]
 
 # Work project documentation directories (Spotify repos with docs worth indexing)
@@ -63,10 +66,16 @@ WORK_PROJECT_DOCS = [
     (Path.home() / "Developer" / "ahmed-experience-mission", "work:experience-mission"),
     # Product specs (inbox architecture, push taxonomy, opt-in API)
     (Path.home() / "Developer" / "Client-Messaging-Product-Specs", "work:product-specs"),
-    # Bézier monorepo
-    (Path.home() / "Developer" / "Bézier" / "monorepo", "projects:bezier"),
+    # Bézier (full repo, not just monorepo subdir)
+    (Path.home() / "Developer" / "Bézier", "projects:bezier"),
     # Aika pipeline
     (Path.home() / "Developer" / "aika-knowledge-ingestion-pipeline", "projects:aika"),
+    # The Hub — active project
+    (Path.home() / "Developer" / "the-hub", "projects:the-hub"),
+    # Moments catalog — messaging moments reference
+    (Path.home() / "Developer" / "moments-catalog", "work:moments-catalog"),
+    # ECM GHE — enterprise client messaging
+    (Path.home() / "Developer" / "ecm-ghe", "work:ecm-ghe"),
 ]
 
 # Standalone files worth indexing from work repos
