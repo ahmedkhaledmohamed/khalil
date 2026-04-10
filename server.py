@@ -6371,16 +6371,23 @@ def _setup_scheduler():
     # M9: Weekly preference decay — run before reflection
     async def _preference_decay_job():
         try:
-            from learning import decay_preferences
+            from learning import decay_preferences, gc_old_signals
             archived = decay_preferences()
-            if archived and _can_send():
-                names = ", ".join(a["key"] for a in archived[:5])
+            # #27: Garbage collect old signals (>30 days)
+            pruned = gc_old_signals()
+            if _can_send() and (archived or pruned > 0):
+                parts = []
+                if archived:
+                    names = ", ".join(a["key"] for a in archived[:5])
+                    parts.append(f"archived {len(archived)} stale preference(s): {names}")
+                if pruned > 0:
+                    parts.append(f"pruned {pruned} old signals (>30d)")
                 await channel.send_message(
                     OWNER_CHAT_ID,
-                    f"🗑 Archived {len(archived)} stale preference(s): {names}"
+                    f"\U0001f5d1 Memory maintenance: {'; '.join(parts)}"
                 )
         except Exception as e:
-            log.warning("Preference decay failed: %s", e)
+            log.warning("Preference decay / signal GC failed: %s", e)
 
     scheduler.add_job(
         _preference_decay_job,
