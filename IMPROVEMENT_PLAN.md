@@ -183,7 +183,7 @@ Orchestrator only handles synchronous single-turn tasks. Add: persistent task qu
 - **Files:** `orchestrator.py`, `agent_loop.py`, new: `scheduler/tasks.py`
 - **Unlocks:** 25
 
-### 27. Cross-Session Memory with Forgetting
+### 27. Cross-Session Memory with Forgetting ✅ (PR #246)
 27,509 signals never pruned. Implement: time-decay on memory relevance, conflict resolution (newer wins), memory consolidation (merge related signals into summary), `/forget` command, garbage collection of processed signals >30d.
 - **Effort:** L | **Impact:** MEDIUM | **Benchmark:** METR (long-term maintenance)
 - **Files:** `learning.py`, `knowledge/search.py`, `memory/session_continuity.py`
