@@ -232,3 +232,31 @@ SENSITIVE_PATTERNS = [
     r"\bpassword\b",
     r"\bSIN\s*\d",                        # Canadian SIN
 ]
+
+# #20: Data classification for privacy-aware routing
+DATA_CLASSIFICATIONS = {
+    "PII": {"patterns": SENSITIVE_PATTERNS, "routing": "local_only",
+            "sources": ["email", "contacts", "imessage"]},
+    "FINANCIAL": {"patterns": [r"\bRSU\b", r"\binvestment\b", r"\bportfolio\b", r"\btax\b"],
+                  "routing": "local_preferred",
+                  "sources": ["finance"]},
+    "HEALTH": {"patterns": [r"\bhealth\b", r"\bsteps\b", r"\bsleep\b", r"\bheart\s*rate\b", r"\bworkout\b"],
+               "routing": "local_preferred",
+               "sources": ["apple_health", "fitness"]},
+    "WORK": {"patterns": [r"\bspotify\b.*\binternal\b", r"\bconfidential\b"],
+             "routing": "local_preferred",
+             "sources": ["work"]},
+}
+
+
+def get_privacy_summary() -> str:
+    """Return a human-readable summary of data flow routing rules."""
+    lines = ["Data Privacy Routing:\n"]
+    for category, info in DATA_CLASSIFICATIONS.items():
+        routing = info["routing"].replace("_", " ")
+        sources = ", ".join(info["sources"])
+        lines.append(f"  {category}: {routing} (sources: {sources})")
+    lines.append(f"\n  Sensitive patterns: {len(SENSITIVE_PATTERNS)} regex rules")
+    lines.append("  Local-only data never reaches cloud LLMs (forced to Ollama)")
+    lines.append("  Local-preferred data uses Ollama when available, cloud as fallback")
+    return "\n".join(lines)
