@@ -1378,8 +1378,30 @@ def _is_preamble_response(text: str) -> bool:
 
 
 def _save_pending_task(chat_id: int | str, query: str, tool_names: list[str]) -> None:
-    """Save a marker when a tool-use task didn't fully complete."""
+    """Save a marker when a tool-use task didn't fully complete.
+
+    Only overwrites if the new query is more descriptive than the existing one.
+    Prevents "Yes" / "Continue" from replacing the original task description.
+    """
     try:
+        existing = db_conn.execute(
+            "SELECT value FROM settings WHERE key = ?", (f"pending_task_{chat_id}",)
+        ).fetchone()
+        if existing:
+            old_task = json.loads(existing[0])
+            old_query = old_task.get("query", "")
+            # Keep the longer/more descriptive query
+            if len(query) < len(old_query) and len(query) < 30:
+                # Update tools used but keep original query
+                old_task["tools_used"] = tool_names[:10]
+                old_task["timestamp"] = datetime.now(timezone.utc).isoformat()
+                db_conn.execute(
+                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                    (f"pending_task_{chat_id}", json.dumps(old_task)),
+                )
+                db_conn.commit()
+                return
+
         db_conn.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
             (f"pending_task_{chat_id}", json.dumps({
@@ -1512,6 +1534,32 @@ async def _execute_tool_call(tool_call) -> str:
         args = await prefetch_for_tool(fn_name, args)
     except Exception as e:
         log.debug("Prefetch failed for %s: %s", fn_name, e)
+
+    # Handle search_knowledge tool directly (not from skill registry)
+    if fn_name == "search_knowledge":
+        search_query = args.get("query", "")
+        if not search_query:
+            return json.dumps({"error": True, "message": "Missing query parameter"})
+        try:
+            results = await asyncio.wait_for(hybrid_search(search_query, limit=8), timeout=15.0)
+            if not results:
+                _record_tool_analytics(fn_name, search_query, True, 0)
+                return json.dumps({"results": [], "message": "No results found in knowledge base."})
+            formatted = []
+            for doc in results:
+                formatted.append({
+                    "title": doc.get("title", "")[:100],
+                    "category": doc.get("category", ""),
+                    "content": doc.get("content", "")[:500],
+                })
+            _record_tool_analytics(fn_name, search_query, True, 0)
+            return json.dumps({"results": formatted, "count": len(formatted)})
+        except asyncio.TimeoutError:
+            _record_tool_analytics(fn_name, search_query, False, 15, error="timeout")
+            return json.dumps({"error": True, "message": "Knowledge search timed out (15s). Try a simpler query."})
+        except Exception as e:
+            _record_tool_analytics(fn_name, search_query, False, 0, error=str(e)[:200])
+            return json.dumps({"error": True, "message": f"Search failed: {e}"})
 
     # New: tool name IS the action (one-tool-per-action)
     action = fn_name
@@ -1678,6 +1726,14 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
         "- If the request is ambiguous, use the clarify tool to ask before guessing.\n"
         "- Summarize tool results in natural language. Don't dump raw output.\n\n"
+        "KNOWLEDGE BASE:\n"
+        "You have a personal knowledge base with 45K+ indexed documents covering emails, "
+        "work repos (Spotify, ClientMessaging, planning), projects, career, and finance.\n"
+        "- Use search_knowledge to find information — it's fast and comprehensive.\n"
+        "- Do NOT use shell grep/find across ~/Developer for context gathering — it's slow "
+        "and times out. The knowledge base already indexes those repos.\n"
+        "- If building artifacts (presentations, docs), use search_knowledge to gather "
+        "context first, then shell to write files.\n\n"
         "MULTI-STEP REASONING (ReAct):\n"
         "For complex requests, follow this cycle:\n"
         "1. THINK: What do I need to find out or do? Which tool helps?\n"
@@ -5395,7 +5451,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         async def _tg_search():
             try:
-                return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=10.0)
+                return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=15.0)
             except asyncio.TimeoutError:
                 log.warning("hybrid_search timed out after 10s for query: %s", query[:80])
                 return []
@@ -5637,7 +5693,7 @@ async def handle_message_generic(ctx: MessageContext):
     # Parallel context gathering — these are independent async ops
     async def _gather_search():
         try:
-            return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=10.0)
+            return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=15.0)
         except Exception as e:
             log.warning("hybrid_search failed/timed out: %s", e)
             return []
@@ -7247,7 +7303,7 @@ async def _process_whatsapp_message(ctx: MessageContext):
         # Fall through to conversational LLM flow — parallel context gathering
         async def _ch_search():
             try:
-                return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=10.0)
+                return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=15.0)
             except Exception:
                 return []
 
