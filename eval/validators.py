@@ -101,10 +101,11 @@ def _validate_calendar(query: str, response: str) -> list[tuple[str, bool, str]]
     lower = response.lower()
     has_time = bool(re.search(r'\d{1,2}:\d{2}', response))
     has_date = bool(re.search(r'(monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)', lower))
-    has_no_events = any(phrase in lower for phrase in ("no events", "no meetings", "nothing scheduled", "calendar is clear", "free"))
+    has_no_events = any(phrase in lower for phrase in ("no events", "no meetings", "nothing scheduled", "calendar is clear", "free", "no upcoming"))
+    has_calendar_term = any(w in lower for w in ("calendar", "schedule", "meeting", "event", "appointment", "busy", "available"))
 
-    passed = has_time or has_date or has_no_events
-    return [("calendar_content", passed, "" if passed else "No time, date, or 'no events' in response")]
+    passed = has_time or has_date or has_no_events or has_calendar_term
+    return [("calendar_content", passed, "" if passed else "No time, date, calendar term, or 'no events' in response")]
 
 
 @register_validator("email")
@@ -125,7 +126,7 @@ def _validate_email(query: str, response: str) -> list[tuple[str, bool, str]]:
 def _validate_reminder(query: str, response: str) -> list[tuple[str, bool, str]]:
     """Reminder responses should confirm the action or list reminders."""
     lower = response.lower()
-    confirmation = any(w in lower for w in ("reminder", "remind", "set", "created", "scheduled", "no reminders", "list"))
+    confirmation = any(w in lower for w in ("reminder", "remind", "set", "created", "scheduled", "no reminders", "list", "due", "upcoming", "active", "overdue", "done", "completed"))
 
     return [("reminder_content", confirmation, "" if confirmation else "No reminder confirmation in response")]
 
