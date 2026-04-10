@@ -36,7 +36,31 @@ _INCLUDE_SKILLS = {
 
 # Core tools always included regardless of query relevance
 _CORE_TOOLS = {
-    "shell", "reminder", "web_search", "clarify",
+    "shell", "reminder", "web_search", "clarify", "search_knowledge",
+}
+
+# Manual tool schema for search_knowledge (not from skill registry)
+_SEARCH_KNOWLEDGE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "search_knowledge",
+        "description": (
+            "Search Khalil's personal knowledge base (45K+ indexed documents: "
+            "emails, work repos, projects, career, finance, planning docs). "
+            "Use this BEFORE shell grep when looking for information about the user's "
+            "work, projects, or personal context. Much faster than shell find/grep."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query — natural language or keywords",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 }
 
 # Maximum tools to expose per query (core + filtered)
@@ -250,6 +274,9 @@ def generate_tool_schemas(registry) -> list[dict]:
             tool = _build_action_tool(skill, action_type, action_info)
             if tool:
                 tools.append(tool)
+
+    # Add manual tools not from skill registry
+    tools.append(_SEARCH_KNOWLEDGE_SCHEMA)
 
     log.info("Generated %d tool schemas (one per action) from %d skills",
              len(tools), len(_INCLUDE_SKILLS))
