@@ -139,7 +139,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 - **Effort:** L | **Impact:** MEDIUM | **Benchmark:** NIST AI RMF, EU AI Act
 - **Files:** `config.py` (SENSITIVE_PATTERNS), `server.py` (contains_sensitive_data), `state/email_provider.py`, `state/calendar_provider.py`
 
-### 21. Autonomy Level Promotion with Decay
+### 21. Autonomy Level Promotion with Decay ✅ (PR #242)
 3-tier autonomy is static. Build trust over time: after 50 consecutive successes, auto-promote tool to next tier (with notification). After any correction/failure, demote immediately. Add trust score per tool via `/autonomy`.
 - **Effort:** M | **Impact:** LOW | **Benchmark:** NIST AI RMF (proportionality)
 - **Files:** `autonomy.py` (ACTION_RULES, AutonomyController)
