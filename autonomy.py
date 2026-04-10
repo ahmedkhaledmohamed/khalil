@@ -82,10 +82,15 @@ DEFAULT_RATE_LIMITS = {
 
 
 class AutonomyController:
+    # #21: Trust score thresholds
+    PROMOTE_THRESHOLD = 50   # consecutive successes to auto-promote
+    DEMOTE_ON_FAILURE = True  # immediately demote on failure/correction
+
     def __init__(self, conn: sqlite3.Connection):
         self.conn = conn
         self._level = self._load_level()
         self._confirmation_codes: dict[int, str] = {}  # #76: action_id -> 4-digit code
+        self._trust_scores: dict[str, dict] = {}  # {action: {successes, failures, promoted}}
 
     def _load_level(self) -> AutonomyLevel:
         row = self.conn.execute(
@@ -184,8 +189,51 @@ class AutonomyController:
         return count
 
     def classify_action(self, action_name: str) -> ActionType:
-        """Classify an action into read/write/dangerous."""
-        return ACTION_RULES.get(action_name, ActionType.WRITE)
+        """Classify an action into read/write/dangerous.
+
+        #21: If a WRITE action has been promoted via trust score (50+ consecutive
+        successes), treat it as READ (auto-execute without approval).
+        """
+        base = ACTION_RULES.get(action_name, ActionType.WRITE)
+        # Never auto-promote DANGEROUS actions
+        if base == ActionType.DANGEROUS:
+            return base
+        # Check trust promotion: WRITE → READ after 50 successes
+        trust = self._trust_scores.get(action_name)
+        if trust and trust.get("promoted") and base == ActionType.WRITE:
+            return ActionType.READ
+        return base
+
+    # --- #21: Trust Score Tracking ---
+
+    def record_tool_success(self, action_name: str):
+        """Record a successful tool execution. Promotes after PROMOTE_THRESHOLD."""
+        if action_name not in self._trust_scores:
+            self._trust_scores[action_name] = {"successes": 0, "failures": 0, "promoted": False}
+        t = self._trust_scores[action_name]
+        t["successes"] += 1
+        t["failures"] = 0  # Reset consecutive failure count on success
+
+        if not t["promoted"] and t["successes"] >= self.PROMOTE_THRESHOLD:
+            t["promoted"] = True
+            log.info("Trust promotion: %s promoted to auto-execute (%d consecutive successes)",
+                     action_name, t["successes"])
+
+    def record_tool_failure(self, action_name: str):
+        """Record a tool failure or user correction. Immediately demotes."""
+        if action_name not in self._trust_scores:
+            self._trust_scores[action_name] = {"successes": 0, "failures": 0, "promoted": False}
+        t = self._trust_scores[action_name]
+        t["failures"] += 1
+        t["successes"] = 0  # Reset consecutive success count
+
+        if t["promoted"] and self.DEMOTE_ON_FAILURE:
+            t["promoted"] = False
+            log.info("Trust demotion: %s demoted (failure/correction)", action_name)
+
+    def get_trust_scores(self) -> dict[str, dict]:
+        """Return all trust scores for display."""
+        return dict(self._trust_scores)
 
     def _effective_level(self) -> AutonomyLevel:
         """Return the effective autonomy level, adjusted by time-of-day context.
