@@ -106,7 +106,7 @@ No metric for failure-to-resolution time. Add timestamps: failure detected -> he
 - **Files:** `eval/fixtures/golden.yaml`, `eval/cases.py`, `eval/case_gen.py`
 - **Unlocks:** 1, 7, 9
 
-### 16. Cost-Aware Model Routing
+### 16. Cost-Aware Model Routing ✅ (PR #237)
 Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (greetings, lookups) to Haiku/Sonnet. Keep privacy routing to Ollama. Add A/B testing: record which model produced better eval scores per query type.
 - **Effort:** M | **Impact:** MEDIUM | **Benchmark:** TheAgentCompany
 - **Files:** `model_router.py`, `config.py`, `server.py` (ask_llm)
