@@ -25,6 +25,8 @@ SKILL = {
         (r"\b(?:server|droplet)\s+(?:status|health)\b", "digitalocean_status"),
         (r"\bdigitalocean\b", "digitalocean_status"),
         (r"\b(?:server|digitalocean)\s+(?:cost|bill|spend)\b", "digitalocean_spend"),
+        (r"\bcheck\s+digitalocean\s+status\b", "digitalocean_status"),
+        (r"\bdigitalocean\s+(?:bill(?:ing)?|cost)\b", "digitalocean_spend"),
     ],
     "actions": [
         {"type": "digitalocean_status", "handler": "handle_intent", "keywords": "server droplet status health digitalocean", "description": "Droplet status"},

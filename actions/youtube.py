@@ -29,6 +29,9 @@ SKILL = {
         (r"\byoutube\s+search\b", "youtube_search"),
         (r"\bliked\s+videos?\b", "youtube_liked"),
         (r"\byoutube\s+(?:history|liked)\b", "youtube_liked"),
+        (r"\bsearch\s+youtube\s+for\b", "youtube_search"),
+        (r"\bliked\s+videos?\s+on\s+(?:yt|youtube)\b", "youtube_liked"),
+        (r"\bfind\s+(?:a\s+)?(?:tutorial|video)\s+on\s+youtube\b", "youtube_search"),
     ],
     "actions": [
         {"type": "youtube_search", "handler": "handle_intent", "keywords": "youtube search video find", "description": "Search YouTube"},

@@ -21,6 +21,7 @@ SKILL = {
         (r"\bsearch\s+(?:the\s+)?(?:web|internet|online)\b", "web_search"),
         (r"\bgoogle\s+(?!doc|sheet|spreadsheet|slide|drive|form)", "web_search"),
         (r"\blook\s+up\b", "web_search"),
+        (r"\bsearch\s+the\s+web\s+for\b", "web_search"),
     ],
     "actions": [
         {"type": "web_search", "handler": "handle_intent", "keywords": "search web internet google look up find", "description": "Search the web"},
