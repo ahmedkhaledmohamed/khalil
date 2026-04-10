@@ -29,6 +29,9 @@ SKILL = {
         (r"\bfind\s+in\s+notion\b", "notion_search"),
         (r"\bnotion\s+search\b", "notion_search"),
         (r"\bcreate\s+(?:a\s+)?notion\s+page\b", "notion_create"),
+        (r"\b(?:check|look\s+up)\s+notion\s+for\b", "notion_search"),
+        (r"\bfind\s+in\s+notion\b", "notion_search"),
+        (r"\b(?:start|new|fresh)\s+notion\s+page\b", "notion_create"),
     ],
     "actions": [
         {"type": "notion_search", "handler": "handle_intent", "keywords": "notion search find pages notes", "description": "Search Notion pages"},
