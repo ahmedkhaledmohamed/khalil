@@ -134,7 +134,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 - **Files:** `server.py` (_execute_tool_call), `data/audit_trail.jsonl`, `autonomy.py`
 - **Unlocks:** 21
 
-### 20. Sensitive Data Flow Map
+### 20. Sensitive Data Flow Map ✅ (PR #243)
 `contains_sensitive_data()` exists but no map of where PII/financial/health data flows. Add classification tags to state providers, ensure tagged data never reaches cloud LLMs when `_force_local` is true, add redaction in audit trail, add `/privacy` command showing data routing.
 - **Effort:** L | **Impact:** MEDIUM | **Benchmark:** NIST AI RMF, EU AI Act
 - **Files:** `config.py` (SENSITIVE_PATTERNS), `server.py` (contains_sensitive_data), `state/email_provider.py`, `state/calendar_provider.py`
