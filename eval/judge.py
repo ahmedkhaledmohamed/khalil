@@ -177,12 +177,17 @@ class HeuristicEval:
 
         # 4. Length appropriate
         complexity = getattr(case, "complexity", "moderate")
+        pipeline = getattr(result, "pipeline_path", "")
         if complexity == "trivial":
-            length_ok = len(response) < 500
-            detail = f"trivial response too long ({len(response)} >= 500)" if not length_ok else ""
+            length_ok = len(normalized) < 500
+            detail = f"trivial response too long ({len(normalized)} >= 500)" if not length_ok else ""
+        elif pipeline in ("direct_action", "skill_pattern"):
+            # Direct action responses can be short but valid (e.g., "Battery: 100%")
+            length_ok = len(normalized) > 15
+            detail = f"direct action response too short ({len(normalized)} <= 15)" if not length_ok else ""
         else:
-            length_ok = len(response) > 50
-            detail = f"response too short ({len(response)} <= 50)" if not length_ok else ""
+            length_ok = len(normalized) > 50
+            detail = f"response too short ({len(normalized)} <= 50)" if not length_ok else ""
         checks.append(Check(name="length_appropriate", passed=length_ok, detail=detail))
 
         # 5. No error
