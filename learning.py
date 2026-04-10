@@ -2860,6 +2860,70 @@ def detect_implicit_preferences(query: str) -> list[dict]:
     return detected
 
 
+# --- #27: Signal Garbage Collection & Memory Consolidation ---
+
+SIGNAL_RETENTION_DAYS = 30  # Prune processed signals older than this
+
+
+def gc_old_signals(retention_days: int = SIGNAL_RETENTION_DAYS) -> int:
+    """Delete interaction signals older than retention_days.
+
+    Keeps the DB lean. Signals should already be processed into preferences,
+    insights, and evolution candidates by the time they're pruned.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    # Count before delete
+    row = conn.execute(
+        "SELECT COUNT(*) FROM interaction_signals WHERE created_at < ?", (cutoff,)
+    ).fetchone()
+    count = row[0] if row else 0
+
+    if count > 0:
+        conn.execute("DELETE FROM interaction_signals WHERE created_at < ?", (cutoff,))
+        conn.commit()
+        log.info("Signal GC: pruned %d signals older than %d days", count, retention_days)
+
+    return count
+
+
+def consolidate_signals(signal_type: str, days: int = 7) -> dict | None:
+    """Consolidate repeated signals of the same type into a summary.
+
+    Groups signals by key context fields and produces a count summary.
+    Useful for reducing noise before reflection.
+    """
+    conn = _get_conn()
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+
+    rows = conn.execute(
+        "SELECT context, COUNT(*) as cnt FROM interaction_signals "
+        "WHERE signal_type = ? AND created_at > ? AND context IS NOT NULL "
+        "GROUP BY context ORDER BY cnt DESC LIMIT 10",
+        (signal_type, cutoff),
+    ).fetchall()
+
+    if not rows:
+        return None
+
+    total = sum(r[1] for r in rows)
+    top_contexts = []
+    for r in rows[:5]:
+        try:
+            ctx = json.loads(r[0]) if isinstance(r[0], str) else r[0]
+            top_contexts.append({"context": ctx, "count": r[1]})
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+    return {
+        "signal_type": signal_type,
+        "total": total,
+        "unique_contexts": len(rows),
+        "top": top_contexts,
+    }
+
+
 # --- Routine Drift Detection ---
 
 def get_recent_user_intents(hours: int = 24) -> list[str]:
