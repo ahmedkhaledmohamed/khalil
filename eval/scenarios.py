@@ -725,6 +725,34 @@ SCENARIOS: list[Scenario] = [
         ],
         tags=["multi-turn", "topic-switching", "stress-test"],
     ),
+
+    # --- Artifact Creation (anti-research-loop) ---
+    Scenario(
+        name="artifact_creation_no_research_loop",
+        description="Build task should write files, not loop endlessly on research",
+        turns=[
+            ScenarioTurn(
+                user="Create a simple HTML page listing my top 3 projects and save it to /tmp/projects.html",
+                expect_tools=["shell"],
+                expect_result="file creation confirmed or content shown",
+                expect_not_contains=["ran out of iterations", "break into smaller steps"],
+            ),
+        ],
+        tags=["artifact-creation", "anti-loop", "task-completion"],
+    ),
+
+    Scenario(
+        name="artifact_uses_knowledge_not_grep",
+        description="Building artifacts should use search_knowledge, not shell grep across ~/Developer",
+        turns=[
+            ScenarioTurn(
+                user="Write a summary of my FL26 planning work and save it as /tmp/fl26-summary.md",
+                expect_result="file created with planning content",
+                expect_not_contains=["Timed out", "find ~/Developer"],
+            ),
+        ],
+        tags=["artifact-creation", "knowledge-base", "anti-loop"],
+    ),
 ]
 
 
