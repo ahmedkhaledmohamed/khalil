@@ -118,7 +118,7 @@ Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (
 - **Files:** `tool_catalog.py`, `server.py` (call_llm_with_tools), `eval/validators.py`
 - **Unlocks:** 1, 15
 
-### 18. Preference Learning Amplification
+### 18. Preference Learning Amplification ✅ (PR #239)
 27,509 signals but only 6 preferences (all <0.65 confidence). Too passive — requires `/feedback` command. Add implicit preference detection from conversation patterns, increase confidence via repeated signals, expose `/preferences` command for transparency and correction.
 - **Effort:** L | **Impact:** MEDIUM | **Benchmark:** METR, Constitutional AI
 - **Files:** `learning.py` (set_preference, get_preference), `server.py` (style_hint injection)
