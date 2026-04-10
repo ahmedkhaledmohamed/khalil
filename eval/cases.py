@@ -105,51 +105,73 @@ def _expand_alternation(raw: str) -> list[str]:
 def _positive_query_from_regex(pattern: re.Pattern) -> list[str]:
     """Generate 2-3 plausible query strings from a compiled regex pattern.
 
-    Strategy: expand all alternation groups, then strip regex metacharacters
-    to produce clean natural-language queries.
+    Strategy: for each alternation group, pick ONE branch (not all),
+    producing clean natural-language sentences.
     """
     raw = pattern.pattern
-    # Strip anchors and flags
+    # Strip anchors
     raw = re.sub(r"[\^$]", "", raw)
+    # Remove optional non-capturing groups: (?:X\s+)? → "" (produces cleaner queries)
+    # Must handle nested content including \s+ and other regex
+    raw = re.sub(r"\(\?:[^)]*\)\?", "", raw)
 
-    # Expand all alternation groups recursively
-    branches = _expand_alternation(raw)
+    def _pick_one_branch(text: str) -> list[str]:
+        """Recursively resolve alternation groups by picking each branch separately."""
+        m = re.search(r"\((?:\?:)?([^()]+)\)", text)
+        if not m:
+            if "|" in text:
+                return [b.strip() for b in text.split("|")[:3]]
+            return [text]
+        alts = m.group(1).split("|")
+        results = []
+        for alt in alts[:3]:
+            resolved = text[:m.start()] + alt + text[m.end():]
+            # Only recurse once more to avoid combinatorial explosion
+            sub = _pick_one_branch(resolved)
+            results.append(sub[0] if sub else resolved)
+        return results[:3]
 
-    queries = []
-    for branch in branches[:3]:
-        text = branch
-        # Replace regex whitespace matchers with actual spaces
+    branches = _pick_one_branch(raw)
+
+    def _clean(text: str) -> str:
+        """Convert a regex branch to clean natural language."""
+        # Replace regex whitespace with actual spaces
         text = re.sub(r"\\s[+*?]?", " ", text)
-        # Replace wildcard matchers (.*, .+) with space
+        # Replace wildcards with space
         text = re.sub(r"\.\*|\.\+", " ", text)
         # Remove word boundaries
         text = text.replace("\\b", "")
-        # Remove optional markers and quantifiers
+        # Handle optional groups: (?:X)? or (X)? → remove entirely for cleaner output
+        text = re.sub(r"\((?:\?:)?[^)]+\)\?", "", text)
+        # Remove optional quantifiers on single chars (keep the base character)
+        text = re.sub(r"([a-z])\?", r"\1", text)  # s? → s
+        # Remove remaining quantifiers on non-letters
         text = re.sub(r"[?+*]", "", text)
-        # Remove remaining regex syntax
+        # Remove regex metacharacters
         text = re.sub(r"[{}\[\]\\|()^$.]", "", text)
         # Collapse whitespace
         text = re.sub(r"\s+", " ", text).strip()
-        if text and len(text) > 2:
-            queries.append(text)
+        return text
 
-    # Deduplicate while preserving order
+    queries = []
     seen = set()
-    unique = []
-    for q in queries:
-        q_lower = q.lower()
-        if q_lower not in seen:
-            seen.add(q_lower)
-            unique.append(q)
-    return unique[:3] or [raw[:40]]
+    for branch in branches:
+        q = _clean(branch)
+        if q and len(q) > 2 and q.lower() not in seen:
+            seen.add(q.lower())
+            queries.append(q)
+
+    return queries[:3] or [_clean(raw)[:40]]
 
 
 def _near_miss_query(positive: str) -> str:
     """Generate a near-miss query that looks similar but shouldn't match."""
     words = positive.split()
-    if len(words) > 2:
-        # Drop the key verb (first word)
+    if len(words) > 3:
+        # Drop the key verb (first word) and rephrase
         return "what about " + " ".join(words[1:])
+    if len(words) > 1:
+        return "tell me about " + " ".join(words[1:])
     return "something about " + positive
 
 
