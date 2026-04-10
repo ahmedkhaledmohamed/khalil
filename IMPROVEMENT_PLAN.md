@@ -171,7 +171,7 @@ Eval runs are manual. Add GitHub Actions workflow: run frozen case eval on every
 
 ## Theme 7: STRATEGIC CAPABILITIES — World-Class Differentiation
 
-### 25. Proactive Intelligence Layer
+### 25. Proactive Intelligence Layer ✅ (PR #248)
 Agent loop is reactive (state changes only). Add: (a) daily anticipation pass at 7am (unusual meetings -> research attendees, severe weather, high-priority unread); (b) pre-meeting prep 15min before events (context, email threads with attendees); (c) weekly pattern analyzer (learn rhythms, surface relevant info).
 - **Effort:** XL | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
 - **Files:** `agent_loop.py`, `scheduler/proactive.py`, `scheduler/planning.py`, `state/collector.py`
