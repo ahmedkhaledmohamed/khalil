@@ -50,6 +50,7 @@ from config import (
     OPENAI_BASE_URL,
     OPENAI_MODEL,
     SENSITIVE_PATTERNS,
+    SWARM_ENABLED,
     TIMEZONE,
 )
 from knowledge.indexer import init_db
