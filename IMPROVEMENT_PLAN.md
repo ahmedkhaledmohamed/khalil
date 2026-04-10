@@ -189,7 +189,7 @@ Orchestrator only handles synchronous single-turn tasks. Add: persistent task qu
 - **Files:** `learning.py`, `knowledge/search.py`, `memory/session_continuity.py`
 - **Unlocks:** 18
 
-### 28. Implicit User Satisfaction Signal
+### 28. Implicit User Satisfaction Signal ✅ (PR #240)
 `/feedback` has 0 uses. Implement: (a) "task completion confirmation" — next message is correction or new topic; (b) session quality score = 1 - (negative_signals / total_turns); (c) engagement trend (declining usage = negative); (d) weekly "Satisfaction Index" in digest.
 - **Effort:** M | **Impact:** MEDIUM | **Benchmark:** ConvBench, UX research
 - **Files:** `learning.py`, `evolution.py` (post_interaction_check), `eval/metrics.py`, `scheduler/digests.py`
