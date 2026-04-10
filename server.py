@@ -1614,6 +1614,16 @@ def _record_tool_analytics(tool_name: str, params: str, success: bool,
     except Exception:
         pass  # analytics should never break tool execution
 
+    # #21: Update trust scores for autonomy promotion/demotion
+    try:
+        if autonomy:
+            if success:
+                autonomy.record_tool_success(tool_name)
+            else:
+                autonomy.record_tool_failure(tool_name)
+    except Exception:
+        pass
+
 
 def _get_failing_tools() -> str:
     """Query tool_analytics for recently failing tools (#46).
