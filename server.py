@@ -1535,27 +1535,54 @@ async def _execute_tool_call(tool_call) -> str:
     intent = {"action": action, **args, "tool_mode": True}
 
     t0 = _time.monotonic()
+    _audit_success = False
+    _audit_error = ""
+    _result_text = ""
     try:
         result = await asyncio.wait_for(
             handler(action, intent, capture_ctx),
             timeout=60,  # increased from 30s for shell/claude_code
         )
         elapsed = _time.monotonic() - t0
-        result_text = capture_ctx.get_result()
+        _result_text = capture_ctx.get_result()
         _record_tool_analytics(fn_name, json.dumps(args), True, elapsed)
-        return result_text
+        _audit_success = True
+        return _result_text
     except asyncio.TimeoutError:
         elapsed = _time.monotonic() - t0
+        _audit_error = "timeout"
         _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error="timeout")
-        return json.dumps({"error": True, "type": "timeout",
+        _result_text = json.dumps({"error": True, "type": "timeout",
                            "message": f"{fn_name} timed out after 60s",
                            "suggestion": "The operation took too long. Try a simpler request."})
+        return _result_text
     except Exception as e:
         elapsed = _time.monotonic() - t0
-        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=str(e)[:200])
-        return json.dumps({"error": True, "type": "execution_error",
-                           "message": f"{fn_name} failed: {str(e)[:200]}",
+        _audit_error = str(e)[:200]
+        _record_tool_analytics(fn_name, json.dumps(args), False, elapsed, error=_audit_error)
+        _result_text = json.dumps({"error": True, "type": "execution_error",
+                           "message": f"{fn_name} failed: {_audit_error}",
                            "suggestion": "Check the parameters and try again, or use an alternative approach."})
+        return _result_text
+    finally:
+        # #19: Audit trail — structured JSONL per tool execution
+        try:
+            _audit_entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "tool": fn_name,
+                "action": action,
+                "args_summary": json.dumps(args)[:200],
+                "success": _audit_success,
+                "error": _audit_error,
+                "latency_ms": int((_time.monotonic() - t0) * 1000),
+                "result_summary": _result_text[:200] if _result_text else "",
+            }
+            from config import DATA_DIR
+            _audit_path = DATA_DIR / "audit_trail.jsonl"
+            with open(_audit_path, "a") as _af:
+                _af.write(json.dumps(_audit_entry) + "\n")
+        except Exception:
+            pass  # Audit should never break tool execution
 
 
 def _check_required_params(tool_name: str, args: dict) -> list[str]:
