@@ -27,6 +27,7 @@ SKILL = {
         (r"\bbook\s+highlights?\b", "readwise_highlights"),
         (r"\bmy\s+highlights?\b", "readwise_highlights"),
         (r"\bdaily\s+review\b", "readwise_review"),
+        (r"\bnew\s+highlights?\s+to\s+review\b", "readwise_highlights"),
     ],
     "actions": [
         {"type": "readwise_highlights", "handler": "handle_intent", "keywords": "readwise highlights books reading", "description": "Recent highlights"},

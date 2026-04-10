@@ -22,6 +22,8 @@ SKILL = {
         (r"\b(?:what'?s\s+the\s+)?weather\b", "weather"),
         (r"\btemperature\b", "weather"),
         (r"\bforecast\b", "weather_forecast"),
+        (r"\bhows\s+the\s+weather\b", "weather"),
+        (r"\bweather\s+\w+\b", "weather"),
     ],
     "actions": [
         {"type": "weather", "handler": "handle_intent", "keywords": "weather temperature outside today toronto", "description": "Current weather"},
