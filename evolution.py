@@ -828,7 +828,29 @@ async def post_interaction_check(
         except Exception:
             pass
 
-        # 8. Latency already recorded by server.py, no need to duplicate
+        # 8. Satisfaction signal — detect negative quality indicators
+        _negative_indicators = 0
+        resp_lower = response.lower()
+        # Correction signals
+        if any(w in resp_lower for w in ["sorry", "let me try again", "i apologize"]):
+            _negative_indicators += 1
+        # Error in response
+        if any(w in resp_lower for w in ["error", "failed", "traceback", "timed out"]):
+            _negative_indicators += 1
+        # Very short response to a non-trivial query
+        if len(query) > 30 and len(response) < 20:
+            _negative_indicators += 1
+
+        _quality_score = max(0.0, 1.0 - (_negative_indicators * 0.33))
+        record_signal("interaction_quality", {
+            "query_length": len(query),
+            "response_length": len(response),
+            "negative_indicators": _negative_indicators,
+            "quality_score": round(_quality_score, 2),
+            "latency_ms": int(latency_ms),
+        })
+
+        # 9. Latency already recorded by server.py, no need to duplicate
 
     except Exception as e:
         log.debug("post_interaction_check failed: %s", e)

@@ -65,6 +65,9 @@ class MetricsSnapshot:
     # Hallucination / grounding
     grounding_ratio_avg: float | None = None
     grounding_checks: int = 0
+    # Satisfaction index (implicit NPS proxy)
+    satisfaction_index: float | None = None
+    satisfaction_samples: int = 0
 
 
 def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
@@ -210,6 +213,21 @@ def compute_metrics(db_path: str | None = None) -> MetricsSnapshot:
     except Exception:
         pass
 
+    # --- Satisfaction Index ---
+    try:
+        sat_rows = conn.execute(
+            "SELECT CAST(json_extract(context, '$.quality_score') AS REAL) as score "
+            "FROM interaction_signals "
+            "WHERE signal_type = 'interaction_quality' AND context IS NOT NULL"
+        ).fetchall()
+        if sat_rows:
+            scores = [r["score"] for r in sat_rows if r["score"] is not None]
+            if scores:
+                snapshot.satisfaction_index = round(sum(scores) / len(scores), 3)
+                snapshot.satisfaction_samples = len(scores)
+    except Exception:
+        pass
+
     # --- Grounding / Hallucination Rate ---
     try:
         grounding_rows = conn.execute(
@@ -346,6 +364,8 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
          f"{snapshot.cascaded_failures} cascaded", "<5%"),
         ("Abandonment Rate", snapshot.abandonment_rate,
          f"{snapshot.abandoned_sessions}/{snapshot.total_sessions} sessions", "<15%"),
+        ("Satisfaction Index", snapshot.satisfaction_index,
+         f"{snapshot.satisfaction_samples} samples" if snapshot.satisfaction_samples else "N/A", ">90%"),
         ("Grounding Ratio", snapshot.grounding_ratio_avg,
          f"{snapshot.grounding_checks} checks" if snapshot.grounding_checks else "N/A", ">95%"),
         ("MTTR (avg)", snapshot.mttr_hours,
