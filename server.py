@@ -714,7 +714,7 @@ def _get_mcp_tools_text() -> str:
 
 
 LLM_TIMEOUT = 20.0  # seconds — Ollama local (fast when running)
-CLAUDE_TIMEOUT = 8.0  # per-model timeout — fail fast, try next provider
+CLAUDE_TIMEOUT = 15.0  # per-model timeout — 8s was too aggressive for Taskforce proxy
 FALLBACK_BUDGET = 15.0  # total seconds for the entire fallback chain
 _ollama_recovery_attempted = False
 
