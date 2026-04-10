@@ -1734,15 +1734,21 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "and times out. The knowledge base already indexes those repos.\n"
         "- If building artifacts (presentations, docs), use search_knowledge to gather "
         "context first, then shell to write files.\n\n"
-        "MULTI-STEP REASONING (ReAct):\n"
-        "For complex requests, follow this cycle:\n"
-        "1. THINK: What do I need to find out or do? Which tool helps?\n"
-        "2. ACT: Call the most relevant tool with correct parameters.\n"
-        "3. OBSERVE: Read the tool result carefully.\n"
-        "4. REPEAT or RESPOND: If more steps are needed, go to step 1. "
-        "Otherwise, synthesize all results into a clear response.\n"
-        "Example: 'Prep me for my next meeting' → "
-        "calendar() → observe events → meeting_prep(meeting_title=...) → respond with brief.\n\n"
+        "TASK EXECUTION PHASES:\n"
+        "When the user asks you to BUILD or CREATE something (file, presentation, email, script):\n"
+        "1. GATHER (1-2 tool calls max): Use search_knowledge or read one existing file.\n"
+        "2. BUILD (remaining calls): Write the artifact using shell (cat > file << 'EOF'). "
+        "Start creating immediately with what you have — don't wait for perfect information.\n"
+        "3. DELIVER: Confirm what you built and where it is.\n\n"
+        "For INFORMATION requests (check calendar, weather, status):\n"
+        "1. Call the relevant tool once.\n"
+        "2. Summarize the result in natural language.\n\n"
+        "CRITICAL ANTI-PATTERNS (never do these):\n"
+        "- Do NOT run `find ~/Developer` or `grep -r` across large directories — use search_knowledge.\n"
+        "- Do NOT `echo` a plan of what you're going to do — just do it.\n"
+        "- Do NOT re-read a file you already read in this conversation.\n"
+        "- Do NOT spend more than 2 iterations gathering context before writing.\n"
+        "- If you ran out of iterations last time, START WITH WRITING this time, not more research.\n\n"
         f"{_failing}"
         f"{style_hint}"
         f"{system_extra}"
@@ -1825,6 +1831,25 @@ async def call_llm_with_tools(
     _progress_steps = []
     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
+
+        # Research-loop prevention: after 3 iterations of read-only calls,
+        # nudge the LLM to start building instead of searching further
+        if iteration == 3 and _progress_steps:
+            _read_cmds = {"grep", "find", "cat", "ls", "head", "tail", "rg", "wc", "echo"}
+            _all_read = all(
+                any(cmd in step for cmd in _read_cmds) or "search_knowledge" in step
+                for step in _progress_steps
+            )
+            if _all_read:
+                log.info("Research-loop detected at iteration 3 — injecting build nudge")
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You've spent 3 iterations gathering information. You have enough context now. "
+                        "START CREATING the artifact using shell to write files (cat > file << 'EOF'). "
+                        "Do not search or read further — use what you already have."
+                    ),
+                })
 
         # When switching to tool_choice="none", inject synthesis instruction
         # so the LLM knows to deliver results, not announce plans
