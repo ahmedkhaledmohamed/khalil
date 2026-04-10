@@ -3,20 +3,34 @@ name: Eval Gate
 on:
   pull_request:
     branches: [main]
-    paths:
-      - '**.py'
-      - 'eval/**'
-      - 'actions/**'
-      - 'agents/**'
-      - '**.yaml'
-      - '**.yml'
 
 permissions:
   pull-requests: write
   contents: read
 
 jobs:
-  syntax-and-tests:
+  # Detect which files changed so we can skip heavy eval on doc-only PRs
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**.py'
+              - 'eval/**'
+              - 'actions/**'
+              - 'agents/**'
+              - '**.yaml'
+              - '**.yml'
+
+  eval:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,3 +101,23 @@ jobs:
               repo: context.repo.repo,
               body: body
             });
+
+  # Required status check — always runs, gates on whichever path was taken.
+  # Point branch protection at this job name instead of "eval".
+  syntax-and-tests:
+    needs: [changes, eval]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check result
+        run: |
+          if [ "${{ needs.changes.outputs.code }}" != "true" ]; then
+            echo "No code changes — eval skipped, gate passes"
+            exit 0
+          fi
+          if [ "${{ needs.eval.result }}" = "success" ]; then
+            echo "Eval passed"
+            exit 0
+          fi
+          echo "Eval failed or was cancelled"
+          exit 1

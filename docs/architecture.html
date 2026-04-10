@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khalil — System Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg-primary: #0a0a0f;
+  --bg-secondary: #0e0e15;
+  --bg-card: #13131d;
+  --bg-card-hover: #181825;
+  --text-primary: #f0f0f5;
+  --text-secondary: #9d9db5;
+  --text-muted: #5f5f7a;
+  --border: #1e1e30;
+  --border-light: #2a2a42;
+
+  --green: #6ee7b7;
+  --green-dim: rgba(110, 231, 183, 0.08);
+  --green-border: rgba(110, 231, 183, 0.2);
+  --blue: #818cf8;
+  --blue-dim: rgba(129, 140, 248, 0.08);
+  --blue-border: rgba(129, 140, 248, 0.2);
+  --purple: #a78bfa;
+  --purple-dim: rgba(167, 139, 250, 0.08);
+  --purple-border: rgba(167, 139, 250, 0.2);
+  --amber: #fbbf24;
+  --amber-dim: rgba(251, 191, 36, 0.08);
+  --amber-border: rgba(251, 191, 36, 0.2);
+  --red: #f87171;
+  --red-dim: rgba(248, 113, 113, 0.08);
+  --red-border: rgba(248, 113, 113, 0.2);
+  --teal: #34d399;
+  --teal-dim: rgba(52, 211, 153, 0.08);
+  --teal-border: rgba(52, 211, 153, 0.2);
+  --pink: #f472b6;
+  --pink-dim: rgba(244, 114, 182, 0.08);
+  --pink-border: rgba(244, 114, 182, 0.2);
+
+  --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--font-sans);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Noise overlay ─────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  opacity: 0.025;
+  z-index: 1000;
+  pointer-events: none;
+  background: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ── Container ─────────────────────────────── */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+/* ── Hero ──────────────────────────────────── */
+.hero {
+  min-height: 40vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6rem 2rem 3rem;
+  position: relative;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 50%;
+  transform: translateX(-50%);
+  width: 800px; height: 600px;
+  background: radial-gradient(circle, rgba(110, 231, 183, 0.04) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 6vw, 4rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+  background: linear-gradient(135deg, #6ee7b7 0%, #a78bfa 50%, #818cf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 1rem;
+}
+
+.hero p {
+  color: var(--text-secondary);
+  font-size: 1.125rem;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.hero-stats {
+  display: flex;
+  gap: 3rem;
+  justify-content: center;
+  margin-top: 2.5rem;
+}
+
+.hero-stat {
+  text-align: center;
+}
+
+.hero-stat .number {
+  font-family: var(--font-mono);
+  font-size: 1.75rem;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.hero-stat .label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: var(--font-mono);
+  margin-top: 0.25rem;
+}
+
+/* ── Layer sections ────────────────────────── */
+.layer {
+  padding: 3rem 0;
+  position: relative;
+}
+
+.layer + .layer {
+  border-top: 1px solid var(--border);
+}
+
+.layer-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.layer-indicator {
+  width: 4px;
+  height: 28px;
+  border-radius: 2px;
+}
+
+.layer-label {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 500;
+}
+
+.layer-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.layer-desc {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin-top: 0.25rem;
+}
+
+/* ── Flow arrow between layers ─────────────── */
+.flow-arrow {
+  display: flex;
+  justify-content: center;
+  padding: 1rem 0;
+  color: var(--text-muted);
+}
+
+.flow-arrow svg {
+  opacity: 0.4;
+}
+
+/* ── Node cards ────────────────────────────── */
+.nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+}
+
+.node {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.625rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  transition: all 0.25s ease;
+  cursor: default;
+  position: relative;
+}
+
+.node:hover {
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+  background: var(--bg-card-hover);
+}
+
+.node .icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.node .tag {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  font-weight: 500;
+  margin-left: 0.25rem;
+  white-space: nowrap;
+}
+
+/* Node color variants */
+.node--green { border-color: var(--green-border); background: var(--green-dim); }
+.node--green:hover { border-color: var(--green); }
+.node--green .tag { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
+
+.node--blue { border-color: var(--blue-border); background: var(--blue-dim); }
+.node--blue:hover { border-color: var(--blue); }
+.node--blue .tag { background: var(--blue-dim); color: var(--blue); border: 1px solid var(--blue-border); }
+
+.node--purple { border-color: var(--purple-border); background: var(--purple-dim); }
+.node--purple:hover { border-color: var(--purple); }
+.node--purple .tag { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple-border); }
+
+.node--amber { border-color: var(--amber-border); background: var(--amber-dim); }
+.node--amber:hover { border-color: var(--amber); }
+.node--amber .tag { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber-border); }
+
+.node--red { border-color: var(--red-border); background: var(--red-dim); }
+.node--red:hover { border-color: var(--red); }
+.node--red .tag { background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border); }
+
+.node--teal { border-color: var(--teal-border); background: var(--teal-dim); }
+.node--teal:hover { border-color: var(--teal); }
+.node--teal .tag { background: var(--teal-dim); color: var(--teal); border: 1px solid var(--teal-border); }
+
+.node--pink { border-color: var(--pink-border); background: var(--pink-dim); }
+.node--pink:hover { border-color: var(--pink); }
+.node--pink .tag { background: var(--pink-dim); color: var(--pink); border: 1px solid var(--pink-border); }
+
+/* ── Pipeline diagram ──────────────────────── */
+.pipeline {
+  display: flex;
+  align-items: stretch;
+  gap: 1.5rem;
+  padding: 1.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.pipeline-branch {
+  flex: 1;
+  padding: 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.pipeline-branch h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pipeline-branch p {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.pipeline-branch .steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.pipeline-branch .step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+}
+
+.pipeline-branch .step .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pipeline-or {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+/* ── Action group grid ─────────────────────── */
+.action-groups {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.action-group {
+  padding: 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.25s ease;
+}
+
+.action-group:hover {
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+}
+
+.action-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.action-group-header .icon {
+  font-size: 1.125rem;
+}
+
+.action-group-header h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.action-group-header .count {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  color: var(--text-muted);
+  margin-left: auto;
+  background: var(--bg-secondary);
+  padding: 0.125rem 0.5rem;
+  border-radius: 100px;
+  border: 1px solid var(--border);
+}
+
+.action-group ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.action-group li {
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-secondary);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+/* ── Data table ────────────────────────────── */
+.data-tables {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.data-table {
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.25s ease;
+}
+
+.data-table:hover {
+  border-color: var(--amber-border);
+}
+
+.data-table h4 {
+  font-size: 0.8125rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  margin-bottom: 0.375rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.data-table h4 .indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+}
+
+.data-table p {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* ── Scheduled jobs ────────────────────────── */
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.schedule-item {
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  font-size: 0.8125rem;
+}
+
+.schedule-item .time {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.schedule-item .name {
+  font-weight: 500;
+}
+
+/* ── Split layout ──────────────────────────── */
+.split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.split-section {
+  padding: 1.5rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.split-section h4 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* ── Provider cards ────────────────────────── */
+.providers {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.provider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  min-width: 120px;
+  text-align: center;
+  transition: all 0.25s ease;
+}
+
+.provider:hover {
+  border-color: var(--border-light);
+  transform: translateY(-2px);
+}
+
+.provider .name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.provider .detail {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.provider .badge {
+  font-size: 0.5625rem;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.125rem 0.5rem;
+  border-radius: 100px;
+  font-weight: 500;
+}
+
+.badge--primary { background: var(--green-dim); color: var(--green); border: 1px solid var(--green-border); }
+.badge--fallback { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber-border); }
+.badge--local { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple-border); }
+
+/* ── Tooltip ───────────────────────────────── */
+.node[data-tooltip]:hover::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #1e1e30;
+  color: var(--text-secondary);
+  font-size: 0.6875rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 6px;
+  white-space: nowrap;
+  border: 1px solid var(--border-light);
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* ── Auth section ──────────────────────────── */
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1rem;
+}
+
+.auth-card {
+  padding: 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+}
+
+.auth-card h4 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  list-style: none;
+}
+
+.token-list li {
+  font-size: 0.6875rem;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  padding: 0.2rem 0.5rem;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+/* ── Animate ───────────────────────────────── */
+.animate-in {
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.animate-in.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ── Knowledge sources ─────────────────────── */
+.sources {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.source {
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  transition: all 0.25s ease;
+}
+
+.source:hover {
+  border-color: var(--teal-border);
+  transform: translateY(-2px);
+}
+
+.source .icon { font-size: 1.25rem; margin-bottom: 0.5rem; }
+.source h4 { font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.375rem; }
+.source p { font-size: 0.6875rem; color: var(--text-muted); line-height: 1.5; }
+
+/* ── Footer ────────────────────────────────── */
+footer {
+  padding: 3rem 0;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  border-top: 1px solid var(--border);
+}
+
+/* ── Responsive ────────────────────────────── */
+@media (max-width: 768px) {
+  .pipeline { flex-direction: column; }
+  .action-groups { grid-template-columns: 1fr; }
+  .data-tables { grid-template-columns: 1fr 1fr; }
+  .split { grid-template-columns: 1fr; }
+  .schedule-grid { grid-template-columns: 1fr 1fr; }
+  .sources { grid-template-columns: 1fr 1fr; }
+  .auth-grid { grid-template-columns: 1fr; }
+  .hero-stats { gap: 1.5rem; flex-wrap: wrap; }
+}
+
+@media (max-width: 480px) {
+  .data-tables { grid-template-columns: 1fr; }
+  .schedule-grid { grid-template-columns: 1fr; }
+  .sources { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════ Hero ═══════ -->
+<section class="hero">
+  <div>
+    <h1>Khalil Architecture</h1>
+    <p>End-to-end system map — from user input to data persistence, and everything running in between.</p>
+    <div class="hero-stats">
+      <div class="hero-stat">
+        <div class="number">87</div>
+        <div class="label">Action Modules</div>
+      </div>
+      <div class="hero-stat">
+        <div class="number">5</div>
+        <div class="label">Channels</div>
+      </div>
+      <div class="hero-stat">
+        <div class="number">4</div>
+        <div class="label">LLM Providers</div>
+      </div>
+      <div class="hero-stat">
+        <div class="number">15+</div>
+        <div class="label">External APIs</div>
+      </div>
+      <div class="hero-stat">
+        <div class="number">9</div>
+        <div class="label">DB Tables</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="container">
+
+<!-- ═══════ 1. Client Layer ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--green)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--green)">Layer 1</div>
+      <div class="layer-title">Client Layer</div>
+      <div class="layer-desc">All the ways a user can interact with Khalil</div>
+    </div>
+  </div>
+  <div class="nodes">
+    <div class="node node--green" data-tooltip="Primary channel — polling mode, 30+ command handlers">
+      <span class="icon">💬</span> Telegram Bot <span class="tag">primary</span>
+    </div>
+    <div class="node node--green" data-tooltip="Socket Mode handler, conditional on token">
+      <span class="icon">🔗</span> Slack Bot
+    </div>
+    <div class="node node--green" data-tooltip="Native bot connection, conditional on token">
+      <span class="icon">🎮</span> Discord Bot
+    </div>
+    <div class="node node--green" data-tooltip="Meta Cloud API — webhook-based">
+      <span class="icon">📱</span> WhatsApp
+    </div>
+    <div class="node node--green" data-tooltip="HTTP endpoints for webhooks and health checks">
+      <span class="icon">🌐</span> FastAPI REST
+    </div>
+    <div class="node node--green" data-tooltip="Exposes search_knowledge, get_context, create_reminder to Claude Code and IDEs">
+      <span class="icon">🔌</span> MCP Server <span class="tag">stdio</span>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 2. Channel Gateway ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--green)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--green)">Layer 2</div>
+      <div class="layer-title">Channel Gateway</div>
+      <div class="layer-desc">Platform-agnostic abstraction — every channel speaks the same interface</div>
+    </div>
+  </div>
+  <div class="nodes">
+    <div class="node node--green" data-tooltip="Auto-discovers available channels at startup based on available tokens">
+      <span class="icon">📡</span> Channel Registry
+    </div>
+    <div class="node node--green" data-tooltip="Wraps: channel, chat_id, user_id, incoming message. Methods: reply(), typing(), reply_voice()">
+      <span class="icon">📦</span> MessageContext
+    </div>
+    <div class="node node--green" data-tooltip="Photos, voice/audio, text, callback queries">
+      <span class="icon">🔀</span> Input Handlers <span class="tag">text / voice / photo</span>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 3. Processing Pipeline ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--blue)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--blue)">Layer 3</div>
+      <div class="layer-title">Processing Pipeline</div>
+      <div class="layer-desc">Intent detection decides: fast regex dispatch or full LLM tool-use loop</div>
+    </div>
+  </div>
+  <div class="pipeline">
+    <div class="pipeline-branch" style="border-color: var(--green-border); flex: 0.8;">
+      <h4><span style="color: var(--green)">&#9889;</span> Fast Path</h4>
+      <p>Pattern-matched intents skip the LLM entirely. Regex hit on the skill registry routes directly to the handler.</p>
+      <div class="steps">
+        <div class="step"><span class="dot" style="background: var(--green)"></span> regex match on 87 skill patterns</div>
+        <div class="step"><span class="dot" style="background: var(--green)"></span> direct handler dispatch</div>
+        <div class="step"><span class="dot" style="background: var(--green)"></span> &lt; 100ms typical</div>
+      </div>
+    </div>
+    <div class="pipeline-or">or</div>
+    <div class="pipeline-branch" style="border-color: var(--blue-border); flex: 1.2;">
+      <h4><span style="color: var(--blue)">&#9881;</span> Tool-Use Loop</h4>
+      <p>Complex queries enter the LLM loop. Context is assembled in parallel, tools are filtered, and the LLM iterates until it has a final answer.</p>
+      <div class="steps">
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> parallel context assembly (4 streams)</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> build prompt + ~12 filtered tool schemas</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> LLM call &rarr; tool execution &rarr; loop (max 5)</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> stream final response to user</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 4. Context Assembly ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--blue)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--blue)">Layer 4</div>
+      <div class="layer-title">Context Assembly</div>
+      <div class="layer-desc">Four async streams gathered in parallel before each LLM call</div>
+    </div>
+  </div>
+  <div class="nodes">
+    <div class="node node--blue" data-tooltip="hybrid_search() — vector (sqlite-vec) + full-text + freshness scoring">
+      <span class="icon">🔍</span> Knowledge Search <span class="tag">vector + keyword</span>
+    </div>
+    <div class="node node--blue" data-tooltip="Last 30 messages from conversations table — provides reference resolution">
+      <span class="icon">💭</span> Conversation History <span class="tag">30 msgs</span>
+    </div>
+    <div class="node node--blue" data-tooltip="Calendar events, weather, system status — formatted for LLM consumption">
+      <span class="icon">📊</span> Live State <span class="tag">calendar / weather / system</span>
+    </div>
+    <div class="node node--blue" data-tooltip="Tracks in-progress work across sessions, resolves named entities">
+      <span class="icon">🧵</span> Session Continuity <span class="tag">entity resolution</span>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 5. LLM Layer ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--purple)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--purple)">Layer 5</div>
+      <div class="layer-title">LLM Layer</div>
+      <div class="layer-desc">Model router classifies complexity, Taskforce proxy routes to providers with circuit-breaker failover</div>
+    </div>
+  </div>
+  <div class="split">
+    <div class="split-section">
+      <h4><span style="color: var(--purple)">&#9881;</span> Model Router</h4>
+      <p style="font-size: 0.8125rem; color: var(--text-secondary); margin-bottom: 1rem;">Classifies query complexity without an LLM call — routes to the right tier.</p>
+      <div class="nodes" style="justify-content: flex-start;">
+        <div class="node node--green" style="font-size: 0.75rem;"><strong>FAST</strong>&nbsp; &lt;20 chars, greetings</div>
+        <div class="node node--blue" style="font-size: 0.75rem;"><strong>STANDARD</strong>&nbsp; default tier</div>
+        <div class="node node--purple" style="font-size: 0.75rem;"><strong>COMPLEX</strong>&nbsp; code gen, &gt;500 chars</div>
+      </div>
+    </div>
+    <div class="split-section">
+      <h4><span style="color: var(--purple)">&#9729;</span> Providers</h4>
+      <div class="providers">
+        <div class="provider">
+          <span style="font-size: 1.25rem;">&#9883;</span>
+          <span class="name">Claude</span>
+          <span class="detail">Opus / Sonnet</span>
+          <span class="badge badge--primary">primary</span>
+        </div>
+        <div class="provider">
+          <span style="font-size: 1.25rem;">&#9679;</span>
+          <span class="name">GPT-5.2</span>
+          <span class="detail">via Taskforce</span>
+          <span class="badge badge--fallback">fallback</span>
+        </div>
+        <div class="provider">
+          <span style="font-size: 1.25rem;">&#10022;</span>
+          <span class="name">Gemini 2.5</span>
+          <span class="detail">via Taskforce</span>
+          <span class="badge badge--fallback">fallback</span>
+        </div>
+        <div class="provider">
+          <span style="font-size: 1.25rem;">&#127968;</span>
+          <span class="name">Ollama</span>
+          <span class="detail">qwen3:14b</span>
+          <span class="badge badge--local">local</span>
+        </div>
+      </div>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem;">Taskforce Proxy (hendrix-genai.spotify.net) routes all cloud calls. Circuit breaker auto-failover between providers. Sensitive queries forced to local Ollama.</p>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 6. Skill & Action Dispatch ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--red)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--red)">Layer 6</div>
+      <div class="layer-title">Skill &amp; Action Dispatch</div>
+      <div class="layer-desc">Registry resolves the handler, autonomy checks the risk, guardian reviews safety</div>
+    </div>
+  </div>
+  <div class="nodes">
+    <div class="node node--blue" data-tooltip="Auto-scans actions/*.py + extensions/*.json at startup. Pattern + keyword matching.">
+      <span class="icon">📚</span> Skill Registry <span class="tag">87 skills</span>
+    </div>
+    <div class="node node--blue" data-tooltip="Generates OpenAI-format tool schemas. Dynamically filters to ~12 most relevant per query.">
+      <span class="icon">🔧</span> Tool Catalog <span class="tag">~12 per query</span>
+    </div>
+    <div class="node node--amber" data-tooltip="READ: always safe. WRITE: ask in supervised. DANGEROUS: always ask.">
+      <span class="icon">🛡️</span> Autonomy Controller <span class="tag">read / write / dangerous</span>
+    </div>
+    <div class="node node--red" data-tooltip="Claude Haiku reviews WRITE and DANGEROUS actions before execution.">
+      <span class="icon">👁️</span> Guardian <span class="tag">safety review</span>
+    </div>
+    <div class="node node--blue" data-tooltip="Unified action dispatch for complex multi-step tasks. Wires LLM for decomposition.">
+      <span class="icon">🚌</span> Execution Bus
+    </div>
+    <div class="node node--blue" data-tooltip="Composable multi-step action sequences with conditional logic.">
+      <span class="icon">🔗</span> Workflow Engine
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 7. Action Modules ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--teal)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--teal)">Layer 7</div>
+      <div class="layer-title">Action Modules</div>
+      <div class="layer-desc">87 modules across 6 integration categories — each exposes a SKILL dict for auto-registration</div>
+    </div>
+  </div>
+  <div class="action-groups">
+    <div class="action-group" style="border-color: var(--blue-border);">
+      <div class="action-group-header">
+        <span class="icon">&#9729;</span>
+        <h4>Google APIs</h4>
+        <span class="count">7 modules</span>
+      </div>
+      <ul>
+        <li>gmail</li><li>calendar</li><li>drive</li><li>tasks</li><li>youtube</li><li>contacts</li><li>doc_extract</li>
+      </ul>
+    </div>
+    <div class="action-group" style="border-color: var(--purple-border);">
+      <div class="action-group-header">
+        <span class="icon">&#63743;</span>
+        <h4>Apple Native</h4>
+        <span class="count">5 modules</span>
+      </div>
+      <ul>
+        <li>music</li><li>reminders</li><li>notes</li><li>healthkit</li><li>homekit</li>
+      </ul>
+    </div>
+    <div class="action-group" style="border-color: var(--green-border);">
+      <div class="action-group-header">
+        <span class="icon">&#128187;</span>
+        <h4>Dev Tools</h4>
+        <span class="count">10 modules</span>
+      </div>
+      <ul>
+        <li>github_api</li><li>shell</li><li>terminal</li><li>tmux</li><li>claude_code</li><li>cursor</li><li>digitalocean</li><li>appstore</li><li>git_ops</li><li>ollama_check</li>
+      </ul>
+    </div>
+    <div class="action-group" style="border-color: var(--amber-border);">
+      <div class="action-group-header">
+        <span class="icon">&#128172;</span>
+        <h4>Communication</h4>
+        <span class="count">5 modules</span>
+      </div>
+      <ul>
+        <li>slack</li><li>imessage</li><li>discord</li><li>email_cat</li><li>gmail_mgr</li>
+      </ul>
+    </div>
+    <div class="action-group" style="border-color: var(--pink-border);">
+      <div class="action-group-header">
+        <span class="icon">&#127911;</span>
+        <h4>Media &amp; Knowledge</h4>
+        <span class="count">8 modules</span>
+      </div>
+      <ul>
+        <li>spotify</li><li>notion</li><li>readwise</li><li>obsidian</li><li>web_search</li><li>browser</li><li>ai_media</li><li>summarize</li>
+      </ul>
+    </div>
+    <div class="action-group" style="border-color: var(--red-border);">
+      <div class="action-group-header">
+        <span class="icon">&#9881;</span>
+        <h4>System &amp; Utilities</h4>
+        <span class="count">10 modules</span>
+      </div>
+      <ul>
+        <li>weather</li><li>reminders</li><li>pomodoro</li><li>voice</li><li>gui_auto</li><li>clipboard</li><li>machine</li><li>finance</li><li>calories</li><li>fasting</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 8. External Connections ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--teal)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--teal)">Layer 8</div>
+      <div class="layer-title">Auth &amp; External Services</div>
+      <div class="layer-desc">OAuth token manager with proactive refresh + macOS keyring for API keys and bot tokens</div>
+    </div>
+  </div>
+  <div class="auth-grid">
+    <div class="auth-card">
+      <h4>&#128274; OAuth Manager <span class="tag" style="font-family: var(--font-mono); font-size: 0.625rem; padding: 0.125rem 0.375rem; border-radius: 4px; background: var(--teal-dim); color: var(--teal); border: 1px solid var(--teal-border);">10+ tokens</span></h4>
+      <ul class="token-list">
+        <li>gmail_readonly</li><li>gmail_compose</li><li>gmail_modify</li><li>calendar</li><li>contacts</li><li>tasks</li><li>drive_write</li><li>youtube</li><li>work_gmail</li><li>personal2_gmail</li><li>spotify</li>
+      </ul>
+    </div>
+    <div class="auth-card">
+      <h4>&#128273; macOS Keyring</h4>
+      <ul class="token-list">
+        <li>anthropic-api-key</li><li>telegram-bot-token</li><li>github-pat</li><li>slack-bot-token</li><li>notion-token</li><li>readwise-token</li><li>spotify-client-id</li><li>spotify-client-secret</li>
+      </ul>
+    </div>
+  </div>
+  <div style="margin-top: 1.25rem;">
+    <div class="nodes">
+      <div class="node node--teal" data-tooltip="Stdio transport — consumes tools from external MCP servers">
+        <span class="icon">🔌</span> MCP Client
+      </div>
+      <div class="node node--teal" data-tooltip="Personal tools — the-hub MCP server">
+        <span class="icon">🏠</span> the-hub <span class="tag">personal</span>
+      </div>
+      <div class="node node--teal" data-tooltip="Spotify work tools — ClientMessaging hub">
+        <span class="icon">🏢</span> work-hub <span class="tag">spotify</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 9. Intelligence Layer ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--purple)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--purple)">Background</div>
+      <div class="layer-title">Intelligence Layer</div>
+      <div class="layer-desc">Runs independently — agent loop senses state, evolution engine improves capabilities</div>
+    </div>
+  </div>
+  <div class="split">
+    <div class="split-section" style="border-color: var(--purple-border);">
+      <h4>&#129504; Agent Loop <span class="tag" style="font-family: var(--font-mono); font-size: 0.625rem; padding: 0.125rem 0.375rem; border-radius: 4px; background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple-border);">every 5 min</span></h4>
+      <div class="steps" style="display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.75rem;">
+        <div class="step" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+          <span class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0;"></span>
+          <span><strong>Sense</strong> — poll sensors (calendar, reminders, GitHub, system health)</span>
+        </div>
+        <div class="step" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+          <span class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--blue); flex-shrink: 0;"></span>
+          <span><strong>Think</strong> — identify opportunities, rank by urgency</span>
+        </div>
+        <div class="step" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+          <span class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--amber); flex-shrink: 0;"></span>
+          <span><strong>Filter</strong> — quiet hours (11pm-7am), learned preferences, cooldowns</span>
+        </div>
+        <div class="step" style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.8125rem;">
+          <span class="dot" style="width: 6px; height: 6px; border-radius: 50%; background: var(--purple); flex-shrink: 0;"></span>
+          <span><strong>Act</strong> — execute within autonomy level, notify user</span>
+        </div>
+      </div>
+    </div>
+    <div class="split-section" style="border-color: var(--red-border);">
+      <h4>&#9881; Evolution Engine <span class="tag" style="font-family: var(--font-mono); font-size: 0.625rem; padding: 0.125rem 0.375rem; border-radius: 4px; background: var(--red-dim); color: var(--red); border: 1px solid var(--red-border);">4x daily</span></h4>
+      <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.75rem;">
+        <div style="font-size: 0.8125rem;">
+          <strong style="color: var(--text-primary);">Self-Healing</strong>
+          <span style="color: var(--text-secondary);"> — detects recurring failures, fingerprints patterns, generates patches via Claude, opens PRs</span>
+        </div>
+        <div style="font-size: 0.8125rem;">
+          <strong style="color: var(--text-primary);">Self-Extension</strong>
+          <span style="color: var(--text-secondary);"> — detects capability gaps from LLM responses, classifies as CAP_GAP vs KNOWLEDGE, generates new action modules</span>
+        </div>
+        <div style="font-size: 0.8125rem;">
+          <strong style="color: var(--text-primary);">Safety Gates</strong>
+          <span style="color: var(--text-secondary);"> — guardian review, autonomy approval, rate limits (2 PRs/cycle, 1 gen/hour)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 10. Scheduled Jobs ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--purple)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--purple)">Background</div>
+      <div class="layer-title">Scheduled Jobs</div>
+      <div class="layer-desc">APScheduler — cron-based recurring tasks running async in the background</div>
+    </div>
+  </div>
+  <div class="schedule-grid">
+    <div class="schedule-item">
+      <div class="time">08:00 daily</div>
+      <div class="name">Morning Brief</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">1st &amp; 15th 09:00</div>
+      <div class="name">Financial Alert</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">Sunday 18:00</div>
+      <div class="name">Weekly Summary</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">Friday 17:00</div>
+      <div class="name">Reflection</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">every 60s</div>
+      <div class="name">Reminder Check</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">every 6h</div>
+      <div class="name">Email Sync</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">03, 09, 15, 21</div>
+      <div class="name">Evolution Cycle</div>
+    </div>
+    <div class="schedule-item">
+      <div class="time">Sunday 04:00</div>
+      <div class="name">Knowledge Enrichment</div>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 11. Data Layer ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--amber)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--amber)">Persistence</div>
+      <div class="layer-title">Data Layer</div>
+      <div class="layer-desc">SQLite (WAL mode) + sqlite-vec for 768-dimensional vector search. Embeddings via Ollama nomic-embed-text.</div>
+    </div>
+  </div>
+  <div class="data-tables">
+    <div class="data-table">
+      <h4><span class="indicator"></span> documents</h4>
+      <p>Full-text indexed content + 768d embeddings. Gmail, Drive, repos, Notion.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> conversations</h4>
+      <p>Chat history — user, assistant, tool messages with timestamps.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> interaction_signals</h4>
+      <p>Self-improvement signals — corrections, failures, search misses, slow responses.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> learned_preferences</h4>
+      <p>Derived preferences with confidence scores. Decays over time.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> evolution_candidates</h4>
+      <p>Ranked by impact x feasibility. Status: pending, in_progress, merged, failed.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> reminders</h4>
+      <p>One-shot and recurring. Checked every 60s by scheduler.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> audit_log</h4>
+      <p>Every executed action with type, description, result, autonomy level.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> tool_analytics</h4>
+      <p>Usage metrics — success rate, latency, error counts per action.</p>
+    </div>
+    <div class="data-table">
+      <h4><span class="indicator"></span> settings</h4>
+      <p>Key-value config: owner_chat_id, autonomy_level, sync timestamps.</p>
+    </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 12. Knowledge Sources ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--teal)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--teal)">Ingestion</div>
+      <div class="layer-title">Knowledge Sources</div>
+      <div class="layer-desc">Everything that gets indexed into the documents table — embeddings generated via Ollama nomic-embed-text</div>
+    </div>
+  </div>
+  <div class="sources">
+    <div class="source">
+      <div class="icon">&#128231;</div>
+      <h4>Gmail &amp; Drive</h4>
+      <p>Email archives, Google Drive exports. Multi-account (personal + work).</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128193;</div>
+      <h4>Personal Repo</h4>
+      <p>work/, career/, goals/, finance/, projects/, learning/ directories.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#127925;</div>
+      <h4>Spotify Work Repos</h4>
+      <p>ClientMessaging platform, product specs, backend, orchestration.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128214;</div>
+      <h4>Notion &amp; Readwise</h4>
+      <p>Notion pages via API. Readwise highlights grouped by book.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128197;</div>
+      <h4>Google Tasks &amp; Contacts</h4>
+      <p>Task lists, contact enrichment via People API.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128250;</div>
+      <h4>YouTube</h4>
+      <p>Watch history, video metadata via Data API v3.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128218;</div>
+      <h4>Side Projects</h4>
+      <p>Zia, Tiny Grounds, Bezier READMEs and documentation.</p>
+    </div>
+    <div class="source">
+      <div class="icon">&#128336;</div>
+      <h4>Timeline</h4>
+      <p>Life timeline (archives/timeline.md) + CONTEXT.md profile.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════ Portable Export ═══════ -->
+<section class="layer animate-in" style="margin-top: 2rem;">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--pink)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--pink)">Export</div>
+      <div class="layer-title">Portable Knowledge</div>
+      <div class="layer-desc">Daily export of 8 key tables to khalil-knowledge repo (git-synced JSON). Full DB backup to GitHub Releases.</div>
+    </div>
+  </div>
+  <div class="nodes">
+    <div class="node node--pink" data-tooltip="Daily 3:00 AM — exports 8 portable tables (~400 rows) as JSON, opens PR">
+      <span class="icon">📤</span> Knowledge Export <span class="tag">daily 3am &rarr; PR</span>
+    </div>
+    <div class="node node--pink" data-tooltip="Daily 3:15 AM — gzipped SQLite (~150 MB) uploaded to GitHub Releases">
+      <span class="icon">💾</span> Full DB Backup <span class="tag">daily 3:15am &rarr; release</span>
+    </div>
+    <div class="node node--pink" data-tooltip="github.com/ahmedkhaledmohamed/khalil-knowledge — git-synced portable state">
+      <span class="icon">🔗</span> khalil-knowledge repo
+    </div>
+  </div>
+</section>
+
+</div><!-- /container -->
+
+<footer>
+  <div class="container">khalil &mdash; system architecture &mdash; auto-generated from codebase analysis</div>
+</footer>
+
+<script>
+// Scroll-triggered fade-in animation
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach((entry, i) => {
+    if (entry.isIntersecting) {
+      setTimeout(() => entry.target.classList.add('visible'), i * 60);
+      observer.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1 });
+
+document.querySelectorAll('.animate-in').forEach(el => observer.observe(el));
+</script>
+
+</body>
+</html>
