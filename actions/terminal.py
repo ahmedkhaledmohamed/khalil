@@ -1038,4 +1038,6 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
             await ctx.reply(msg)
         return True
 
-    return False
+    # Unmatched terminal action — send helpful message instead of empty response
+    await ctx.reply(f"Terminal action '{action}' is not available right now. Try a shell command directly.")
+    return True
