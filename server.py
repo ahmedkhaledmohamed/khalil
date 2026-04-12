@@ -74,6 +74,170 @@ def _redact_sensitive(text: str) -> str:
     return text
 
 
+# --- Artifact Generation Mode ---
+
+_ARTIFACT_SIGNALS = re.compile(
+    r"\b(build|create|write|generate|make)\s+.{0,40}"
+    r"\b(presentation|html|page|script|file|document|deck|slides?|report|template|website)\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_PATH_RE = re.compile(r'\.(html|css|js|py|md|txt|json|sh|yaml|yml)\b')
+_ARTIFACT_SAVE_RE = re.compile(r'\b(save|write|put)\s+(?:it\s+)?(?:to|in|at)\s+', re.IGNORECASE)
+
+
+def _is_artifact_request(query: str) -> bool:
+    """Detect if the user is asking to create a file/artifact."""
+    if _ARTIFACT_SIGNALS.search(query):
+        return True
+    if _ARTIFACT_SAVE_RE.search(query) and _ARTIFACT_PATH_RE.search(query):
+        return True
+    return False
+
+
+def _extract_artifact_path(query: str) -> str | None:
+    """Extract target file path from the query, or return None for auto-path."""
+    # Look for explicit paths: /path/to/file.html, ~/Developer/...
+    m = re.search(r'(?:to|at|in)\s+([~/][\w/.\-]+\.\w+)', query)
+    if m:
+        return os.path.expanduser(m.group(1))
+    # Look for bare paths
+    m = re.search(r'([~/][\w/.\-]+\.(?:html|css|js|py|md|txt))', query)
+    if m:
+        return os.path.expanduser(m.group(1))
+    return None
+
+
+async def _generate_artifact(query: str, context: str, chat_id, progress_msg, channel) -> str | None:
+    """Generate a complete file artifact via single LLM call — bypasses tool-use loop.
+
+    1. Auto-search KB for additional context
+    2. Single streaming LLM call with max_tokens=16000
+    3. Write output to target path
+    4. Return confirmation message
+    """
+    from pathlib import Path as _Path
+
+    target_path = _extract_artifact_path(query)
+    if not target_path:
+        # Generate default path from query
+        slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
+        target_path = os.path.expanduser(f"~/Developer/Personal/presentations/{slug}/index.html")
+
+    # Determine file type for system prompt
+    ext = os.path.splitext(target_path)[1].lstrip('.')
+    file_type = {
+        'html': 'HTML', 'css': 'CSS', 'js': 'JavaScript', 'py': 'Python',
+        'md': 'Markdown', 'txt': 'plain text', 'json': 'JSON', 'sh': 'Bash script',
+    }.get(ext, ext.upper())
+
+    await progress_msg.edit(f"\U0001f3d7 Generating {file_type} artifact...")
+
+    # Phase 1: Enhance context with KB search
+    try:
+        kb_results = await asyncio.wait_for(hybrid_search(query, limit=8), timeout=15.0)
+        if kb_results:
+            kb_text = "\n\n".join(
+                f"[{doc.get('category', '')}] {doc.get('title', '')}\n{doc.get('content', '')[:800]}"
+                for doc in kb_results
+            )
+            context = f"[Source: knowledge base — relevant documents]\n{kb_text}\n\n{context}"
+    except Exception as e:
+        log.debug("Artifact KB search failed: %s", e)
+
+    # Phase 2: Single LLM call — generate complete file content
+    system = (
+        f"Generate a COMPLETE {file_type} file. Output ONLY the file content — no explanation, "
+        f"no markdown fences, no commentary before or after. The output will be saved directly "
+        f"to {target_path}.\n\n"
+        f"The user asked: {query}\n\n"
+        "Use the provided context to inform the content. Make it production-quality, "
+        "well-structured, and complete. Do not leave TODOs or placeholders."
+    )
+    user_message = f"Context:\n\n{context}\n\n---\n\nGenerate the complete {file_type} file now."
+
+    try:
+        if _taskforce_client:
+            response = await _taskforce_client.chat.completions.create(
+                model=CLAUDE_MODEL,
+                max_tokens=16000,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user_message},
+                ],
+                timeout=60.0,  # generous — generating a full file
+                temperature=0.3,  # slight creativity for content
+            )
+            content = response.choices[0].message.content or ""
+        elif claude:
+            response = await claude.messages.create(
+                model=CLAUDE_MODEL,
+                max_tokens=16000,
+                system=system,
+                messages=[{"role": "user", "content": user_message}],
+                timeout=60.0,
+            )
+            content = response.content[0].text
+        else:
+            return None  # No LLM available
+
+        if not content or len(content) < 50:
+            log.warning("Artifact generation produced empty/short content: %d chars", len(content))
+            return None
+
+        # Strip markdown fences if the LLM wrapped the output
+        if content.startswith("```"):
+            lines = content.split("\n")
+            lines = lines[1:]  # Remove opening fence
+            if lines and lines[-1].strip().startswith("```"):
+                lines = lines[:-1]
+            content = "\n".join(lines)
+
+        # Phase 3: Write to disk
+        target = _Path(target_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+        line_count = content.count("\n") + 1
+        char_count = len(content)
+
+        log.info("Artifact generated: %s (%d lines, %d chars)", target_path, line_count, char_count)
+
+        # Record signal
+        try:
+            from learning import record_signal
+            record_signal("artifact_generated", {
+                "path": target_path,
+                "type": file_type,
+                "lines": line_count,
+                "chars": char_count,
+            })
+        except Exception:
+            pass
+
+        save_message(chat_id, "assistant", f"Created {target_path} ({line_count} lines)")
+
+        confirmation = (
+            f"\u2705 **{file_type} artifact created**\n\n"
+            f"**Path:** `{target_path}`\n"
+            f"**Size:** {line_count} lines, {char_count:,} chars\n\n"
+            "Open it in your browser or editor to review. Want me to modify anything?"
+        )
+        try:
+            await progress_msg.edit(confirmation)
+        except Exception:
+            await progress_msg.delete()
+            await channel.send_message(chat_id, confirmation)
+
+        return confirmation
+
+    except asyncio.TimeoutError:
+        log.error("Artifact generation timed out (60s)")
+        return None
+    except Exception as e:
+        log.error("Artifact generation failed: %s", e)
+        return None
+
+
 def _should_try_swarm(query: str) -> bool:
     """Cheap heuristic: should we attempt parallel agent decomposition?
 
@@ -5568,6 +5732,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 full_context = _pending_task_extra + full_context
         except Exception:
             pass
+
+        # Artifact generation mode: bypass tool-use loop for file creation requests
+        if _is_artifact_request(query):
+            log.info("Artifact request detected: %s", query[:80])
+            artifact_result = await _generate_artifact(query, full_context, chat_id, progress_msg, channel)
+            if artifact_result:
+                _latency_ms = (_time_mod.monotonic() - _msg_start) * 1000
+                try:
+                    from learning import record_signal
+                    record_signal("response_latency", {"latency_ms": int(_latency_ms), "path": "artifact_generation"})
+                except Exception:
+                    pass
+                return
 
         # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
         _t_llm_start = _time_mod.monotonic()
