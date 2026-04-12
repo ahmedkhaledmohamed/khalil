@@ -2378,6 +2378,41 @@ async def call_llm_with_tools(
             except Exception as _pre_e:
                 log.error("Preamble synthesis retry failed: %s", _pre_e)
 
+        # If the user asked to BUILD something and we have search results but
+        # never called generate_file — the LLM chose text over action. Nudge once.
+        if final_text and _has_tool_results and _is_artifact_request(query):
+            _used_generate = any(
+                isinstance(m, dict) and m.get("role") == "tool"
+                and "generate_file" in str(m.get("content", ""))[:100]
+                for m in messages
+            )
+            if not _used_generate:
+                log.info("Artifact request but generate_file not called — nudging")
+                messages.append({"role": "assistant", "content": final_text})
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You gathered context but didn't create the file. "
+                        "Call generate_file NOW with the information you have."
+                    ),
+                })
+                try:
+                    _gen_resp = await _taskforce_client.chat.completions.create(
+                        model=_routed_model, max_tokens=4000, messages=messages,
+                        tools=tools, tool_choice="auto",
+                        timeout=CLAUDE_TIMEOUT, temperature=0.0,
+                    )
+                    _gen_choice = _gen_resp.choices[0]
+                    if _gen_choice.message.tool_calls:
+                        for _tc in _gen_choice.message.tool_calls:
+                            _gen_result = await _execute_tool_call(_tc)
+                            if "success" in _gen_result.lower()[:100]:
+                                final_text = _gen_result
+                                log.info("generate_file nudge succeeded")
+                                break
+                except Exception as _gen_e:
+                    log.warning("generate_file nudge failed: %s", _gen_e)
+
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
         else:
@@ -5978,17 +6013,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         display_response = "Sorry, I hit an internal error processing that. Please try again."
         await _safe_edit(progress_msg, display_response)
 
-    # Detect hallucinated tool calls — LLM generating fake tool output in text
-    if display_response and ("[Called tool:" in display_response or "[tool_call:" in display_response):
-        log.warning("Detected hallucinated tool call in response — suppressing")
-        display_response = (
-            "\u26a0\ufe0f I wasn't able to execute this action — the response was generated "
-            "without actual tool execution. Please try again."
-        )
-        try:
-            await _safe_edit(progress_msg, display_response)
-        except Exception:
-            pass
+    # Note: hallucination detection moved to generic handler only (handle_message_generic).
+    # The Telegram tool-use path (call_llm_with_tools) legitimately includes "[Called tool:"
+    # in its formatted responses — detecting here caused false positives.
 
     # Save to conversation history
     save_message(chat_id, "assistant", display_response)
@@ -6210,9 +6237,11 @@ async def handle_message_generic(ctx: MessageContext):
     _gap_tags = _gap_tag_re.findall(response)  # list of (name, command, description)
     display_response = _gap_tag_re.sub("", response).strip()
 
-    # Detect hallucinated tool calls in conversational mode
-    if "[Called tool:" in display_response or "[tool_call:" in display_response:
-        log.warning("Hallucinated tool call detected in generic handler — suppressing")
+    # Detect hallucinated tool calls in conversational mode — only when the LLM
+    # is pretending to invoke tools (line starts with the pattern, not just mentioning it)
+    _fake_tool_re = re.compile(r'^\s*\[(?:Called tool|tool_call)[:\s]', re.MULTILINE)
+    if _fake_tool_re.search(display_response):
+        log.warning("Hallucinated tool invocation detected in generic handler — suppressing")
         display_response = (
             "\u26a0\ufe0f I wasn't able to execute this action. "
             "Please try again — I need the tool execution system to be available."
