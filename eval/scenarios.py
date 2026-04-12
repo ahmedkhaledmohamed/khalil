@@ -753,6 +753,46 @@ SCENARIOS: list[Scenario] = [
         ],
         tags=["artifact-creation", "knowledge-base", "anti-loop"],
     ),
+
+    # --- Autonomous Reasoning ---
+    Scenario(
+        name="novel_db_query",
+        description="Agent queries its own database for a novel question",
+        turns=[
+            ScenarioTurn(
+                user="How many emails are in your knowledge base?",
+                expect_tools=["shell", "search_knowledge"],
+                expect_result="response contains a number",
+                expect_not_contains=["I can't", "I don't have access"],
+            ),
+        ],
+        tags=["autonomy", "reasoning", "novel-task"],
+    ),
+
+    Scenario(
+        name="adaptive_failure_recovery",
+        description="Agent adapts when first approach doesn't work",
+        turns=[
+            ScenarioTurn(
+                user="What's in my Notion workspace?",
+                expect_result="attempts to answer or explains limitation",
+                expect_not_contains=["Traceback"],
+            ),
+        ],
+        tags=["autonomy", "error-recovery"],
+    ),
+
+    Scenario(
+        name="unprompted_decomposition",
+        description="Agent decides to use delegate_tasks or multiple tools without being told",
+        turns=[
+            ScenarioTurn(
+                user="Prep me for tomorrow — check calendar, weather, and any urgent emails",
+                expect_result="covers multiple topics",
+            ),
+        ],
+        tags=["autonomy", "decomposition"],
+    ),
 ]
 
 
