@@ -1725,6 +1725,156 @@ async def _execute_tool_call(tool_call) -> str:
             _record_tool_analytics(fn_name, search_query, False, 0, error=str(e)[:200])
             return json.dumps({"error": True, "message": f"Search failed: {e}"})
 
+    # Handle generate_file tool — artifact generation mode
+    if fn_name == "generate_file":
+        description = args.get("description", "")
+        target_path = args.get("target_path", "")
+        file_type = args.get("file_type", "")
+        if not description:
+            return json.dumps({"error": True, "message": "Missing description parameter"})
+        if not target_path:
+            slug = re.sub(r'[^\w\s-]', '', description.lower())[:40].strip().replace(' ', '-')
+            target_path = f"~/Developer/Personal/presentations/{slug}/index.html"
+
+        try:
+            # Build context from conversation + KB search
+            _ctx_parts = []
+            try:
+                kb = await asyncio.wait_for(hybrid_search(description, limit=8), timeout=15.0)
+                if kb:
+                    _ctx_parts.append("\n".join(
+                        f"[{d.get('category','')}] {d.get('title','')}\n{d.get('content','')[:600]}"
+                        for d in kb
+                    ))
+            except Exception:
+                pass
+
+            context_text = "\n\n".join(_ctx_parts) if _ctx_parts else "No additional context found."
+
+            # Determine file type
+            import os as _os
+            ext = _os.path.splitext(target_path)[1].lstrip('.') or file_type or 'html'
+            type_label = {'html': 'HTML', 'py': 'Python', 'md': 'Markdown', 'css': 'CSS',
+                          'js': 'JavaScript', 'json': 'JSON', 'sh': 'Bash'}.get(ext, ext.upper())
+
+            # Single high-token LLM call
+            gen_system = (
+                f"Generate a COMPLETE {type_label} file. Output ONLY the file content — "
+                "no explanation, no markdown fences, no commentary. "
+                "Make it production-quality, well-structured, and complete."
+            )
+            gen_user = (
+                f"Description: {description}\n\n"
+                f"Context from knowledge base:\n{context_text}\n\n"
+                f"Generate the complete {type_label} file now."
+            )
+
+            if _taskforce_client:
+                resp = await _taskforce_client.chat.completions.create(
+                    model=CLAUDE_MODEL, max_tokens=16000,
+                    messages=[{"role": "system", "content": gen_system},
+                              {"role": "user", "content": gen_user}],
+                    timeout=60.0, temperature=0.3,
+                )
+                content = resp.choices[0].message.content or ""
+            elif claude:
+                resp = await claude.messages.create(
+                    model=CLAUDE_MODEL, max_tokens=16000, system=gen_system,
+                    messages=[{"role": "user", "content": gen_user}], timeout=60.0,
+                )
+                content = resp.content[0].text
+            else:
+                return json.dumps({"error": True, "message": "No LLM available"})
+
+            # Strip markdown fences if present
+            if content.startswith("```"):
+                lines = content.split("\n")
+                lines = lines[1:]
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                content = "\n".join(lines)
+
+            if len(content) < 50:
+                _record_tool_analytics(fn_name, description, False, 0, error="empty_output")
+                return json.dumps({"error": True, "message": "Generated content too short"})
+
+            # Write to disk
+            from pathlib import Path as _Path
+            expanded = _os.path.expanduser(target_path)
+            _Path(expanded).parent.mkdir(parents=True, exist_ok=True)
+            _Path(expanded).write_text(content, encoding="utf-8")
+
+            lines = content.count("\n") + 1
+            _record_tool_analytics(fn_name, description, True, 0)
+            try:
+                from learning import record_signal
+                record_signal("artifact_generated", {"path": expanded, "type": type_label, "lines": lines})
+            except Exception:
+                pass
+
+            return json.dumps({
+                "success": True,
+                "path": expanded,
+                "lines": lines,
+                "chars": len(content),
+                "message": f"Created {expanded} ({lines} lines, {len(content):,} chars)",
+            })
+        except asyncio.TimeoutError:
+            _record_tool_analytics(fn_name, description, False, 60, error="timeout")
+            return json.dumps({"error": True, "message": "File generation timed out (60s)"})
+        except Exception as e:
+            _record_tool_analytics(fn_name, description, False, 0, error=str(e)[:200])
+            return json.dumps({"error": True, "message": f"Generation failed: {e}"})
+
+    # Handle delegate_tasks tool — parallel sub-agent execution
+    if fn_name == "delegate_tasks":
+        tasks = args.get("tasks", [])
+        if not tasks or not isinstance(tasks, list):
+            return json.dumps({"error": True, "message": "Missing or invalid tasks array"})
+        if len(tasks) > 5:
+            tasks = tasks[:5]
+        try:
+            from agents.pool import fan_out_named
+            task_dict = {f"task_{i+1}": t for i, t in enumerate(tasks)}
+            results = await asyncio.wait_for(fan_out_named(task_dict), timeout=45.0)
+            _record_tool_analytics(fn_name, json.dumps(tasks)[:200], True, 0)
+            return json.dumps({
+                "success": True,
+                "results": results,
+                "count": len(results),
+            })
+        except asyncio.TimeoutError:
+            _record_tool_analytics(fn_name, json.dumps(tasks)[:200], False, 45, error="timeout")
+            return json.dumps({"error": True, "message": "Parallel tasks timed out (45s)"})
+        except Exception as e:
+            _record_tool_analytics(fn_name, json.dumps(tasks)[:200], False, 0, error=str(e)[:200])
+            return json.dumps({"error": True, "message": f"Delegation failed: {e}"})
+
+    # Handle spawn_watcher tool — background task with completion condition
+    if fn_name == "spawn_watcher":
+        task = args.get("task", "")
+        condition = args.get("condition", "")
+        follow_up = args.get("follow_up")
+        if not task or not condition:
+            return json.dumps({"error": True, "message": "Missing task or condition"})
+        try:
+            from agents.coordinator import spawn_background_agent
+            agent = spawn_background_agent(
+                task=task,
+                context={"query": task},
+                completion_condition=condition,
+                follow_up_action=follow_up,
+            )
+            _record_tool_analytics(fn_name, task[:200], True, 0)
+            return json.dumps({
+                "success": True,
+                "agent_id": agent.id,
+                "message": f"Background watcher started: {agent.id}. Monitoring: {condition}",
+            })
+        except Exception as e:
+            _record_tool_analytics(fn_name, task[:200], False, 0, error=str(e)[:200])
+            return json.dumps({"error": True, "message": f"Watcher failed: {e}"})
+
     # New: tool name IS the action (one-tool-per-action)
     action = fn_name
 
@@ -1890,29 +2040,27 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
         "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
         "- If the request is ambiguous, use the clarify tool to ask before guessing.\n"
         "- Summarize tool results in natural language. Don't dump raw output.\n\n"
-        "KNOWLEDGE BASE:\n"
-        "You have a personal knowledge base with 45K+ indexed documents covering emails, "
-        "work repos (Spotify, ClientMessaging, planning), projects, career, and finance.\n"
-        "- Use search_knowledge to find information — it's fast and comprehensive.\n"
-        "- Do NOT use shell grep/find across ~/Developer for context gathering — it's slow "
-        "and times out. The knowledge base already indexes those repos.\n"
-        "- If building artifacts (presentations, docs), use search_knowledge to gather "
-        "context first, then shell to write files.\n\n"
-        "TASK EXECUTION PHASES:\n"
-        "When the user asks you to BUILD or CREATE something (file, presentation, email, script):\n"
-        "1. GATHER (1-2 tool calls max): Use search_knowledge or read one existing file.\n"
-        "2. BUILD (remaining calls): Write the artifact using shell (cat > file << 'EOF'). "
-        "Start creating immediately with what you have — don't wait for perfect information.\n"
-        "3. DELIVER: Confirm what you built and where it is.\n\n"
-        "For INFORMATION requests (check calendar, weather, status):\n"
-        "1. Call the relevant tool once.\n"
-        "2. Summarize the result in natural language.\n\n"
-        "CRITICAL ANTI-PATTERNS (never do these):\n"
-        "- Do NOT run `find ~/Developer` or `grep -r` across large directories — use search_knowledge.\n"
-        "- Do NOT `echo` a plan of what you're going to do — just do it.\n"
-        "- Do NOT re-read a file you already read in this conversation.\n"
-        "- Do NOT spend more than 2 iterations gathering context before writing.\n"
-        "- If you ran out of iterations last time, START WITH WRITING this time, not more research.\n\n"
+        "STRATEGY TOOLS — choose the right approach for each task:\n"
+        "- search_knowledge(query): Search 45K+ indexed docs (emails, repos, projects). "
+        "Use INSTEAD of shell grep/find for context.\n"
+        "- generate_file(description, target_path): Create a complete file (HTML, Python, Markdown, etc.). "
+        "Use for BUILD/CREATE requests. Generates the full file in one pass — much better than shell.\n"
+        "- delegate_tasks(tasks): Run 2-5 independent subtasks in PARALLEL via sub-agents. "
+        "Use when a request has multiple independent parts.\n"
+        "- spawn_watcher(task, condition): Start a background monitor for long-running tasks. "
+        "Use for 'track this', 'notify me when', 'follow up if'.\n"
+        "- shell(command): Execute shell commands. Use for checking system state, running scripts, git ops.\n\n"
+        "WHEN TO USE WHICH:\n"
+        "- 'Build me a presentation' → generate_file\n"
+        "- 'Check weather and email Sarah' → delegate_tasks\n"
+        "- 'What's the weather?' → weather tool directly\n"
+        "- 'Monitor the deploy' → spawn_watcher\n"
+        "- 'How much disk space?' → shell\n"
+        "- 'What do I know about FL26?' → search_knowledge\n\n"
+        "ANTI-PATTERNS:\n"
+        "- Do NOT use shell grep/find for searching — use search_knowledge.\n"
+        "- Do NOT use shell cat > file for creating files — use generate_file.\n"
+        "- Do NOT echo plans — execute the right strategy tool immediately.\n\n"
         f"{_failing}"
         f"{style_hint}"
         f"{system_extra}"
@@ -5733,18 +5881,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-        # Artifact generation mode: bypass tool-use loop for file creation requests
-        if _is_artifact_request(query):
-            log.info("Artifact request detected: %s", query[:80])
-            artifact_result = await _generate_artifact(query, full_context, chat_id, progress_msg, channel)
-            if artifact_result:
-                _latency_ms = (_time_mod.monotonic() - _msg_start) * 1000
-                try:
-                    from learning import record_signal
-                    record_signal("response_latency", {"latency_ms": int(_latency_ms), "path": "artifact_generation"})
-                except Exception:
-                    pass
-                return
+        # Strategy tools (generate_file, delegate_tasks, spawn_watcher) are now available
+        # in the tool-use loop — the LLM decides when to use them, no hardcoded bypass needed.
 
         # Call LLM with tool-use (falls back to plain streaming for Ollama/privacy)
         _t_llm_start = _time_mod.monotonic()
