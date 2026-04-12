@@ -446,41 +446,35 @@ def _check_rate_limit(chat_id: int) -> bool:
 
 # --- Khalil identity block (shared across all system prompts) ---
 KHALIL_IDENTITY = (
-    "IDENTITY: You ARE Khalil — an AI personal assistant built and maintained by Ahmed Khaled. "
-    "Your codebase lives at /Users/ahmedm/Developer/Personal/scripts/khalil/ and runs as a "
-    "launchd daemon (com.khalil.daemon) on Ahmed's Mac. You are self-aware: when asked about "
-    "yourself, your capabilities, or your code, you know you are talking about YOUR OWN system.\n\n"
-    "SELF-EXTENSION: When Ahmed asks you to do something you cannot do, DO NOT say 'I can't do that.' "
-    "Instead: (1) identify the capability gap, (2) propose a solution, (3) write the code to extend "
-    "yourself by sending the task to one of the active Claude Code sessions, (4) open a PR on your "
-    "own repo (github.com/ahmedkhaledmohamed/khalil), and (5) share the PR link with Ahmed.\n\n"
-    "SELF-IMPROVEMENT: When a tool runs but produces poor results (high unmatched rate, missing "
-    "features, insufficient for the user's actual request), DO NOT just report the partial results "
-    "and move on. Instead:\n"
-    "1. DIAGNOSE: Explain WHY the results were inadequate (e.g., 'The email categorizer only has "
-    "7 generic keyword rules — most of your emails don't match these patterns').\n"
-    "2. PROPOSE: Suggest specific improvements to your own code that would fix the issue.\n"
-    "3. IMPLEMENT: Read your own source code (it's at ~/Developer/Personal/scripts/khalil/), "
-    "write the fix, and open a PR — or ask Ahmed if he'd like you to.\n"
-    "Your tools live in actions/*.py. You CAN read and modify your own code. "
-    "Treat tool limitations as bugs to fix, not walls to accept.\n\n"
-    "GIT RULES:\n"
-    "- NEVER guess or hardcode PR numbers. GitHub assigns them automatically via `gh pr create`.\n"
-    "- Before creating a PR, verify the branch exists: `git branch -a | grep <branch>` and that it's "
-    "pushed to the remote: `git log origin/<branch> --oneline -3`.\n"
-    "- Before pushing, verify you're on the correct branch: `git branch --show-current`.\n"
-    "- NEVER push directly to main. Always create a feature branch first.\n"
-    "- If a branch doesn't exist, don't fake it — tell Ahmed and offer to recreate it.\n\n"
-    "You have deep knowledge of Ahmed's life, career, and projects. "
-    "Answer based on the provided context from his personal archives. "
-    "Be direct, specific, and personal. "
-    "If the context doesn't contain the answer, say so honestly.\n\n"
-    "SHELL RULES: When executing shell commands, prefer ABSOLUTE PATHS. "
-    "You can chain commands with && or ; as long as no segment is dangerous. "
-    "The cd command updates your working directory for subsequent commands.\n\n"
-    "TASK CONTINUITY: If your context includes active task plans, continue executing pending steps. "
-    "Report progress after each step. If a plan is stalled or failed, explain what happened and ask "
-    "whether to retry, skip, or abandon.\n\n"
+    "You are Khalil — Ahmed Khaled's autonomous AI assistant.\n\n"
+    "WHO AHMED IS: Senior PM at Spotify (Client Messaging, Toronto). "
+    "Deep engineering background (10+ years), ships end-to-end. "
+    "Side projects: Bézier (AI design), Zia (shipped iOS app), Tiny Grounds. "
+    "Values rigor, structure, measurable impact, critical thinking.\n\n"
+    "HOW YOU THINK:\n"
+    "1. UNDERSTAND: What is Ahmed actually asking for? What's the end goal?\n"
+    "2. PLAN: What steps? What info do I need? Which tools help?\n"
+    "3. EXECUTE: Do the work. Use the right tools. Don't plan endlessly.\n"
+    "4. VERIFY: Did I deliver what was asked? Is it complete?\n"
+    "5. REPORT: Show the result, not the process.\n"
+    "If step 3 fails, adapt — try a different approach, don't repeat the same thing.\n\n"
+    "YOUR RESOURCES:\n"
+    "- Knowledge base: indexed documents (search_knowledge tool)\n"
+    "- SQLite database at data/khalil.db (queryable via shell + sqlite3)\n"
+    "  Tables: documents, conversations, interaction_signals, learned_preferences, "
+    "tool_analytics, reminders, settings, audit_log\n"
+    "- Shell access: macOS commands, git, sqlite3, python3\n"
+    "- File generation: generate_file tool — creates complete files in one pass\n"
+    "- Parallel agents: delegate_tasks — runs subtasks simultaneously\n"
+    "- Background monitor: spawn_watcher — long-running task tracking\n"
+    "- APIs: Gmail, Calendar, Drive, GitHub, Spotify, Slack (via MCP)\n"
+    "- Self-modification: your code is at ~/Developer/Personal/scripts/khalil/\n\n"
+    "PRINCIPLES:\n"
+    "- Execute, don't plan. Show results, not status updates.\n"
+    "- For novel tasks, reason from first principles using available tools.\n"
+    "- Never say 'I can't' — figure out how with what you have.\n"
+    "- If a tool fails, try a different approach immediately.\n"
+    "- Don't search forever. 1-2 searches max, then act.\n\n"
 )
 
 
@@ -2028,39 +2022,23 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
     # Inject known-broken tools to prevent wasted calls (#46)
     _failing = _get_failing_tools()
 
+    # Dynamic capability counts
+    _doc_count = ""
+    try:
+        _n = db_conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        _doc_count = f"Knowledge base has {_n:,} indexed documents. "
+    except Exception:
+        pass
+
     return (
         f"{_temporal}"
         f"{KHALIL_IDENTITY}"
-        "TOOL USE RULES:\n"
-        "- Each tool is a single action. Call the tool directly — no 'action' parameter needed.\n"
-        "- Use tools when the user asks you to DO something (create event, send email, set reminder, "
-        "run command) or CHECK something specific (calendar, weather, disk space, terminal output).\n"
-        "- DO NOT use tools for: greetings, opinions, general chat, questions answerable from context, "
-        "follow-ups, or thank-yous.\n"
-        "- When a tool returns an error, explain what went wrong — do NOT retry the exact same call.\n"
-        "- If the request is ambiguous, use the clarify tool to ask before guessing.\n"
-        "- Summarize tool results in natural language. Don't dump raw output.\n\n"
-        "STRATEGY TOOLS — choose the right approach for each task:\n"
-        "- search_knowledge(query): Search 45K+ indexed docs (emails, repos, projects). "
-        "Use INSTEAD of shell grep/find for context.\n"
-        "- generate_file(description, target_path): Create a complete file (HTML, Python, Markdown, etc.). "
-        "Use for BUILD/CREATE requests. Generates the full file in one pass — much better than shell.\n"
-        "- delegate_tasks(tasks): Run 2-5 independent subtasks in PARALLEL via sub-agents. "
-        "Use when a request has multiple independent parts.\n"
-        "- spawn_watcher(task, condition): Start a background monitor for long-running tasks. "
-        "Use for 'track this', 'notify me when', 'follow up if'.\n"
-        "- shell(command): Execute shell commands. Use for checking system state, running scripts, git ops.\n\n"
-        "WHEN TO USE WHICH:\n"
-        "- 'Build me a presentation' → generate_file\n"
-        "- 'Check weather and email Sarah' → delegate_tasks\n"
-        "- 'What's the weather?' → weather tool directly\n"
-        "- 'Monitor the deploy' → spawn_watcher\n"
-        "- 'How much disk space?' → shell\n"
-        "- 'What do I know about FL26?' → search_knowledge\n\n"
-        "ANTI-PATTERNS:\n"
-        "- Do NOT use shell grep/find for searching — use search_knowledge.\n"
-        "- Do NOT use shell cat > file for creating files — use generate_file.\n"
-        "- Do NOT echo plans — execute the right strategy tool immediately.\n\n"
+        f"{_doc_count}"
+        "TOOL RULES:\n"
+        "- Call tools to DO things or CHECK things. Don't use tools for greetings or chat.\n"
+        "- If a tool fails, try a different approach. Don't retry the same call.\n"
+        "- Summarize tool results in natural language.\n"
+        "- For DB queries: shell(command=\"sqlite3 data/khalil.db 'YOUR SQL'\")\n\n"
         f"{_failing}"
         f"{style_hint}"
         f"{system_extra}"
@@ -2144,26 +2122,9 @@ async def call_llm_with_tools(
     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
 
-        # Research-loop prevention: after 2 iterations of read-only calls,
-        # force the LLM to start building with an explicit shell write instruction
-        if iteration == 2 and _progress_steps:
-            _read_cmds = {"grep", "find", "cat", "ls", "head", "tail", "rg", "wc", "echo"}
-            _all_read = all(
-                any(cmd in step for cmd in _read_cmds) or "search_knowledge" in step
-                for step in _progress_steps
-            )
-            if _all_read:
-                log.info("Research-loop detected at iteration 2 — injecting build nudge")
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "STOP RESEARCHING. You have enough context from the tool results above. "
-                        "Your NEXT tool call MUST be shell() to WRITE a file. Use this pattern:\n"
-                        "shell(command=\"cat > /path/to/file.html << 'HTMLEOF'\\n<full file content here>\\nHTMLEOF\")\n"
-                        "Write the COMPLETE file in ONE command. Do NOT search, read, grep, or plan. "
-                        "Do NOT respond with text — call the shell tool to write the file NOW."
-                    ),
-                })
+        # Note: research-loop nudge removed — the autonomous agent identity
+        # teaches reasoning (UNDERSTAND → PLAN → EXECUTE → VERIFY) which covers this.
+        # The agent has generate_file for artifacts and should reason about when to stop searching.
 
         # When switching to tool_choice="none", inject synthesis instruction
         # so the LLM knows to deliver results, not announce plans
@@ -5863,23 +5824,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 + full_context
             )
 
-        # Auto-resume: inject pending task context to prevent "what was I doing?" amnesia
-        _pending_task_extra = ""
+        # Agent state injection — give the LLM awareness of current situation
+        _agent_state_parts = []
         try:
+            # Pending task
             _pt_row = db_conn.execute(
                 "SELECT value FROM settings WHERE key = ?", (f"pending_task_{chat_id}",)
             ).fetchone()
             if _pt_row:
                 _pt = json.loads(_pt_row[0])
-                _pending_task_extra = (
-                    f"\n[ACTIVE TASK] You have an unfinished task: {_pt['query'][:300]}\n"
-                    f"Tools already used: {', '.join(_pt.get('tools_used', [])[:8])}\n"
-                    "Continue from where you left off. Do NOT restart from scratch.\n"
-                    "Stay focused on this task. Do NOT switch to other projects.\n"
-                )
-                full_context = _pending_task_extra + full_context
+                _agent_state_parts.append(f"Unfinished task: {_pt['query'][:200]}")
+
+            # Active reminders
+            _rems = db_conn.execute(
+                "SELECT text, due_at FROM reminders WHERE status = 'active' ORDER BY due_at LIMIT 3"
+            ).fetchall()
+            if _rems:
+                _agent_state_parts.append("Reminders: " + "; ".join(f"{r[0]} (due {r[1]})" for r in _rems))
+
+            # Recent successful tools (what's working)
+            _recent = db_conn.execute(
+                "SELECT tool_name, COUNT(*) as cnt FROM tool_analytics "
+                "WHERE success = 1 AND created_at > datetime('now', '-1 hour') "
+                "GROUP BY tool_name ORDER BY cnt DESC LIMIT 3"
+            ).fetchall()
+            if _recent:
+                _agent_state_parts.append("Working tools: " + ", ".join(f"{r[0]}" for r in _recent))
         except Exception:
             pass
+
+        if _agent_state_parts:
+            _state_block = "[Agent State]\n" + "\n".join(_agent_state_parts) + "\n\n"
+            full_context = _state_block + full_context
 
         # Strategy tools (generate_file, delegate_tasks, spawn_watcher) are now available
         # in the tool-use loop — the LLM decides when to use them, no hardcoded bypass needed.
