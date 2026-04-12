@@ -37,6 +37,7 @@ _INCLUDE_SKILLS = {
 # Core tools always included regardless of query relevance
 _CORE_TOOLS = {
     "shell", "reminder", "web_search", "clarify", "search_knowledge",
+    "generate_file", "delegate_tasks",
 }
 
 # Manual tool schema for search_knowledge (not from skill registry)
@@ -62,6 +63,102 @@ _SEARCH_KNOWLEDGE_SCHEMA = {
         },
     },
 }
+
+_GENERATE_FILE_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "generate_file",
+        "description": (
+            "Generate a COMPLETE file (HTML presentation, Python script, Markdown doc, etc.) "
+            "and save it to disk. Use this when asked to BUILD, CREATE, or WRITE a file. "
+            "Khalil will search the knowledge base for context, generate the full file content "
+            "in one pass (up to 16K tokens), and write it to the target path. "
+            "Much more effective than trying to write files via shell in multiple iterations."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "What to generate — be specific about content, structure, and style",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "Where to save the file (e.g., ~/Developer/Personal/presentations/deck.html)",
+                },
+                "file_type": {
+                    "type": "string",
+                    "description": "File type: html, py, md, css, js, json, sh, txt",
+                },
+            },
+            "required": ["description", "target_path"],
+        },
+    },
+}
+
+_DELEGATE_TASKS_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "delegate_tasks",
+        "description": (
+            "Run multiple independent tasks IN PARALLEL using sub-agents. Each task gets its own "
+            "focused Claude call. Use this when the user's request has 2-5 independent parts that "
+            "can be researched or executed simultaneously. Results are returned together. "
+            "Example: delegate_tasks(tasks=['search KB for FL26 strategy', 'search KB for team proposals', "
+            "'search KB for dependency mapping']) — all three run at once."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of 2-5 task descriptions to run in parallel",
+                },
+            },
+            "required": ["tasks"],
+        },
+    },
+}
+
+_SPAWN_WATCHER_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "spawn_watcher",
+        "description": (
+            "Start a long-running background task that monitors a condition and notifies when done. "
+            "Use for tasks that take hours or days: 'monitor this deploy', 'track PR until merged', "
+            "'follow up if no reply by Thursday'. The watcher runs in the background and checks "
+            "periodically."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "What to watch/monitor",
+                },
+                "condition": {
+                    "type": "string",
+                    "description": "When to trigger: 'time:3600' (after N seconds), 'pr_merged:123' (PR merge), 'regex:pattern' (match shell output)",
+                },
+                "follow_up": {
+                    "type": "string",
+                    "description": "What to do when condition is met (e.g., 'notify:Deploy complete')",
+                },
+            },
+            "required": ["task", "condition"],
+        },
+    },
+}
+
+# All manual tool schemas (not from skill registry)
+_MANUAL_TOOL_SCHEMAS = [
+    _SEARCH_KNOWLEDGE_SCHEMA,
+    _GENERATE_FILE_SCHEMA,
+    _DELEGATE_TASKS_SCHEMA,
+    _SPAWN_WATCHER_SCHEMA,
+]
 
 # Maximum tools to expose per query (core + filtered)
 _MAX_TOOLS_PER_QUERY = 12
@@ -276,7 +373,8 @@ def generate_tool_schemas(registry) -> list[dict]:
                 tools.append(tool)
 
     # Add manual tools not from skill registry
-    tools.append(_SEARCH_KNOWLEDGE_SCHEMA)
+    # Add manual meta-tools (not from skill registry)
+    tools.extend(_MANUAL_TOOL_SCHEMAS)
 
     log.info("Generated %d tool schemas (one per action) from %d skills",
              len(tools), len(_INCLUDE_SKILLS))
