@@ -41,7 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyyaml pytest anthropic httpx
+          pip install pyyaml pytest anthropic httpx keyring
 
       - name: Syntax check — all Python files
         run: |
@@ -79,6 +79,10 @@ jobs:
       - name: Tool-use eval (swarm gate + schema + param + filter + bypass)
         run: |
           python eval/tool_use_eval.py
+
+      - name: Reasoning eval (strategy selection + identity + anti-patterns)
+        run: |
+          python eval/reasoning_eval.py
 
       - name: Post eval summary as PR comment
         if: github.event_name == 'pull_request'
