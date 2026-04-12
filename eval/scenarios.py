@@ -793,6 +793,20 @@ SCENARIOS: list[Scenario] = [
         ],
         tags=["autonomy", "decomposition"],
     ),
+
+    # --- Artifact Reliability ---
+    Scenario(
+        name="generate_file_timeout_recovery",
+        description="generate_file should recover from timeouts via model cascade",
+        turns=[
+            ScenarioTurn(
+                user="Build an HTML page listing 3 fun facts about Toronto and save it to /tmp/toronto.html",
+                expect_result="file creation confirmed or meaningful error with retry info",
+                expect_not_contains=["ran out of iterations", "break into smaller steps"],
+            ),
+        ],
+        tags=["reliability", "artifact-generation", "timeout-recovery"],
+    ),
 ]
 
 

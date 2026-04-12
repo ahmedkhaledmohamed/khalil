@@ -470,7 +470,8 @@ KHALIL_IDENTITY = (
     "- APIs: Gmail, Calendar, Drive, GitHub, Spotify, Slack (via MCP)\n"
     "- Self-modification: your code is at ~/Developer/Personal/scripts/khalil/\n\n"
     "PRINCIPLES:\n"
-    "- Execute, don't plan. Show results, not status updates.\n"
+    "- Execute, don't plan. Show results, not status updates or checklists.\n"
+    "- Never give a status update. If a task fails, explain what failed and try a different approach.\n"
     "- For novel tasks, reason from first principles using available tools.\n"
     "- Never say 'I can't' — figure out how with what you have.\n"
     "- If a tool fails, try a different approach immediately.\n"
@@ -1751,7 +1752,7 @@ async def _execute_tool_call(tool_call) -> str:
             type_label = {'html': 'HTML', 'py': 'Python', 'md': 'Markdown', 'css': 'CSS',
                           'js': 'JavaScript', 'json': 'JSON', 'sh': 'Bash'}.get(ext, ext.upper())
 
-            # Single high-token LLM call
+            # Model cascade with retry — try multiple models until one succeeds
             gen_system = (
                 f"Generate a COMPLETE {type_label} file. Output ONLY the file content — "
                 "no explanation, no markdown fences, no commentary. "
@@ -1763,34 +1764,82 @@ async def _execute_tool_call(tool_call) -> str:
                 f"Generate the complete {type_label} file now."
             )
 
-            if _taskforce_client:
-                resp = await _taskforce_client.chat.completions.create(
-                    model=CLAUDE_MODEL, max_tokens=16000,
-                    messages=[{"role": "system", "content": gen_system},
-                              {"role": "user", "content": gen_user}],
-                    timeout=60.0, temperature=0.3,
-                )
-                content = resp.choices[0].message.content or ""
-            elif claude:
-                resp = await claude.messages.create(
-                    model=CLAUDE_MODEL, max_tokens=16000, system=gen_system,
-                    messages=[{"role": "user", "content": gen_user}], timeout=60.0,
-                )
-                content = resp.content[0].text
-            else:
-                return json.dumps({"error": True, "message": "No LLM available"})
+            from config import CLAUDE_MODEL_FAST
+            _GEN_CASCADE = [
+                (CLAUDE_MODEL, 90.0, "opus"),        # Best quality, generous timeout
+                (CLAUDE_MODEL_FAST, 60.0, "sonnet"),  # Faster fallback
+            ]
+            # Add Ollama as final fallback if available
+            if LLM_BACKEND == "ollama" or OLLAMA_URL:
+                _GEN_CASCADE.append(("local", 120.0, "ollama"))
+
+            content = ""
+            _used_model = ""
+            _attempts = 0
+
+            for _model, _timeout, _label in _GEN_CASCADE:
+                _attempts += 1
+                try:
+                    if _model == "local":
+                        # Ollama fallback
+                        import httpx as _hx
+                        async with _hx.AsyncClient(timeout=_timeout) as _ollama_c:
+                            _resp = await _ollama_c.post(
+                                f"{OLLAMA_URL}/api/chat",
+                                json={"model": OLLAMA_LLM_MODEL, "stream": False,
+                                      "messages": [{"role": "system", "content": gen_system},
+                                                   {"role": "user", "content": gen_user}]},
+                            )
+                            _resp.raise_for_status()
+                            content = _resp.json()["message"]["content"]
+                    elif _taskforce_client:
+                        resp = await _taskforce_client.chat.completions.create(
+                            model=_model, max_tokens=16000,
+                            messages=[{"role": "system", "content": gen_system},
+                                      {"role": "user", "content": gen_user}],
+                            timeout=_timeout, temperature=0.3,
+                        )
+                        content = resp.choices[0].message.content or ""
+                    elif claude:
+                        resp = await claude.messages.create(
+                            model=_model, max_tokens=16000, system=gen_system,
+                            messages=[{"role": "user", "content": gen_user}],
+                            timeout=_timeout,
+                        )
+                        content = resp.content[0].text
+                    else:
+                        continue
+
+                    if content and len(content) >= 50:
+                        _used_model = _label
+                        log.info("generate_file succeeded with %s (attempt %d)", _label, _attempts)
+                        break
+                    else:
+                        log.warning("generate_file %s returned short content (%d chars), trying next", _label, len(content))
+                        content = ""
+                except (asyncio.TimeoutError, Exception) as _e:
+                    log.warning("generate_file %s failed (attempt %d): %s", _label, _attempts, str(_e)[:100])
+                    try:
+                        from learning import record_signal
+                        record_signal("artifact_failed", {
+                            "model": _label, "attempt": _attempts,
+                            "error": str(_e)[:200], "description": description[:200],
+                        })
+                    except Exception:
+                        pass
+                    continue
+
+            if not content or len(content) < 50:
+                _record_tool_analytics(fn_name, description, False, 0, error=f"all_models_failed_after_{_attempts}_attempts")
+                return json.dumps({"error": True, "message": f"File generation failed after {_attempts} attempts across all models. The API may be overloaded — try again in a few minutes."})
 
             # Strip markdown fences if present
             if content.startswith("```"):
-                lines = content.split("\n")
-                lines = lines[1:]
-                if lines and lines[-1].strip().startswith("```"):
-                    lines = lines[:-1]
-                content = "\n".join(lines)
-
-            if len(content) < 50:
-                _record_tool_analytics(fn_name, description, False, 0, error="empty_output")
-                return json.dumps({"error": True, "message": "Generated content too short"})
+                _lines = content.split("\n")
+                _lines = _lines[1:]
+                if _lines and _lines[-1].strip().startswith("```"):
+                    _lines = _lines[:-1]
+                content = "\n".join(_lines)
 
             # Write to disk
             from pathlib import Path as _Path
@@ -1798,24 +1847,26 @@ async def _execute_tool_call(tool_call) -> str:
             _Path(expanded).parent.mkdir(parents=True, exist_ok=True)
             _Path(expanded).write_text(content, encoding="utf-8")
 
-            lines = content.count("\n") + 1
+            line_count = content.count("\n") + 1
             _record_tool_analytics(fn_name, description, True, 0)
             try:
                 from learning import record_signal
-                record_signal("artifact_generated", {"path": expanded, "type": type_label, "lines": lines})
+                record_signal("artifact_generated", {
+                    "path": expanded, "type": type_label,
+                    "lines": line_count, "model": _used_model, "attempts": _attempts,
+                })
             except Exception:
                 pass
 
             return json.dumps({
                 "success": True,
                 "path": expanded,
-                "lines": lines,
+                "lines": line_count,
                 "chars": len(content),
-                "message": f"Created {expanded} ({lines} lines, {len(content):,} chars)",
+                "model": _used_model,
+                "attempts": _attempts,
+                "message": f"Created {expanded} ({line_count} lines, {len(content):,} chars) via {_used_model}",
             })
-        except asyncio.TimeoutError:
-            _record_tool_analytics(fn_name, description, False, 60, error="timeout")
-            return json.dumps({"error": True, "message": "File generation timed out (60s)"})
         except Exception as e:
             _record_tool_analytics(fn_name, description, False, 0, error=str(e)[:200])
             return json.dumps({"error": True, "message": f"Generation failed: {e}"})

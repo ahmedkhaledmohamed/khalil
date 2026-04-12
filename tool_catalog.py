@@ -46,10 +46,11 @@ _SEARCH_KNOWLEDGE_SCHEMA = {
     "function": {
         "name": "search_knowledge",
         "description": (
-            "Search Khalil's personal knowledge base (45K+ indexed documents: "
+            "Search Khalil's personal knowledge base (indexed documents: "
             "emails, work repos, projects, career, finance, planning docs). "
-            "Use this BEFORE shell grep when looking for information about the user's "
-            "work, projects, or personal context. Much faster than shell find/grep."
+            "Use 3-5 focused keywords, not full sentences. "
+            "Example: 'FL26 messaging strategy' not 'Fall 2026 planning cycle messaging platform'. "
+            "Much faster than shell grep/find."
         ),
         "parameters": {
             "type": "object",
