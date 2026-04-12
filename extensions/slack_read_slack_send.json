@@ -1,0 +1,9 @@
+{
+    "name": "slack_read_slack_send",
+    "command": "slackchat",
+    "description": "Combined Slack read+send — read channels and send messages in one flow",
+    "action_module": "actions.slack_read_slack_send",
+    "handler_function": "handle_slackchat",
+    "generated_at": "2026-04-10T12:00:00",
+    "generated_for": "Actions 'slack_read' and 'slack_send' used together 118x — integration opportunity"
+}
