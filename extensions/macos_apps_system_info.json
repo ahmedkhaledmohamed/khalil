@@ -1,0 +1,9 @@
+{
+    "name": "macos_apps_system_info",
+    "command": "sysapps",
+    "description": "Actions 'macos_apps' and 'system_info' used together 91x — integration opportunity",
+    "action_module": "actions.macos_apps_system_info",
+    "handler_function": "handle_sysapps",
+    "generated_at": "2026-04-12T12:00:00",
+    "generated_for": "Actions 'macos_apps' and 'system_info' used together 91x — integration opportunity"
+}
