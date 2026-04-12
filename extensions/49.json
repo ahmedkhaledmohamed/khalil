@@ -1,0 +1,9 @@
+{
+    "name": "gaps",
+    "command": "gaps",
+    "description": "Failed to answer 7 queries today \u2014 Consider indexing more content related to these topics, or running /sync",
+    "action_module": "actions.49",
+    "handler_function": "handle_gaps",
+    "generated_at": "2026-04-11T12:00:00",
+    "generated_for": "Failed to answer 7 queries today \u2014 Consider indexing more content related to these topics, or running /sync"
+}
