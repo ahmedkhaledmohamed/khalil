@@ -197,10 +197,15 @@ async def _generate_artifact(query: str, context: str, chat_id, progress_msg, ch
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
+        # VERIFY: file actually exists and has content
+        if not target.exists() or target.stat().st_size < 50:
+            log.error("Artifact verification failed: %s does not exist or is empty", target_path)
+            return None
+
         line_count = content.count("\n") + 1
         char_count = len(content)
 
-        log.info("Artifact generated: %s (%d lines, %d chars)", target_path, line_count, char_count)
+        log.info("Artifact generated and VERIFIED: %s (%d lines, %d chars)", target_path, line_count, char_count)
 
         # Record signal
         try:
@@ -1113,6 +1118,9 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         f"{_skill_context}\n\n"
         "If Ahmed asks about his machine state, DO NOT suggest he run a command "
         "— just tell him you'll check. Actions execute automatically.\n\n"
+        "HONESTY RULE: NEVER pretend to execute tools or create files. "
+        "Do NOT output '[Called tool: X]' or fake tool results in text. "
+        "If you cannot execute an action, say so honestly.\n\n"
         f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "AND no skill or extension covers it, "
@@ -1388,6 +1396,9 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
         f"{_skill_context}\n\n"
         "If Ahmed asks about his machine state, DO NOT suggest he run a command "
         "— just tell him you'll check. Actions execute automatically.\n\n"
+        "HONESTY RULE: NEVER pretend to execute tools or create files. "
+        "Do NOT output '[Called tool: X]' or fake tool results in text. "
+        "If you cannot execute an action, say so honestly.\n\n"
         f"{_get_mcp_tools_text()}"
         "IMPORTANT: If the user asks you to DO something that you cannot execute "
         "AND no skill or extension covers it, "
@@ -1874,6 +1885,11 @@ async def _execute_tool_call(tool_call) -> str:
             expanded = _os.path.expanduser(target_path)
             _Path(expanded).parent.mkdir(parents=True, exist_ok=True)
             _Path(expanded).write_text(content, encoding="utf-8")
+
+            # VERIFY: file actually exists and has content
+            if not _Path(expanded).exists() or _Path(expanded).stat().st_size < 50:
+                _record_tool_analytics(fn_name, description, False, 0, error="verification_failed")
+                return json.dumps({"error": True, "message": f"Verification failed: {expanded} was not created or is empty"})
 
             line_count = content.count("\n") + 1
             _record_tool_analytics(fn_name, description, True, 0)
@@ -5962,6 +5978,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         display_response = "Sorry, I hit an internal error processing that. Please try again."
         await _safe_edit(progress_msg, display_response)
 
+    # Detect hallucinated tool calls — LLM generating fake tool output in text
+    if display_response and ("[Called tool:" in display_response or "[tool_call:" in display_response):
+        log.warning("Detected hallucinated tool call in response — suppressing")
+        display_response = (
+            "\u26a0\ufe0f I wasn't able to execute this action — the response was generated "
+            "without actual tool execution. Please try again."
+        )
+        try:
+            await _safe_edit(progress_msg, display_response)
+        except Exception:
+            pass
+
     # Save to conversation history
     save_message(chat_id, "assistant", display_response)
 
@@ -6181,6 +6209,14 @@ async def handle_message_generic(ctx: MessageContext):
     _gap_tag_re = re.compile(r'\[CAPABILITY_GAP:\s*(\w+)\s*\|\s*(/\w+)\s*\|\s*(.+?)\]')
     _gap_tags = _gap_tag_re.findall(response)  # list of (name, command, description)
     display_response = _gap_tag_re.sub("", response).strip()
+
+    # Detect hallucinated tool calls in conversational mode
+    if "[Called tool:" in display_response or "[tool_call:" in display_response:
+        log.warning("Hallucinated tool call detected in generic handler — suppressing")
+        display_response = (
+            "\u26a0\ufe0f I wasn't able to execute this action. "
+            "Please try again — I need the tool execution system to be available."
+        )
 
     save_message(chat_id, "assistant", display_response)
 
