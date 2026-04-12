@@ -1,0 +1,9 @@
+{
+    "name": "digitalocean_status_github_notifications",
+    "command": "infra",
+    "description": "Actions 'digitalocean_status' and 'github_notifications' used together 63x — integration opportunity",
+    "action_module": "actions.digitalocean_status_github_notifications",
+    "handler_function": "handle_infra",
+    "generated_at": "2026-04-12T00:00:00+00:00",
+    "generated_for": "Actions 'digitalocean_status' and 'github_notifications' used together 63x — integration opportunity"
+}
