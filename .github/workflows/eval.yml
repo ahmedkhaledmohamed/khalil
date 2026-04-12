@@ -80,6 +80,10 @@ jobs:
         run: |
           python eval/tool_use_eval.py
 
+      - name: Reasoning eval (strategy selection + identity + anti-patterns)
+        run: |
+          python eval/reasoning_eval.py
+
       - name: Post eval summary as PR comment
         if: github.event_name == 'pull_request'
         continue-on-error: true

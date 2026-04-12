@@ -78,7 +78,7 @@ def _redact_sensitive(text: str) -> str:
 
 _ARTIFACT_SIGNALS = re.compile(
     r"\b(build|create|write|generate|make)\s+.{0,40}"
-    r"\b(presentation|html|page|script|file|document|deck|slides?|report|template|website)\b",
+    r"\b(presentation|html|page|script|file|document|deck|slides?|report|template|website|summary|readme)\b",
     re.IGNORECASE,
 )
 _ARTIFACT_PATH_RE = re.compile(r'\.(html|css|js|py|md|txt|json|sh|yaml|yml)\b')
