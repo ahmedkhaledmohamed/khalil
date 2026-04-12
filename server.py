@@ -1237,7 +1237,35 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                 _last_llm_error = (_err_type, _now)
                 if _is_rate_limit:
                     return "⚠️ Rate limited across all providers. Try again in a minute."
-                return f"⚠️ LLM unavailable (all providers failed). Try again later."
+
+                # Last resort: try local Ollama when all cloud providers fail
+                log.info("All cloud providers failed — trying local Ollama as last resort")
+                try:
+                    import httpx as _hx
+                    _ollama_sys = system
+                    if "qwen3" in OLLAMA_LLM_MODEL:
+                        _ollama_sys = system + "\n\n/no_think"
+                    async with _hx.AsyncClient(timeout=30.0) as _oc:
+                        _or = await _oc.post(
+                            f"{OLLAMA_URL}/api/chat",
+                            json={"model": OLLAMA_LLM_MODEL, "stream": False,
+                                  "messages": [{"role": "system", "content": _ollama_sys},
+                                               {"role": "user", "content": user_message}]},
+                        )
+                        _or.raise_for_status()
+                        _ollama_text = _or.json()["message"]["content"]
+                        if _ollama_text:
+                            log.info("Ollama last-resort fallback succeeded")
+                            try:
+                                from learning import record_signal
+                                record_signal("llm_fallback", {"provider": "ollama_last_resort"})
+                            except Exception:
+                                pass
+                            return _ollama_text
+                except Exception as _oe:
+                    log.warning("Ollama last-resort also failed: %s", _oe)
+
+                return f"⚠️ LLM unavailable (all providers failed, including local Ollama). Try again later."
 
     # Default: Ollama local LLM
     # #20: Circuit breaker — skip Ollama if circuit is open
