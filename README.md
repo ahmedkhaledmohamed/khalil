@@ -1,8 +1,10 @@
-# Khalil — Self-Healing Personal AI Assistant
+# Khalil — Autonomous AI Personal Agent
 
-A personal AI assistant that runs as a Telegram bot on macOS. Indexes your emails, Drive files, and documents into a local knowledge base, then answers questions, takes actions, and learns from interactions. When it fails, it fixes itself. When it can't do something, it builds the capability.
+A self-improving AI agent that runs on a laptop. Classifies intent, assembles context from a 46K-document knowledge base, executes with phase-aware control, and verifies results. When it fails, it fixes itself. When it can't do something, it builds the capability and opens a PR.
 
-Built with FastAPI, SQLite (with vector embeddings via sqlite-vec), and Ollama/Claude for reasoning.
+**Architecture**: Intent classification → context assembly → phase-aware execution → verification.
+**Models**: Claude Opus (primary) → Sonnet → GPT-5.2 → Gemini 2.5 Pro → Ollama (local fallback).
+**Scale**: 59 skills, 200+ actions, 910 tests, 24 behavioral contracts, 4-tier quality system.
 
 ## Quick Start
 
@@ -44,17 +46,22 @@ Channels (Telegram, Slack, Discord, WhatsApp)
        ▼
   server.py (FastAPI + python-telegram-bot)
        │
-       ├── skills.py             → Self-describing skill registry (auto-discovery)
+       ├── intent.py             → Heuristic intent classifier (TASK/QUESTION/CHAT/CONTINUATION)
+       ├── task_manager.py       → Persistent task state (active → blocked → completed → failed)
+       ├── context.py            → Intent-aware context assembly (skip KB for continuations)
+       ├── verification.py       → Centralized post-action verification + hallucination detection
+       │
+       ├── skills.py             → Self-describing skill registry (59 skills, auto-discovery)
        ├── autonomy.py           → Action classification & approval flow
        ├── orchestrator.py       → Multi-step task decomposition & execution
        ├── model_router.py       → Smart model selection (simple/medium/complex)
        │
-       ├── knowledge/            → Vector search over emails, Drive, docs
-       ├── actions/              → 37 action modules (Gmail, Shell, Calendar, Web, ...)
+       ├── knowledge/            → Vector search over 46K+ documents
+       ├── actions/              → 86 action modules (200+ action types)
        ├── channels/             → 4 bidirectional messaging channels
-       ├── scheduler/            → 15+ scheduled jobs (digests, sync, enrichment)
+       ├── scheduler/            → 20+ scheduled jobs (digests, sync, enrichment, health checks)
        ├── synthesis/            → Cross-domain awareness (capacity, risk detection)
-       ├── state/                → Real-time state providers (calendar, email)
+       ├── state/                → Real-time state providers (calendar, email, device)
        │
        ├── learning.py           → Self-improvement (signals, insights, preferences)
        ├── healing.py            → Self-healing (detect failures → generate patches → PR)
@@ -62,6 +69,36 @@ Channels (Telegram, Slack, Discord, WhatsApp)
        ├── agents/coordinator.py → Agent swarm for parallel sub-tasks
        └── mcp_server.py         → MCP protocol server for Claude Code
 ```
+
+### Agent Pipeline (April 2026)
+
+Every message goes through a 5-stage pipeline:
+
+```
+Message → CLASSIFY INTENT → ASSEMBLE CONTEXT → EXECUTE (phase-aware) → VERIFY → COMPLETE
+```
+
+1. **Intent Classification** (`intent.py`): Heuristic classifier (no LLM needed) determines TASK, QUESTION, CHAT, or CONTINUATION. Continuations skip KB search to prevent context drift.
+
+2. **Context Assembly** (`context.py`): Different context per intent type. TASK gets deep retrieval (KB search + full documents). CONTINUATION gets task state + 5 recent messages. CHAT gets conversation history only.
+
+3. **Phase-Aware Execution** (`_PhaseTracker` in `server.py`): For artifact tasks, enforces an escalation ladder:
+   - Iterations 0-3: free research
+   - Iteration 4: nudge ("call generate_file NOW")
+   - Iteration 5: restrict (remove search tools)
+   - Iteration 6+: force (tool_choice=generate_file)
+   - Exhaustion: programmatic fallback (construct generate_file call directly)
+
+4. **Verification** (`verification.py`): Hallucination detection, file creation verification, task completion tracking.
+
+5. **Task State** (`task_manager.py`): Persistent DB-backed task lifecycle (active → blocked → completed → failed). Tasks survive across messages, auto-reset after 3 failures.
+
+### Execution Resilience
+
+- **Isolated circuit breakers**: foreground (user requests, threshold=5) and background (summarization, threshold=2) are independent — background failures can't kill user requests
+- **Summarization gate**: background LLM calls suppressed during active tool-use loop
+- **Model cascade**: Claude Opus → Sonnet → GPT-5.2 → Gemini → Ollama, with per-model timeouts
+- **Separate connection pool** for generate_file (5-minute calls don't starve 15-second tool calls)
 
 ### Key Design Decisions
 
@@ -318,38 +355,52 @@ Compound requests are decomposed into parallel/sequential sub-tasks:
 - Parallel execution of independent steps
 - Agent swarm coordinator for complex queries (configurable concurrency)
 
-## Eval Suite
+## Quality System
 
-12 test files covering safety-critical paths:
+4-tier quality framework (910 tests, 24 behavioral contracts):
 
 ```bash
-pytest tests/ -v
+pytest tests/ -v                         # 910 tests across 15 files
+python3 eval/tool_use_eval.py            # 55 deterministic tool routing tests
+python3 eval/reasoning_eval.py           # 31 strategy/anti-pattern tests
 ```
 
-| Test File | Coverage |
-|-----------|----------|
-| `test_shell.py` | Shell command classification (safe/risky/blocked) |
-| `test_autonomy.py` | Autonomy levels, approval flow, hard guardrails |
-| `test_validation.py` | Code validation blocklists (imports, calls, structure) |
-| `test_gap_detection.py` | Capability gap detection (phrases, tags, edge cases) |
-| `test_intent.py` | Intent detection patterns (window count, battery, system queries) |
-| `test_complexity.py` | Simple vs. complex query classification |
-| `test_retry.py` | Error classification, escalation safety |
-| `test_signal_coverage.py` | Extension failure triggers, critical error threshold |
-| `test_healing.py` | Heal verification loop (recurrence detection) |
-| `test_extension_quality.py` | Semantic gate patterns, smoke test validation |
-| `test_improvements.py` | Integration tests across features |
-| `test_terminal.py` | Terminal and IDE control |
+### CI Gate (eval.yml)
+
+Every PR is gated on:
+- Syntax check (all Python files)
+- Critical module imports (intent, verification, task_manager, context, tool_catalog)
+- 77 unit + pipeline + behavioral contract tests
+- Tool-use eval (55 cases) + reasoning eval (31 cases)
+- Golden YAML validation (521 frozen cases, 58 categories)
+
+### Behavioral Contracts
+
+24 formalized invariants in `tests/test_behavioral_contracts.py`:
+
+| Contract | What it enforces |
+|----------|-----------------|
+| Artifact Research Cap | Nudge at 4 iterations, restrict at 5, force at 6 |
+| Intent Classification | build→TASK, greeting→CHAT, ?→QUESTION |
+| Circuit Breaker Isolation | Background failures don't trip foreground breaker |
+| Verification Layer | Hallucinated tool calls always detected |
+| Tool Catalog | generate_file and search_knowledge always in core tools |
+
+### Post-Restart Smoke Test
+
+Every restart verifies the pipeline is wired correctly (no LLM calls):
+- Intent classifier returns correct type
+- PhaseTracker escalation logic works
+- Core tools present in catalog
+- Hallucination detector functional
+- Circuit breakers properly isolated
 
 ### Eval Pipeline
 
-Separate evaluation framework for intent detection and action quality at scale:
-
 ```bash
-python3 eval/run.py              # full pipeline
-python3 eval/case_gen.py         # generate test cases (~10K)
-python3 eval/gap_analysis.py     # analyze failures
-python3 eval/autofix.py          # auto-fix cycle
+python3 eval/run.py              # full pipeline (2,938 frozen cases)
+python3 eval/metrics.py          # production metrics from live DB
+python3 eval/metrics.py --json   # compare against baseline thresholds
 ```
 
 ## Configuration
