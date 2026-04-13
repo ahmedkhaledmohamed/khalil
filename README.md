@@ -14,13 +14,26 @@ cd khalil
 make install
 ```
 
-The installer handles everything interactively: system deps (Homebrew, Ollama, Python), secrets, database, and LaunchAgent. Safe to re-run.
+The interactive installer walks you through 9 phases — all optional except the core (Telegram token + API key):
+
+1. System deps (Homebrew, Python, Ollama)
+2. Python environment (venv + 67 packages)
+3. Ollama models (embeddings required, local LLM optional)
+4. Core secrets (Telegram + Anthropic)
+5. **Data sources** (Google Workspace, Slack, Spotify, Notion, Home Assistant — all optional)
+6. Database (restore backup, import knowledge, or fresh start)
+7. **Knowledge base indexing** (indexes your emails, docs, repos — optional, 10-30 min)
+8. LaunchAgent (macOS daemon)
+9. Start + health check
+
+Safe to re-run — skips completed phases.
 
 ```bash
 make status    # Check health
 make logs      # Tail logs
 make restart   # Restart daemon
-make secrets   # Re-configure secrets
+make secrets   # Re-configure integrations
+make index     # Re-index knowledge base
 make test      # Run 910 tests
 ```
 
