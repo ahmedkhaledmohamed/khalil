@@ -1,0 +1,9 @@
+{
+    "name": "appstore_downloads_browser_navigate",
+    "command": "apphealth",
+    "description": "App health dashboard — download stats + App Store page screenshot",
+    "action_module": "actions.appstore_downloads_browser_navigate",
+    "handler_function": "handle_apphealth",
+    "generated_at": "2026-04-13T00:00:00",
+    "generated_for": "Actions 'appstore_downloads' and 'browser_navigate' used together 60x — integration opportunity"
+}
