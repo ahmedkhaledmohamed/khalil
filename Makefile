@@ -4,7 +4,7 @@
 #        make stop       (stop daemon)
 #        make status     (daemon status + health)
 
-.PHONY: install uninstall start stop restart status logs secrets health test
+.PHONY: install uninstall start stop restart status logs secrets health test index
 
 KHALIL_DIR := $(shell pwd)
 VENV := $(KHALIL_DIR)/.venv
@@ -55,6 +55,12 @@ health:
 
 test:
 	@$(PYTHON) -m pytest tests/ -v --tb=short
+
+index:
+	@echo "Indexing knowledge base (this may take 10-30 minutes)..."
+	@$(PYTHON) -c "import sys,asyncio;sys.path.insert(0,'.');from knowledge.indexer import init_db,index_all;init_db();asyncio.run(index_all(force=True))"
+	@echo "Done. Document count:"
+	@$(PYTHON) scripts/setup_utils.py db_doc_count
 
 uninstall:
 	@launchctl unload "$(PLIST_DEST)" 2>/dev/null || true

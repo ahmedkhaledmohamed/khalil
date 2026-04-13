@@ -23,7 +23,7 @@ ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 warn() { echo -e "  ${YELLOW}!${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; }
 skip() { echo -e "  ${DIM}-${NC} $1"; }
-header() { echo -e "\n${BOLD}[$1/8] $2${NC}"; }
+header() { echo -e "\n${BOLD}[$1/9] $2${NC}"; }
 
 # ── Paths ──
 KHALIL_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -91,6 +91,22 @@ prompt_yn() {
     read -rp "  ? $msg $prompt: " answer
     answer="${answer:-$default}"
     [[ "$answer" =~ ^[Yy] ]]
+}
+
+prompt_secret_optional() {
+    local key="$1" label="$2"
+    if $PYTHON "$SETUP_UTILS" check_secret "$key" 2>/dev/null; then
+        ok "$label (configured)"
+        return 0
+    fi
+    read -rsp "  $label (Enter to skip): " value
+    echo
+    if [[ -n "$value" ]]; then
+        $PYTHON "$SETUP_UTILS" set_secret "$key" "$value"
+        ok "$label — stored"
+    else
+        skip "$label"
+    fi
 }
 
 prompt_secret() {
@@ -243,46 +259,113 @@ if should_run 4 && ! phase_done "phase4"; then
     fi
 fi
 
-# ── Phase 5: Optional integrations ──
+# ── Phase 5: Integrations & Data Sources ──
 if should_run 5; then
-    header 5 "Optional integrations"
+    header 5 "Integrations & data sources"
 
-    # Google OAuth
-    creds_path="${PERSONAL_REPO}/scripts/credentials.json"
-    if [[ -f "$creds_path" ]]; then
-        ok "Google OAuth credentials.json found"
+    if [[ "$NON_INTERACTIVE" == "true" ]]; then
+        skip "Non-interactive mode — configure integrations later with: make secrets"
+        mark_done "phase5"
     else
-        skip "Google OAuth — credentials.json not found at $creds_path"
-        if [[ "$NON_INTERACTIVE" != "true" ]]; then
+        # ── Google Workspace ──
+        echo -e "\n  ${BOLD}Google Workspace${NC} ${DIM}(Gmail, Calendar, Drive, Contacts, Tasks)${NC}"
+        creds_path="${PERSONAL_REPO}/scripts/credentials.json"
+        if [[ -f "$creds_path" ]]; then
+            ok "credentials.json found"
+            if prompt_yn "Authenticate Google services now? (opens browser)" "y"; then
+                echo -e "  ${DIM}Running OAuth for each service...${NC}"
+                # Trigger auth for each scope — the Python code opens browser
+                for scope_label in \
+                    "gmail_read:Gmail (read)" \
+                    "calendar:Calendar" \
+                    "contacts:Contacts" \
+                    "tasks:Tasks" \
+                    "drive_write:Drive"; do
+                    scope="${scope_label%%:*}"
+                    label="${scope_label#*:}"
+                    if $PYTHON -c "
+import sys; sys.path.insert(0, '.')
+from oauth_utils import load_credentials
+try:
+    creds = load_credentials('$scope')
+    if creds: print('ok')
+    else: print('needs_auth')
+except: print('needs_auth')
+" 2>/dev/null | grep -q "ok"; then
+                        ok "$label (authenticated)"
+                    else
+                        echo -e "  ${DIM}  Authenticating $label...${NC}"
+                        $PYTHON -c "
+import sys; sys.path.insert(0, '.')
+from oauth_utils import load_credentials
+load_credentials('$scope')
+" 2>/dev/null && ok "$label — authenticated" || warn "$label — auth failed (will retry on first use)"
+                    fi
+                done
+            else
+                skip "Google OAuth — will authenticate on first use"
+            fi
+        else
+            skip "Google — credentials.json not at $creds_path"
             echo -e "  ${DIM}  Download from GCP Console > APIs & Services > Credentials${NC}"
         fi
-    fi
 
-    # Optional secrets — prompt only in interactive mode
-    if [[ "$NON_INTERACTIVE" != "true" ]]; then
-        echo
-        for key_label in \
-            "github-pat:GitHub Personal Access Token" \
-            "spotify-client-id:Spotify Client ID" \
-            "spotify-client-secret:Spotify Client Secret" \
-            "notion-api-key:Notion API Key" \
-            "readwise-api-token:Readwise API Token" \
-            "slack-token:Slack Bot Token (xoxb-...)"; do
-            key="${key_label%%:*}"
-            label="${key_label#*:}"
-            if $PYTHON "$SETUP_UTILS" check_secret "$key" 2>/dev/null; then
-                ok "$label (configured)"
+        # ── Developer Tools ──
+        echo -e "\n  ${BOLD}Developer Tools${NC}"
+        prompt_secret_optional "github-pat" "GitHub Personal Access Token"
+
+        # ── Communication ──
+        echo -e "\n  ${BOLD}Communication${NC}"
+        prompt_secret_optional "slack-token" "Slack Bot Token (xoxb-...)"
+
+        # ── Music & Media ──
+        echo -e "\n  ${BOLD}Music & Media${NC}"
+        prompt_secret_optional "spotify-client-id" "Spotify Client ID"
+        if $PYTHON "$SETUP_UTILS" check_secret "spotify-client-id" 2>/dev/null; then
+            prompt_secret_optional "spotify-client-secret" "Spotify Client Secret"
+        fi
+
+        # ── Knowledge & Notes ──
+        echo -e "\n  ${BOLD}Knowledge & Notes${NC}"
+        prompt_secret_optional "notion-api-key" "Notion API Key"
+        prompt_secret_optional "readwise-api-token" "Readwise API Token"
+        # Obsidian vault
+        if [[ -n "${KHALIL_OBSIDIAN_VAULT:-}" ]]; then
+            ok "Obsidian vault: $KHALIL_OBSIDIAN_VAULT"
+        else
+            read -rp "  Obsidian vault path (Enter to skip): " obsidian_path
+            if [[ -n "$obsidian_path" ]] && [[ -d "$obsidian_path" ]]; then
+                echo "export KHALIL_OBSIDIAN_VAULT=\"$obsidian_path\"" >> "${KHALIL_DIR}/data/.env.local"
+                ok "Obsidian vault: $obsidian_path (saved to data/.env.local)"
             else
-                read -rsp "  $label (Enter to skip): " value
-                echo
-                if [[ -n "$value" ]]; then
-                    $PYTHON "$SETUP_UTILS" set_secret "$key" "$value"
-                    ok "$label — stored"
-                else
-                    skip "$label"
-                fi
+                skip "Obsidian"
             fi
-        done
+        fi
+
+        # ── Home & Health ──
+        echo -e "\n  ${BOLD}Home & Health${NC}"
+        if [[ -n "${KHALIL_HA_URL:-}" ]]; then
+            ok "Home Assistant: $KHALIL_HA_URL"
+        else
+            read -rp "  Home Assistant URL (Enter to skip): " ha_url
+            if [[ -n "$ha_url" ]]; then
+                read -rsp "  Home Assistant Token: " ha_token
+                echo
+                if [[ -n "$ha_token" ]]; then
+                    echo "export KHALIL_HA_URL=\"$ha_url\"" >> "${KHALIL_DIR}/data/.env.local"
+                    echo "export KHALIL_HA_TOKEN=\"$ha_token\"" >> "${KHALIL_DIR}/data/.env.local"
+                    ok "Home Assistant configured (saved to data/.env.local)"
+                fi
+            else
+                skip "Home Assistant"
+            fi
+        fi
+        skip "Apple Health — auto-detected via Shortcuts (no config needed)"
+
+        # ── Cloud Services ──
+        echo -e "\n  ${BOLD}Cloud Services${NC}"
+        prompt_secret_optional "digitalocean-api-key" "DigitalOcean API Key"
+        prompt_secret_optional "replicate-api-token" "Replicate API Token (AI image generation)"
     fi
     mark_done "phase5"
 fi
@@ -355,9 +438,49 @@ if should_run 6 && ! phase_done "phase6"; then
     fi
 fi
 
-# ── Phase 7: LaunchAgent ──
+# ── Phase 7: Knowledge Base Indexing ──
 if should_run 7 && ! phase_done "phase7"; then
-    header 7 "LaunchAgent"
+    header 7 "Knowledge base"
+
+    doc_count=$($PYTHON "$SETUP_UTILS" db_doc_count 2>/dev/null || echo 0)
+    if [[ "$doc_count" -gt 1000 ]]; then
+        ok "Knowledge base has $doc_count documents — skipping indexing"
+        mark_done "phase7"
+    elif [[ "$NON_INTERACTIVE" == "true" ]]; then
+        skip "Non-interactive — run indexing manually later"
+        mark_done "phase7"
+    else
+        echo -e "  Your personal repo: ${BOLD}${PERSONAL_REPO}${NC}"
+        if [[ -d "${PERSONAL_REPO}" ]]; then
+            ok "Personal repo found"
+            # Count indexable files
+            file_count=$(find "${PERSONAL_REPO}" -name "*.md" -o -name "*.csv" 2>/dev/null | head -5000 | wc -l | tr -d ' ')
+            echo -e "  ${DIM}Found ~${file_count} indexable files (.md, .csv)${NC}"
+
+            if prompt_yn "Index knowledge base now? (may take 10-30 min with Ollama)" "y"; then
+                echo -e "  ${DIM}Indexing... (this runs in foreground — Ctrl+C to cancel)${NC}"
+                $PYTHON -c "
+import sys, asyncio; sys.path.insert(0, '.')
+from knowledge.indexer import init_db, index_all
+init_db()
+asyncio.run(index_all(force=True))
+" 2>&1 | tail -5
+                doc_count=$($PYTHON "$SETUP_UTILS" db_doc_count 2>/dev/null || echo 0)
+                ok "Indexed $doc_count documents"
+            else
+                skip "Indexing deferred — run later: make index"
+            fi
+        else
+            warn "Personal repo not found at $PERSONAL_REPO"
+            echo -e "  ${DIM}  Set KHALIL_PERSONAL_REPO env var to your document root${NC}"
+        fi
+        mark_done "phase7"
+    fi
+fi
+
+# ── Phase 8: LaunchAgent ──
+if should_run 8 && ! phase_done "phase8"; then
+    header 8 "LaunchAgent"
 
     if [[ -f "$PLIST_TEMPLATE" ]]; then
         generated="${KHALIL_DIR}/data/${PLIST_NAME}.generated"
@@ -378,15 +501,15 @@ if should_run 7 && ! phase_done "phase7"; then
             cp "$generated" "$PLIST_DEST"
             ok "LaunchAgent installed at ~/Library/LaunchAgents/"
         fi
-        mark_done "phase7"
+        mark_done "phase8"
     else
         warn "Plist template not found — skipping LaunchAgent setup"
     fi
 fi
 
-# ── Phase 8: Start and verify ──
-if should_run 8; then
-    header 8 "Start & verify"
+# ── Phase 9: Start and verify ──
+if should_run 9; then
+    header 9 "Start & verify"
 
     # Check port
     if lsof -i ":${PORT}" -sTCP:LISTEN &>/dev/null; then
