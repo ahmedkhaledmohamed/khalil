@@ -131,7 +131,9 @@ body {
     max-width: var(--container-width);
 }
 
-.section-nav a {
+.section-nav a,
+.section-nav a:link,
+.section-nav a:visited {
     color: var(--text-muted);
     text-decoration: none;
     font-size: 0.8125rem;
@@ -140,12 +142,14 @@ body {
     border-radius: 100px;
     border: 1px solid transparent;
     transition: all 0.2s;
+    font-family: var(--font-sans);
 }
 
 .section-nav a:hover {
     color: var(--text-primary);
     background: var(--bg-tertiary);
     border-color: var(--border);
+    text-decoration: none;
 }
 
 /* ─── Sections ─── */
