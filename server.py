@@ -1839,17 +1839,26 @@ async def _execute_tool_call(tool_call) -> str:
                             _resp.raise_for_status()
                             content = _resp.json()["message"]["content"]
                     elif _taskforce_client:
-                        resp = await _taskforce_client.chat.completions.create(
-                            model=_model, max_tokens=16000,
-                            messages=[{"role": "system", "content": gen_system},
-                                      {"role": "user", "content": gen_user}],
-                            timeout=_timeout, temperature=0.3,
+                        # Wrap with asyncio.wait_for to enforce timeout — the openai SDK
+                        # has built-in retries (max_retries=2) that would otherwise triple
+                        # the wait time before the cascade falls through to the next model.
+                        resp = await asyncio.wait_for(
+                            _taskforce_client.chat.completions.create(
+                                model=_model, max_tokens=16000,
+                                messages=[{"role": "system", "content": gen_system},
+                                          {"role": "user", "content": gen_user}],
+                                timeout=_timeout, temperature=0.3,
+                            ),
+                            timeout=_timeout,
                         )
                         content = resp.choices[0].message.content or ""
                     elif claude:
-                        resp = await claude.messages.create(
-                            model=_model, max_tokens=16000, system=gen_system,
-                            messages=[{"role": "user", "content": gen_user}],
+                        resp = await asyncio.wait_for(
+                            claude.messages.create(
+                                model=_model, max_tokens=16000, system=gen_system,
+                                messages=[{"role": "user", "content": gen_user}],
+                                timeout=_timeout,
+                            ),
                             timeout=_timeout,
                         )
                         content = resp.content[0].text
@@ -7379,6 +7388,7 @@ async def startup():
                 api_key=api_key,
                 base_url=CLAUDE_BASE_URL,
                 default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
+                max_retries=0,  # Disable SDK retries — we handle fallback via model cascade
             )
             log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via Taskforce {CLAUDE_BASE_URL}")
             # Initialize backup provider clients (OpenAI, Google) via Taskforce
