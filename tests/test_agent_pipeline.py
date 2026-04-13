@@ -404,3 +404,75 @@ class TestExecutionResilience:
         # Reset
         _cb_claude_fg._failures = 0
         _cb_claude_fg._opened_at = None
+
+
+class TestPhaseTracker:
+    """Test phase-aware execution for artifact tasks."""
+
+    def test_free_research_under_cap(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        tc, tools, prompt = p.get_config(0, [{"function": {"name": "search_knowledge"}}])
+        assert tc == "auto"
+        assert prompt is None
+
+    def test_nudge_after_4_consecutive_research(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        for _ in range(4):
+            p.record(["search_knowledge"])
+        tc, tools, prompt = p.get_config(4, [{"function": {"name": "search_knowledge"}}])
+        assert tc == "auto"
+        assert prompt is not None
+        assert "generate_file" in prompt.lower()
+
+    def test_restrict_after_5_consecutive(self):
+        from server import _PhaseTracker
+        base = [
+            {"function": {"name": "search_knowledge"}},
+            {"function": {"name": "generate_file"}},
+            {"function": {"name": "shell"}},
+        ]
+        p = _PhaseTracker(is_artifact=True)
+        for _ in range(5):
+            p.record(["search_knowledge"])
+        tc, tools, prompt = p.get_config(5, base)
+        tool_names = [t["function"]["name"] for t in tools]
+        assert "search_knowledge" not in tool_names
+        assert "generate_file" in tool_names
+
+    def test_force_after_6_consecutive(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        for _ in range(6):
+            p.record(["search_knowledge"])
+        tc, tools, prompt = p.get_config(6, [{"function": {"name": "generate_file"}}])
+        assert isinstance(tc, dict)
+        assert tc["function"]["name"] == "generate_file"
+
+    def test_no_restriction_for_non_artifact(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=False)
+        for _ in range(8):
+            p.record(["search_knowledge"])
+        tc, tools, prompt = p.get_config(5, [{"function": {"name": "search_knowledge"}}])
+        assert tc == "auto"
+        assert prompt is None
+
+    def test_no_interference_after_action(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        p.record(["search_knowledge"])
+        p.record(["generate_file"])
+        tc, tools, prompt = p.get_config(2, [{"function": {"name": "search_knowledge"}}])
+        assert tc == "auto"
+        assert prompt is None
+
+    def test_failure_allows_retry(self):
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        p.record(["generate_file"])
+        p.generate_file_failed = True
+        tc, tools, prompt = p.get_config(2, [{"function": {"name": "search_knowledge"}}])
+        assert tc == "auto"
+        assert prompt is None

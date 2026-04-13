@@ -1563,6 +1563,92 @@ class _ToolCaptureContext:
 _MAX_TOOL_ITERATIONS = 12  # raised from 8 — compound artifacts (presentations, multi-file) need ~10 calls
 _MAX_TOOL_AUTO_ITERATIONS = 10  # raised from 6 — 10 auto + 2 forced synthesis
 
+# Phase-aware execution: tool categories for research cap enforcement
+_RESEARCH_TOOLS = {"search_knowledge", "read_full_document", "web_search"}
+_ACTION_TOOLS = {"generate_file", "shell", "delegate_tasks", "spawn_watcher"}
+
+
+class _PhaseTracker:
+    """Track tool-use phases within a single call_llm_with_tools invocation.
+
+    For artifact tasks, enforces a research cap and escalates toward generate_file.
+    For non-artifact tasks, only provides logging — no restrictions.
+    """
+
+    def __init__(self, is_artifact: bool):
+        self.is_artifact = is_artifact
+        self.consecutive_research = 0
+        self.total_research = 0
+        self.has_called_action = False
+        self.generate_file_attempted = False
+        self.generate_file_failed = False
+
+    def record(self, tool_names: list[str]):
+        """Record tools used this iteration."""
+        if not tool_names:
+            return
+        has_research = any(t in _RESEARCH_TOOLS for t in tool_names)
+        has_action = any(t in _ACTION_TOOLS for t in tool_names)
+        if has_action:
+            self.has_called_action = True
+            self.consecutive_research = 0
+            if "generate_file" in tool_names:
+                self.generate_file_attempted = True
+        elif has_research:
+            self.consecutive_research += 1
+            self.total_research += 1
+
+    def get_config(self, iteration: int, base_tools: list[dict]) -> tuple:
+        """Return (tool_choice, tools, phase_prompt) for this iteration.
+
+        Escalation ladder (artifact tasks only):
+        Level 0: free research (consecutive < 4 and total < 6)
+        Level 1: nudge prompt (consecutive == 4 or total == 6)
+        Level 2: remove research tools (consecutive == 5 or total == 7)
+        Level 3: force generate_file via tool_choice
+        """
+        if iteration >= _MAX_TOOL_AUTO_ITERATIONS:
+            return "none", base_tools, None
+
+        # Non-artifact tasks: no phase restrictions
+        if not self.is_artifact:
+            return "auto", base_tools, None
+
+        # If already called an action tool, don't interfere
+        if self.has_called_action:
+            return "auto", base_tools, None
+
+        # Escalation is based on max(consecutive, total) to catch both patterns
+        _level = max(self.consecutive_research, self.total_research)
+
+        # Level 0: free research (< 4)
+        if _level < 4:
+            return "auto", base_tools, None
+
+        # Level 1: nudge (4-4)
+        if _level <= 4:
+            return "auto", base_tools, (
+                "You have gathered sufficient context. Call generate_file NOW "
+                "with the information you have. Do not search further."
+            )
+
+        # Level 2: restrict — remove research tools (5)
+        if _level <= 5:
+            restricted = [t for t in base_tools
+                          if t["function"]["name"] not in _RESEARCH_TOOLS]
+            return "auto", restricted, (
+                "Research tools are no longer available. "
+                "Call generate_file to create the requested artifact."
+            )
+
+        # Level 3: force generate_file (6+)
+        return (
+            {"type": "function", "function": {"name": "generate_file"}},
+            base_tools,
+            "You MUST call generate_file now.",
+        )
+
+
 # Preamble detection: catch LLM responses that announce intent instead of delivering results
 _PREAMBLE_RE = re.compile(
     r"^(now\s+)?(?:let\s+me\s+|i(?:'ll|\s+will)\s+(?:now\s+)?)"
@@ -2244,18 +2330,20 @@ async def call_llm_with_tools(
         return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
     # Tool-use loop
-    # Allow up to _MAX_TOOL_AUTO_ITERATIONS with tool_choice="auto",
-    # then force text response with "none" for remaining iterations.
+    # Phase-aware execution: tracks research vs action tools, escalates for artifact tasks.
     # Gate: suppress background summarization during active tool-use
+    from intent import is_artifact_request as _is_artifact_req
+    _is_artifact = _is_artifact_req(query)
+    _phase = _PhaseTracker(is_artifact=_is_artifact)
     _tool_loop_active.add(int(chat_id))
     _progress_steps = []
     try:  # try/finally to ensure _tool_loop_active cleanup
      for iteration in range(_MAX_TOOL_ITERATIONS):
-        _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
-
-        # Note: research-loop nudge removed — the autonomous agent identity
-        # teaches reasoning (UNDERSTAND → PLAN → EXECUTE → VERIFY) which covers this.
-        # The agent has generate_file for artifacts and should reason about when to stop searching.
+        # Phase-aware tool_choice and tool set
+        _tc, _iter_tools, _phase_prompt = _phase.get_config(iteration, tools)
+        if _phase_prompt:
+            messages.append({"role": "user", "content": _phase_prompt})
+            log.info("Phase[%d] escalation: %s", iteration, _phase_prompt[:80])
 
         # When switching to tool_choice="none", inject synthesis instruction
         # so the LLM knows to deliver results, not announce plans
@@ -2287,7 +2375,7 @@ async def call_llm_with_tools(
                     model=_routed_model,
                     max_tokens=4000,
                     messages=messages,
-                    tools=tools,
+                    tools=_iter_tools,
                     tool_choice=_tc,
                     timeout=_tool_timeout,
                     temperature=0.0,
@@ -2401,12 +2489,36 @@ async def call_llm_with_tools(
                     "content": result_text[:8000],
                 })
 
+            # Phase tracking: record which tools were used this iteration
+            _iter_tool_names = [tc.function.name for tc in msg.tool_calls]
+            _phase.record(_iter_tool_names)
+            # Detect generate_file failure
+            for tc in msg.tool_calls:
+                if tc.function.name == "generate_file":
+                    for m in reversed(messages):
+                        if isinstance(m, dict) and m.get("tool_call_id") == tc.id:
+                            if '"error"' in m.get("content", "")[:200]:
+                                _phase.generate_file_failed = True
+                            break
+            log.info("Phase[%d]: consec_research=%d, total_research=%d, has_action=%s, gen=%s",
+                     iteration, _phase.consecutive_research, _phase.total_research,
+                     _phase.has_called_action, _phase.generate_file_attempted)
+
             # Continue loop — LLM will reason about tool results
             continue
 
         # No tool calls — this is the final text response
         final_text = msg.content or ""
+        _phase.record([])
         log.info("Tool-use final response: %d chars", len(final_text))
+
+        # Preamble interception for artifact tasks — re-enter loop instead of exiting
+        if _is_artifact and iteration < 8 and _is_preamble_response(final_text):
+            log.warning("Preamble at iteration %d — re-entering loop for artifact task", iteration)
+            messages.append({"role": "assistant", "content": final_text})
+            messages.append({"role": "user", "content":
+                "That was a preamble. Call generate_file NOW. Do not describe — ACT."})
+            continue
 
         # Preamble detection: LLM announced intent instead of delivering results
         _has_tool_results = any(isinstance(m, dict) and m.get("role") == "tool" for m in messages)
@@ -2436,41 +2548,39 @@ async def call_llm_with_tools(
             except Exception as _pre_e:
                 log.error("Preamble synthesis retry failed: %s", _pre_e)
 
-        # If the user asked to BUILD something and we have search results but
-        # never called generate_file — the LLM chose text over action. Nudge once.
-        from intent import is_artifact_request as _is_artifact_req
-        if final_text and _has_tool_results and _is_artifact_req(query):
-            _used_generate = any(
-                isinstance(m, dict) and m.get("role") == "tool"
-                and "generate_file" in str(m.get("content", ""))[:100]
-                for m in messages
+        # Programmatic artifact fallback — if LLM never called generate_file despite
+        # having research results, construct the call directly (bypasses LLM refusal).
+        if _is_artifact and _phase.total_research >= 2 and not _phase.generate_file_attempted:
+            log.warning("Programmatic generate_file fallback — LLM never called generate_file")
+            _collected = "\n\n".join(
+                m["content"][:1000] for m in messages
+                if isinstance(m, dict) and m.get("role") == "tool"
             )
-            if not _used_generate:
-                log.info("Artifact request but generate_file not called — nudging")
-                messages.append({"role": "assistant", "content": final_text})
-                messages.append({
-                    "role": "user",
-                    "content": (
-                        "You gathered context but didn't create the file. "
-                        "Call generate_file NOW with the information you have."
-                    ),
-                })
-                try:
-                    _gen_resp = await _taskforce_client.chat.completions.create(
-                        model=_routed_model, max_tokens=4000, messages=messages,
-                        tools=tools, tool_choice="auto",
-                        timeout=CLAUDE_TIMEOUT, temperature=0.0,
-                    )
-                    _gen_choice = _gen_resp.choices[0]
-                    if _gen_choice.message.tool_calls:
-                        for _tc in _gen_choice.message.tool_calls:
-                            _gen_result = await _execute_tool_call(_tc)
-                            if "success" in _gen_result.lower()[:100]:
-                                final_text = _gen_result
-                                log.info("generate_file nudge succeeded")
-                                break
-                except Exception as _gen_e:
-                    log.warning("generate_file nudge failed: %s", _gen_e)
+            _artifact_path = _extract_artifact_path(query)
+            if not _artifact_path:
+                slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
+                _artifact_path = os.path.expanduser(
+                    f"~/Developer/Personal/presentations/{slug}/index.html"
+                )
+
+            class _SynthToolCall:
+                class function:
+                    name = "generate_file"
+                    arguments = json.dumps({
+                        "description": f"{query}\n\nContext gathered:\n{_collected[:3000]}",
+                        "target_path": _artifact_path,
+                    })
+                id = f"programmatic_fallback_{iteration}"
+
+            try:
+                _gen_result = await _execute_tool_call(_SynthToolCall())
+                if '"success"' in _gen_result[:200]:
+                    final_text = _gen_result
+                    log.info("Programmatic generate_file fallback succeeded")
+                else:
+                    log.warning("Programmatic fallback returned: %s", _gen_result[:200])
+            except Exception as _pf_e:
+                log.warning("Programmatic generate_file fallback failed: %s", _pf_e)
 
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
