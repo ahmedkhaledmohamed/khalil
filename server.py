@@ -2544,12 +2544,23 @@ async def call_llm_with_tools(
         except Exception:
             pass
 
-        # Track incomplete tasks for session continuity
+        # Task state tracking via TaskManager (replaces pending_task hack)
         _tool_names_used = [s.split(": ", 1)[-1] for s in _progress_steps]
-        if _has_tool_results and (not final_text or _is_preamble_response(final_text) or len(final_text) < 300):
-            _save_pending_task(chat_id, query, _tool_names_used)
-        else:
-            _clear_pending_task(chat_id)
+        try:
+            from task_manager import TaskManager
+            from verification import update_task_after_response
+            _tmgr = TaskManager()
+            _active = _tmgr.get_active_task(chat_id)
+            if _active:
+                _tool_results = [
+                    m["content"] for m in messages
+                    if isinstance(m, dict) and m.get("role") == "tool"
+                ]
+                update_task_after_response(
+                    _tmgr, _active, final_text, _tool_names_used, _tool_results,
+                )
+        except Exception as _te:
+            log.debug("Task state update failed: %s", _te)
 
         return final_text
 
@@ -6233,10 +6244,9 @@ async def handle_message_generic(ctx: MessageContext):
     _gap_tags = _gap_tag_re.findall(response)  # list of (name, command, description)
     display_response = _gap_tag_re.sub("", response).strip()
 
-    # Detect hallucinated tool calls in conversational mode — only when the LLM
-    # is pretending to invoke tools (line starts with the pattern, not just mentioning it)
-    _fake_tool_re = re.compile(r'^\s*\[(?:Called tool|tool_call)[:\s]', re.MULTILINE)
-    if _fake_tool_re.search(display_response):
+    # Detect hallucinated tool calls in conversational mode
+    from verification import detect_hallucinated_tools
+    if detect_hallucinated_tools(display_response):
         log.warning("Hallucinated tool invocation detected in generic handler — suppressing")
         display_response = (
             "\u26a0\ufe0f I wasn't able to execute this action. "

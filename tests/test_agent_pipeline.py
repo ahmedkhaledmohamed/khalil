@@ -248,3 +248,92 @@ class TestContextAssembly:
         result = _run(assemble_context(Intent.QUESTION, "What's running?", chat_id=123))
         mock_live.assert_called_once()
         assert "live state" in result
+
+
+class TestVerification:
+    """Test centralized verification layer."""
+
+    def test_detect_hallucinated_tool_call(self):
+        from verification import detect_hallucinated_tools
+        assert detect_hallucinated_tools("[Called tool: search_knowledge]\nresults...")
+        assert detect_hallucinated_tools("  [tool_call: generate_file]\n...")
+        assert not detect_hallucinated_tools("I searched for the information you asked about")
+        assert not detect_hallucinated_tools("The tool [Called tool: x] was mentioned in docs")
+
+    def test_is_preamble(self):
+        from verification import is_preamble_response
+        assert is_preamble_response("I'll search for that information now")
+        assert is_preamble_response("Let me check the knowledge base")
+        assert not is_preamble_response("Here are the results of my search: " + "x" * 500)
+        assert not is_preamble_response("")
+
+    def test_verify_file_creation(self, tmp_path):
+        from verification import verify_file_creation
+        # File doesn't exist
+        result = verify_file_creation(str(tmp_path / "missing.html"))
+        assert not result["success"]
+
+        # File too small
+        small = tmp_path / "small.html"
+        small.write_text("hi")
+        result = verify_file_creation(str(small))
+        assert not result["success"]
+
+        # Valid file
+        good = tmp_path / "index.html"
+        good.write_text("<html><body>" + "content " * 20 + "</body></html>")
+        result = verify_file_creation(str(good))
+        assert result["success"]
+        assert result["size"] > 50
+
+    def test_check_tool_results_completion(self):
+        from verification import check_tool_results_for_completion
+        assert not check_tool_results_for_completion([], [])
+        assert check_tool_results_for_completion(
+            ["search_knowledge"],
+            ['{"success": true, "results": ["data"]}'],
+        )
+        assert not check_tool_results_for_completion(
+            ["search_knowledge"],
+            ['{"error": true, "message": "not found"}'],
+        )
+
+    def test_update_task_after_artifact_success(self, tmp_path):
+        from task_manager import TaskManager
+        from verification import update_task_after_response
+        with patch("task_manager.DB_PATH", tmp_path / "test.db"):
+            mgr = TaskManager()
+            task = mgr.create_task("chat_1", "Build presentation", "artifact")
+
+            # Create a real file
+            artifact = tmp_path / "index.html"
+            artifact.write_text("<html>" + "x" * 100 + "</html>")
+
+            update_task_after_response(
+                mgr, task, "Created the file",
+                ["search_knowledge", "generate_file"],
+                [
+                    '{"results": ["data"]}',
+                    json.dumps({"success": True, "path": str(artifact)}),
+                ],
+            )
+            # Task should be completed
+            active = mgr.get_active_task("chat_1")
+            assert active is None  # No active task — it was completed
+
+    def test_update_task_after_failure(self, tmp_path):
+        from task_manager import TaskManager
+        from verification import update_task_after_response
+        with patch("task_manager.DB_PATH", tmp_path / "test.db"):
+            mgr = TaskManager()
+            task = mgr.create_task("chat_1", "Build something", "task")
+
+            update_task_after_response(
+                mgr, task, "",  # empty response
+                ["search_knowledge"],
+                ['{"error": true, "message": "timeout"}'],
+            )
+            # Task should still be active with incremented attempts
+            active = mgr.get_active_task("chat_1")
+            assert active is not None
+            assert active.attempts >= 1
