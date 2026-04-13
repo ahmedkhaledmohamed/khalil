@@ -312,7 +312,14 @@ class CircuitBreaker:
 _cb_gmail = CircuitBreaker("gmail")
 _cb_calendar = CircuitBreaker("calendar")
 _cb_ollama = CircuitBreaker("ollama", threshold=3, cooldown_seconds=60)
-_cb_claude = CircuitBreaker("claude", threshold=3, cooldown_seconds=60)
+# Separate foreground/background circuit breakers — background task failures
+# must not trip the user-facing breaker (see: April 13 failure chain).
+_cb_claude_fg = CircuitBreaker("claude_fg", threshold=5, cooldown_seconds=30)
+_cb_claude_bg = CircuitBreaker("claude_bg", threshold=2, cooldown_seconds=120)
+_cb_claude = _cb_claude_fg  # backward compat for any remaining references
+
+# Gate: suppress background summarization while tool-use loop is active
+_tool_loop_active: set[int] = set()
 
 # Error dedup — suppress identical errors within 60s window
 _last_llm_error: tuple[str, float] = ("", 0.0)
@@ -325,6 +332,7 @@ db_conn = None
 autonomy: AutonomyController = None
 claude: anthropic.AsyncAnthropic = None
 _taskforce_client = None  # OpenAI-compatible client for Taskforce proxy (Anthropic)
+_taskforce_client_long = None  # Separate pool for long-running generation (generate_file)
 _openai_client = None     # OpenAI-compatible client for Taskforce proxy (OpenAI)
 _google_client = None     # OpenAI-compatible client for Taskforce proxy (Google)
 telegram_app: Application | None = None
@@ -521,6 +529,10 @@ def save_message(chat_id: int, role: str, content: str,
 
 def _check_summarization_needed(chat_id: int):
     """Check if we have enough unsummarized messages to trigger a summary."""
+    # Defer summarization while tool-use loop is active for this chat —
+    # background LLM calls during tool-use waste API capacity and can trip circuit breakers.
+    if int(chat_id) in _tool_loop_active:
+        return
     try:
         # Find the last summarized message ID for this chat
         last_summary = db_conn.execute(
@@ -561,6 +573,7 @@ async def _run_summarization(chat_id: int, after_id: int):
             f"facts mentioned, user preferences expressed, and the current topic. Under 400 words.\n\n{conv_text}",
             "",
             system_extra="You are summarizing a conversation for future context. Be concise but complete.",
+            _background=True,
         )
         if not summary or summary.startswith("⚠️"):
             return
@@ -575,10 +588,11 @@ async def _run_summarization(chat_id: int, after_id: int):
         db_conn.commit()
         log.info("Summarized %d messages for chat %s (ids %s-%s)", len(rows), chat_id, msg_start, msg_end)
 
-        # Extract memories from the summary
+        # Extract memories from the summary (background — don't trip foreground CB)
         try:
             from learning import extract_memories
-            await extract_memories(chat_id, summary, ask_llm)
+            _bg_ask_llm = lambda q, c, **kw: ask_llm(q, c, **kw, _background=True)
+            await extract_memories(chat_id, summary, _bg_ask_llm)
         except Exception as e:
             log.warning("Memory extraction failed: %s", e)
 
@@ -1050,11 +1064,13 @@ def _get_cached_response(query: str) -> str | None:
     return None
 
 
-async def ask_llm(query: str, context: str, system_extra: str = "", model: str | None = None) -> str:
+async def ask_llm(query: str, context: str, system_extra: str = "", model: str | None = None,
+                  _background: bool = False) -> str:
     """Send query + context to LLM for reasoning. Supports Ollama (local) and Claude (cloud).
 
     Args:
         model: Explicit model override. If None, model_router selects based on query complexity.
+        _background: If True, use background circuit breaker (won't trip user-facing CB).
 
     Returns an error message (not raises) if the LLM is unreachable.
     """
@@ -1138,8 +1154,10 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
 
     if LLM_BACKEND == "claude" and (claude or _taskforce_client) and not _force_local:
         # Circuit breaker: skip Claude if it's been failing repeatedly
+        # Use background CB for background tasks so their failures don't kill user requests
+        _cb = _cb_claude_bg if _background else _cb_claude_fg
         global _last_llm_error
-        if _cb_claude.is_open():
+        if _cb.is_open():
             log.warning("Claude circuit breaker open — trying backup providers")
             _backup_msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
             for _bp_attr, _bp_model in _BACKUP_PROVIDERS:
@@ -1172,7 +1190,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                         messages=_msgs,
                         timeout=CLAUDE_TIMEOUT,
                     )
-                    _cb_claude.record_success()
+                    _cb.record_success()
                     return response.choices[0].message.content
                 else:
                     # Native Anthropic API
@@ -1183,10 +1201,10 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
                         messages=[{"role": "user", "content": user_message}],
                         timeout=CLAUDE_TIMEOUT,
                     )
-                    _cb_claude.record_success()
+                    _cb.record_success()
                     return response.content[0].text
             except Exception as e:
-                _cb_claude.record_failure()
+                _cb.record_failure()
                 _err_str = str(e).lower()
                 _is_rate_limit = "429" in _err_str or "rate" in _err_str or "overloaded" in _err_str
                 _is_timeout = "timeout" in _err_str
@@ -1406,7 +1424,7 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
     _force_local = any(_re.search(p, query, _re.IGNORECASE) for p in SENSITIVE_PATTERNS)
 
     if LLM_BACKEND == "claude" and (_taskforce_client or claude) and not _force_local:
-        if _cb_claude.is_open():
+        if _cb_claude_fg.is_open():
             # Circuit breaker open — fall back to non-streaming
             result = await ask_llm(query, context, system_extra, model)
             yield result
@@ -1425,7 +1443,7 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
                 text = response.choices[0].message.content if response.choices else ""
                 if text:
                     yield text
-                _cb_claude.record_success()
+                _cb_claude_fg.record_success()
             else:
                 # Native Anthropic: streaming
                 async with claude.messages.stream(
@@ -1436,9 +1454,9 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
                 ) as stream:
                     async for text in stream.text_stream:
                         yield text
-                _cb_claude.record_success()
+                _cb_claude_fg.record_success()
         except Exception as e:
-            _cb_claude.record_failure()
+            _cb_claude_fg.record_failure()
             _err_str = str(e).lower()
             _is_timeout = "timeout" in _err_str
             if _is_timeout:
@@ -1838,12 +1856,11 @@ async def _execute_tool_call(tool_call) -> str:
                             )
                             _resp.raise_for_status()
                             content = _resp.json()["message"]["content"]
-                    elif _taskforce_client:
-                        # Wrap with asyncio.wait_for to enforce timeout — the openai SDK
-                        # has built-in retries (max_retries=2) that would otherwise triple
-                        # the wait time before the cascade falls through to the next model.
+                    elif _taskforce_client_long or _taskforce_client:
+                        # Use separate long-running client to avoid holding main pool connections
+                        _gen_client = _taskforce_client_long or _taskforce_client
                         resp = await asyncio.wait_for(
-                            _taskforce_client.chat.completions.create(
+                            _gen_client.chat.completions.create(
                                 model=_model, max_tokens=16000,
                                 messages=[{"role": "system", "content": gen_system},
                                           {"role": "user", "content": gen_user}],
@@ -2229,8 +2246,11 @@ async def call_llm_with_tools(
     # Tool-use loop
     # Allow up to _MAX_TOOL_AUTO_ITERATIONS with tool_choice="auto",
     # then force text response with "none" for remaining iterations.
+    # Gate: suppress background summarization during active tool-use
+    _tool_loop_active.add(int(chat_id))
     _progress_steps = []
-    for iteration in range(_MAX_TOOL_ITERATIONS):
+    try:  # try/finally to ensure _tool_loop_active cleanup
+     for iteration in range(_MAX_TOOL_ITERATIONS):
         _tc = "auto" if iteration < _MAX_TOOL_AUTO_ITERATIONS else "none"
 
         # Note: research-loop nudge removed — the autonomous agent identity
@@ -2251,22 +2271,42 @@ async def call_llm_with_tools(
                 ),
             })
 
-        try:
-            response = await _taskforce_client.chat.completions.create(
-                model=_routed_model,
-                max_tokens=4000,  # increased from 1500 — LLM needs space for reasoning + tool calls
-                messages=messages,
-                tools=tools,
-                tool_choice=_tc,
-                timeout=CLAUDE_TIMEOUT,
-                temperature=0.0,  # #17: deterministic tool selection to reduce variance
-            )
-        except Exception as e:
-            log.error("Tool-use LLM call failed (iteration %d): %s", iteration, e)
-            if iteration == 0:
-                # First call failed — fall back to plain streaming
-                stream_gen = ask_llm_stream(query, context, system_extra)
-                return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+        # Circuit breaker check — don't waste iterations on a known-broken API
+        if _cb_claude_fg.is_open():
+            log.warning("Foreground circuit breaker open at iteration %d — falling back to streaming", iteration)
+            stream_gen = ask_llm_stream(query, context, system_extra)
+            return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+
+        # API call with 1 retry for transient errors (429, 503, overloaded)
+        response = None
+        for _tool_attempt in range(2):
+            try:
+                response = await _taskforce_client.chat.completions.create(
+                    model=_routed_model,
+                    max_tokens=4000,
+                    messages=messages,
+                    tools=tools,
+                    tool_choice=_tc,
+                    timeout=CLAUDE_TIMEOUT,
+                    temperature=0.0,
+                )
+                _cb_claude_fg.record_success()
+                break
+            except Exception as e:
+                _cb_claude_fg.record_failure()
+                _err_str = str(e).lower()
+                _is_transient = any(s in _err_str for s in ("429", "rate", "overloaded", "503"))
+                if _is_transient and _tool_attempt == 0:
+                    log.warning("Tool-use transient error (iteration %d), retrying in 2s: %s", iteration, e)
+                    await asyncio.sleep(2.0)
+                    continue
+                log.error("Tool-use LLM call failed (iteration %d, attempt %d): %s", iteration, _tool_attempt + 1, e)
+                if iteration == 0:
+                    stream_gen = ask_llm_stream(query, context, system_extra)
+                    return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+                response = None
+                break
+        if response is None:
             break
 
         choice = response.choices[0]
@@ -2512,16 +2552,16 @@ async def call_llm_with_tools(
 
         return final_text
 
-    # Exhausted iterations — try one final synthesis before giving up
-    log.warning("Tool-use loop exhausted %d iterations — attempting final synthesis", _MAX_TOOL_ITERATIONS)
-    messages.append({
+     # Exhausted iterations — try one final synthesis before giving up
+     log.warning("Tool-use loop exhausted %d iterations — attempting final synthesis", _MAX_TOOL_ITERATIONS)
+     messages.append({
         "role": "user",
         "content": (
             "You've used all available tool iterations. Based on everything gathered so far, "
             "please provide your best answer to the original question. Do not call any more tools."
         ),
-    })
-    try:
+     })
+     try:
         _final_resp = await _taskforce_client.chat.completions.create(
             model=_routed_model,
             max_tokens=4000,
@@ -2534,16 +2574,37 @@ async def call_llm_with_tools(
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
             return final_text
-    except Exception as e:
+     except Exception as e:
         log.error("Final synthesis after exhaustion failed: %s", e)
+        # Try backup providers with full tool-use context (Change 5)
+        for _bp_attr, _bp_model in _BACKUP_PROVIDERS:
+            _bp_client = globals().get(_bp_attr)
+            if not _bp_client:
+                continue
+            try:
+                _bp_resp = await _bp_client.chat.completions.create(
+                    model=_bp_model, max_tokens=4000,
+                    messages=messages, tool_choice="none", timeout=CLAUDE_TIMEOUT,
+                )
+                final_text = _bp_resp.choices[0].message.content or ""
+                if final_text:
+                    log.info("Exhaustion synthesis succeeded via backup %s", _bp_model)
+                    await _safe_edit(progress_msg, final_text[:4096])
+                    return final_text
+            except Exception:
+                continue
 
-    _step_summary = " → ".join(_progress_steps) if _progress_steps else "multiple steps"
-    _fallback = (
+     _step_summary = " → ".join(_progress_steps) if _progress_steps else "multiple steps"
+     _fallback = (
         f"I completed {_step_summary} but ran out of iterations before finishing. "
         "Could you try breaking this into smaller steps?"
-    )
-    await _safe_edit(progress_msg, _fallback)
-    return _fallback
+     )
+     await _safe_edit(progress_msg, _fallback)
+     return _fallback
+    finally:
+     # Release summarization gate — deferred summaries can now run
+     _tool_loop_active.discard(int(chat_id))
+     _check_summarization_needed(int(chat_id))
 
 
 async def _safe_edit(msg, text: str):
@@ -7380,15 +7441,24 @@ async def startup():
                 "  Or switch to Ollama: set LLM_BACKEND = 'ollama' in config.py"
             )
             return
-        global _taskforce_client
+        global _taskforce_client, _taskforce_client_long
         if CLAUDE_BASE_URL:
             # Taskforce proxy uses OpenAI-compatible API
             from openai import AsyncOpenAI
+            _headers = {CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {}
             _taskforce_client = AsyncOpenAI(
                 api_key=api_key,
                 base_url=CLAUDE_BASE_URL,
-                default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
-                max_retries=0,  # Disable SDK retries — we handle fallback via model cascade
+                default_headers=_headers,
+                max_retries=1,  # 1 SDK retry for connection-level failures; app-level retry handles 429
+            )
+            # Separate client for long-running generation (generate_file) —
+            # won't hold connections from the main pool during 5-minute calls
+            _taskforce_client_long = AsyncOpenAI(
+                api_key=api_key,
+                base_url=CLAUDE_BASE_URL,
+                default_headers=_headers,
+                max_retries=0,  # generate_file has its own model cascade
             )
             log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via Taskforce {CLAUDE_BASE_URL}")
             # Initialize backup provider clients (OpenAI, Google) via Taskforce
