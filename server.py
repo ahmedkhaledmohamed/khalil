@@ -5945,14 +5945,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     progress_msg = await channel.send_message(chat_id, "🔍 Thinking...")
 
     try:
-        # Build context from all sources — parallel gathering (P95 optimization)
+        # --- Intent Classification + Task State ---
+        from intent import classify_intent, Intent
+        from task_manager import TaskManager
+
+        _task_mgr = TaskManager()
+        _active_task = _task_mgr.get_active_task(chat_id)
+        _intent = classify_intent(query, has_active_task=(_active_task is not None))
+        log.info("Intent: %s | Active task: %s | Query: %s",
+                 _intent.value, _active_task.id if _active_task else "none", query[:60])
+
+        # Create task for TASK intents
+        if _intent == Intent.TASK and not _active_task:
+            from intent import is_artifact_request
+            _task_type = "artifact" if is_artifact_request(query) else "task"
+            _active_task = _task_mgr.create_task(chat_id, query, _task_type)
+
+        # Record attempt for continuations
+        if _intent == Intent.CONTINUATION and _active_task:
+            _task_mgr.record_attempt(_active_task.id)
+            # Check if task should be reset after repeated failures
+            if _task_mgr.should_reset(_active_task):
+                _task_mgr.reset_task(_active_task.id)
+                _active_task = _task_mgr.get_active_task(chat_id)
+
+        # --- Context Gathering (conditional on intent) ---
         _t_ctx_start = _time_mod.monotonic()
 
         async def _tg_search():
+            # Skip KB search for continuations and chat — prevents noise injection
+            if _intent in (Intent.CONTINUATION, Intent.CHAT):
+                log.info("Skipping KB search for %s intent", _intent.value)
+                return []
             try:
                 return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=15.0)
             except asyncio.TimeoutError:
-                log.warning("hybrid_search timed out after 10s for query: %s", query[:80])
+                log.warning("hybrid_search timed out after 15s for query: %s", query[:80])
                 return []
 
         async def _tg_live():
@@ -6023,38 +6051,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 + full_context
             )
 
-        # Agent state injection — give the LLM awareness of current situation
-        _agent_state_parts = []
-        try:
-            # Pending task
-            _pt_row = db_conn.execute(
-                "SELECT value FROM settings WHERE key = ?", (f"pending_task_{chat_id}",)
-            ).fetchone()
-            if _pt_row:
-                _pt = json.loads(_pt_row[0])
-                _agent_state_parts.append(f"Unfinished task: {_pt['query'][:200]}")
-
-            # Active reminders
-            _rems = db_conn.execute(
-                "SELECT text, due_at FROM reminders WHERE status = 'active' ORDER BY due_at LIMIT 3"
-            ).fetchall()
-            if _rems:
-                _agent_state_parts.append("Reminders: " + "; ".join(f"{r[0]} (due {r[1]})" for r in _rems))
-
-            # Recent successful tools (what's working)
-            _recent = db_conn.execute(
-                "SELECT tool_name, COUNT(*) as cnt FROM tool_analytics "
-                "WHERE success = 1 AND created_at > datetime('now', '-1 hour') "
-                "GROUP BY tool_name ORDER BY cnt DESC LIMIT 3"
-            ).fetchall()
-            if _recent:
-                _agent_state_parts.append("Working tools: " + ", ".join(f"{r[0]}" for r in _recent))
-        except Exception:
-            pass
-
-        if _agent_state_parts:
-            _state_block = "[Agent State]\n" + "\n".join(_agent_state_parts) + "\n\n"
-            full_context = _state_block + full_context
+        # Task context injection — give the LLM awareness of active task
+        if _active_task:
+            _task_context = _task_mgr.get_task_context_for_llm(_active_task)
+            full_context = _task_context + "\n\n" + full_context
 
         # Strategy tools (generate_file, delegate_tasks, spawn_watcher) are now available
         # in the tool-use loop — the LLM decides when to use them, no hardcoded bypass needed.
