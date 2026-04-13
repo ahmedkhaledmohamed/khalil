@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>I Built an AI Agent That Improves Itself — Khalil</title>
+    <meta name="description" content="668 commits. 273 PRs. 200+ actions. From a research loop that ran for 36 hours to a system that generates artifacts in 2 minutes. Here's the full story.">
+    <meta property="og:title" content="I Built an AI Agent That Improves Itself">
+    <meta property="og:description" content="668 commits in 29 days. An AI that classifies intent, manages task state, and fixes its own bugs.">
+    <meta property="og:image" content="blog-images/00-hero-chaos-to-structure.png">
+    <meta property="og:type" content="article">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a0f;
+            --bg2: #0e0e15;
+            --bg3: #12121a;
+            --bg-card: #161622;
+            --text: #e8e8f0;
+            --text2: #9d9db5;
+            --text3: #5f5f7a;
+            --accent: #8b5cf6;
+            --accent2: #a78bfa;
+            --green: #4ade80;
+            --red: #f87171;
+            --amber: #fbbf24;
+            --blue: #60a5fa;
+            --border: #1e1e2e;
+            --font: 'Outfit', -apple-system, sans-serif;
+            --mono: 'JetBrains Mono', monospace;
+        }
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+        html { scroll-behavior: smooth; }
+        body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.7; -webkit-font-smoothing: antialiased; }
+
+        /* ── Nav ── */
+        .nav { position: fixed; top: 0; left: 0; right: 0; z-index: 100; padding: 16px 0; background: rgba(10,10,15,0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+        .nav-inner { max-width: 800px; margin: 0 auto; padding: 0 24px; display: flex; justify-content: space-between; align-items: center; }
+        .nav a { color: var(--text2); text-decoration: none; font-size: 14px; font-weight: 500; transition: color 0.2s; }
+        .nav a:hover { color: var(--text); }
+        .logo { font-size: 18px; font-weight: 700; color: var(--text) !important; }
+        .logo span { color: var(--accent); }
+
+        /* ── Article ── */
+        article { max-width: 800px; margin: 0 auto; padding: 120px 24px 80px; }
+        .hero-img { width: 100%; border-radius: 16px; margin-bottom: 48px; border: 1px solid var(--border); }
+        h1 { font-size: clamp(32px, 5vw, 44px); font-weight: 800; line-height: 1.15; margin-bottom: 16px; letter-spacing: -0.5px; }
+        .subtitle { font-size: 18px; color: var(--text2); margin-bottom: 12px; font-weight: 400; }
+        .meta { font-size: 13px; color: var(--text3); margin-bottom: 48px; display: flex; gap: 16px; align-items: center; }
+        .meta-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text3); }
+        h2 { font-size: 26px; font-weight: 700; margin: 56px 0 20px; letter-spacing: -0.3px; }
+        h3 { font-size: 18px; font-weight: 600; margin: 32px 0 12px; color: var(--accent2); }
+        p { margin-bottom: 20px; color: var(--text2); font-size: 16.5px; }
+        strong { color: var(--text); font-weight: 600; }
+        em { color: var(--text); font-style: italic; }
+        a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent); }
+        a:hover { color: var(--accent2); }
+        blockquote { border-left: 3px solid var(--accent); padding: 12px 20px; margin: 24px 0; background: var(--bg2); border-radius: 0 8px 8px 0; }
+        blockquote p { color: var(--text); margin-bottom: 0; font-size: 15px; }
+        code { font-family: var(--mono); font-size: 14px; background: var(--bg3); padding: 2px 6px; border-radius: 4px; color: var(--green); }
+        pre { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin: 20px 0; overflow-x: auto; }
+        pre code { background: none; padding: 0; font-size: 13px; line-height: 1.6; color: var(--text2); }
+        hr { border: none; border-top: 1px solid var(--border); margin: 48px 0; }
+        ul, ol { margin: 0 0 20px 24px; color: var(--text2); }
+        li { margin-bottom: 8px; font-size: 16px; }
+
+        /* ── Stats Bar ── */
+        .stats-bar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 32px 0; }
+        .stat { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 16px; text-align: center; }
+        .stat-num { font-size: 28px; font-weight: 800; letter-spacing: -1px; }
+        .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; font-weight: 600; }
+        .s-purple .stat-num { color: var(--accent2); }
+        .s-green .stat-num { color: var(--green); }
+        .s-blue .stat-num { color: var(--blue); }
+        .s-amber .stat-num { color: var(--amber); }
+
+        /* ── Diagram containers ── */
+        .diagram { margin: 32px -24px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+        @media (min-width: 900px) { .diagram { margin: 32px -80px; } }
+
+        /* ── Before/After ── */
+        .ba { display: grid; grid-template-columns: 1fr 1fr; }
+        @media (max-width: 700px) { .ba { grid-template-columns: 1fr; } }
+        .ba-panel { padding: 28px; }
+        .ba-before { background: #110e0e; }
+        .ba-after { background: #0e110e; }
+        .ba-label { font-size: 10px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 4px; }
+        .ba-before .ba-label { color: var(--red); }
+        .ba-after .ba-label { color: var(--green); }
+        .ba-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 16px; }
+        .ba-step { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 10px; font-size: 13px; color: var(--text2); line-height: 1.4; }
+        .ba-icon { flex-shrink: 0; font-size: 14px; margin-top: 1px; }
+        .ba-bad { color: var(--red); }
+        .ba-good { color: var(--green); }
+        .ba-result { margin-top: 16px; padding: 12px; border-radius: 8px; text-align: center; font-weight: 700; }
+        .ba-before .ba-result { background: #1a0a0a; color: var(--red); border: 1px solid #2a1414; }
+        .ba-after .ba-result { background: #0a1a0e; color: var(--green); border: 1px solid #142a1e; }
+        .ba-result-big { font-size: 24px; font-weight: 800; }
+
+        /* ── Escalation Ladder ── */
+        .ladder { display: flex; flex-direction: column; gap: 0; padding: 28px; background: var(--bg3); }
+        .rung { display: flex; gap: 16px; align-items: stretch; }
+        .rung-bar { width: 4px; border-radius: 2px; flex-shrink: 0; }
+        .rung-body { flex: 1; padding: 14px 0; border-bottom: 1px solid var(--border); }
+        .rung:last-child .rung-body { border-bottom: none; }
+        .rung-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+        .rung-name { font-size: 15px; font-weight: 700; }
+        .rung-iter { font-size: 11px; font-family: var(--mono); color: var(--text3); }
+        .rung-desc { font-size: 13px; color: var(--text2); }
+        .r0 .rung-bar { background: var(--green); } .r0 .rung-name { color: var(--green); }
+        .r1 .rung-bar { background: var(--amber); } .r1 .rung-name { color: var(--amber); }
+        .r2 .rung-bar { background: #fb923c; } .r2 .rung-name { color: #fb923c; }
+        .r3 .rung-bar { background: var(--red); } .r3 .rung-name { color: var(--red); }
+        .r4 .rung-bar { background: var(--accent); } .r4 .rung-name { color: var(--accent2); }
+
+        /* ── Pipeline ── */
+        .pipeline { display: flex; gap: 4px; padding: 28px; background: var(--bg3); overflow-x: auto; }
+        .pipe-stage { flex: 1; min-width: 120px; text-align: center; padding: 16px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--bg); }
+        .pipe-num { font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; }
+        .pipe-name { font-size: 15px; font-weight: 700; margin: 4px 0; }
+        .pipe-desc { font-size: 11px; color: var(--text3); line-height: 1.4; }
+        .pipe-arrow { display: flex; align-items: center; color: var(--text3); font-size: 16px; flex-shrink: 0; }
+        .p1 .pipe-name { color: var(--accent2); }
+        .p2 .pipe-name { color: var(--blue); }
+        .p3 .pipe-name { color: #a3e635; }
+        .p4 .pipe-name { color: var(--amber); }
+        .p5 .pipe-name { color: var(--green); }
+
+        /* ── Lessons ── */
+        .lesson { background: var(--bg3); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin: 16px 0; }
+        .lesson-num { font-size: 11px; font-weight: 700; color: var(--accent); letter-spacing: 1px; margin-bottom: 4px; }
+        .lesson-title { font-size: 16px; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+        .lesson-body { font-size: 14px; color: var(--text2); margin: 0; }
+
+        /* ── Footer ── */
+        .footer { text-align: center; padding: 48px 24px; border-top: 1px solid var(--border); margin-top: 64px; }
+        .footer p { color: var(--text3); font-size: 14px; }
+        .footer a { color: var(--accent); border-bottom: 1px solid transparent; }
+        .footer a:hover { border-bottom-color: var(--accent); }
+
+        @media (max-width: 600px) {
+            .stats-bar { grid-template-columns: repeat(2, 1fr); }
+            .pipeline { flex-direction: column; }
+            .pipe-arrow { justify-content: center; transform: rotate(90deg); }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="nav">
+    <div class="nav-inner">
+        <a href="index.html" class="logo">khalil<span>.</span></a>
+        <div style="display:flex;gap:20px;">
+            <a href="index.html">Home</a>
+            <a href="architecture.html">Architecture</a>
+            <a href="dashboard.html">Dashboard</a>
+        </div>
+    </div>
+</nav>
+
+<article>
+    <img src="blog-images/00-hero-chaos-to-structure.png" alt="From chaos to structure — the Khalil journey" class="hero-img">
+
+    <h1>I Built an AI Agent That Improves Itself. Here's What I Learned in 29 Days.</h1>
+    <p class="subtitle">668 commits. 273 PRs. 200+ actions. One laptop.</p>
+    <div class="meta">
+        <span>Ahmed Khaled Mohamed</span>
+        <span class="meta-dot"></span>
+        <span>April 2026</span>
+        <span class="meta-dot"></span>
+        <span>12 min read</span>
+    </div>
+
+    <div class="stats-bar">
+        <div class="stat s-purple"><div class="stat-num">668</div><div class="stat-label">Commits</div></div>
+        <div class="stat s-green"><div class="stat-num">273</div><div class="stat-label">PRs Merged</div></div>
+        <div class="stat s-blue"><div class="stat-num">200+</div><div class="stat-label">Actions</div></div>
+        <div class="stat s-amber"><div class="stat-num">910</div><div class="stat-label">Tests</div></div>
+    </div>
+
+    <h2>The idea</h2>
+    <p>I wanted a personal AI assistant — not a chatbot, not a wrapper around an API, but something that actually <em>does things</em>. Reads my email. Checks my calendar. Controls my IDE. Generates files. And when it can't do something, it figures out how to build the capability itself.</p>
+    <p>I called it Khalil.</p>
+
+    <h2>Day 1: March 15, 2026</h2>
+    <p>First commit at 7:14 PM. By 8:40 PM — 86 minutes later — Khalil opened its first self-generated PR. It detected that it couldn't read Slack, wrote a Slack integration module, tested it, and submitted the code for review. I merged it.</p>
+    <p>By midnight, 8 PRs were merged. Five of them were written by Khalil.</p>
+    <p>That was the moment I knew this wasn't going to be a weekend project.</p>
+
+    <h2>The architecture (how it started)</h2>
+    <p>The initial design was simple: a Telegram bot backed by a FastAPI server. You send a message, the LLM picks a tool, the tool runs, you get a response.</p>
+    <pre><code>Message → LLM → Pick tool → Execute → Response</code></pre>
+    <p>It worked for simple things. "What's the weather?" "Set a reminder for 3pm." "How many unread emails do I have?"</p>
+    <p>But the moment I asked for anything multi-step — "Build me a presentation about my work planning" — the whole thing fell apart.</p>
+
+    <h2>The 36-hour failure</h2>
+    <p>I asked Khalil to build an HTML presentation about my team's Fall 2026 planning work. It had all the information in its knowledge base (46,000 indexed documents from my emails, Drive, repos, and notes).</p>
+    <p>What happened: Khalil searched the knowledge base. Found relevant documents. Then searched again. And again. And again. For <strong>36 hours</strong>. Zero files created.</p>
+    <p>The LLM kept researching because research is safe. Generating a file is risky — what if it's bad? So it defaulted to what felt productive: gathering more context. Forever.</p>
+    <p>This was the turning point. I realized the problem wasn't the LLM, the tools, or the knowledge base. <strong>The problem was the architecture.</strong> There was no structure telling the system <em>when to stop thinking and start acting</em>.</p>
+
+    <!-- BEFORE/AFTER DIAGRAM -->
+    <div class="diagram">
+        <div class="ba">
+            <div class="ba-panel ba-before">
+                <div class="ba-label">Before</div>
+                <div class="ba-title">Flat Tool-Routing Loop</div>
+                <div class="ba-step"><span class="ba-icon">💬</span><span>Message arrives</span></div>
+                <div class="ba-step"><span class="ba-icon">🤖</span><span>LLM picks a tool (same tools, same prompt, every iteration)</span></div>
+                <div class="ba-step ba-bad"><span class="ba-icon">🔍</span><span>search_knowledge (again) — 10 consecutive searches</span></div>
+                <div class="ba-step ba-bad"><span class="ba-icon">🔍</span><span>search_knowledge (again) — research is safe, generation is risky</span></div>
+                <div class="ba-step ba-bad"><span class="ba-icon">⏰</span><span>Iterations exhausted — 12 iterations burned on research</span></div>
+                <div class="ba-step ba-bad"><span class="ba-icon">💬</span><span>"I'll create the presentation..." — preamble, no file</span></div>
+                <div class="ba-result"><div class="ba-result-big">36 hours</div>0 files created</div>
+            </div>
+            <div class="ba-panel ba-after">
+                <div class="ba-label">After</div>
+                <div class="ba-title">Phase-Aware Execution</div>
+                <div class="ba-step"><span class="ba-icon">🏷️</span><span>Classify intent — TASK detected, artifact pipeline</span></div>
+                <div class="ba-step"><span class="ba-icon">📚</span><span>Assemble context — KB search + full document retrieval</span></div>
+                <div class="ba-step ba-good"><span class="ba-icon">🔍</span><span>Research (capped at 4) — PhaseTracker monitors usage</span></div>
+                <div class="ba-step ba-good"><span class="ba-icon">⚡</span><span>Escalate → Force generate_file (nudge → restrict → force)</span></div>
+                <div class="ba-step ba-good"><span class="ba-icon">📄</span><span>Artifact created — 704 lines, 25K chars, verified on disk</span></div>
+                <div class="ba-step"><span class="ba-icon">✅</span><span>Verify & complete task — file exists, task state updated</span></div>
+                <div class="ba-result"><div class="ba-result-big">2 minutes</div>704-line presentation, first attempt</div>
+            </div>
+        </div>
+    </div>
+
+    <h2>The redesign: thinking in phases</h2>
+    <p>I threw out the flat tool-routing loop and redesigned around phases.</p>
+
+    <h3>Phase 1: What are you asking?</h3>
+    <p>Before doing anything, classify the intent. "Yes" is not the same as "Build me a presentation." A heuristic classifier (no LLM needed — pure regex and pattern matching) categorizes every message:</p>
+    <ul>
+        <li><strong>TASK</strong>: "Build me a presentation" → full pipeline</li>
+        <li><strong>QUESTION</strong>: "What's the weather?" → search + answer</li>
+        <li><strong>CONTINUATION</strong>: "Yes", "Sounds good" → inherit active task</li>
+        <li><strong>CHAT</strong>: "Hello", "Thanks" → conversational only</li>
+    </ul>
+    <p>This alone fixed a bizarre bug where saying "Yes" to continue a task would trigger a knowledge base search on the word "Yes" and return random documents about rate limiting algorithms.</p>
+
+    <h3>Phase 2: What context do you need?</h3>
+    <p>Different intents need different context. A continuation doesn't need a fresh KB search — it needs the task state from the previous message. A new task needs deep retrieval. Chat needs nothing but conversation history.</p>
+
+    <h3>Phase 3: Execute with guardrails</h3>
+    <p>This is where the real innovation happened. I added a <code>PhaseTracker</code> that monitors tool usage during execution and enforces escalating discipline:</p>
+
+    <!-- ESCALATION LADDER -->
+    <div class="diagram">
+        <div class="ladder">
+            <div class="rung r0">
+                <div class="rung-bar"></div>
+                <div class="rung-body">
+                    <div class="rung-header"><span class="rung-name">Free Research</span><span class="rung-iter">iter 0-3</span></div>
+                    <div class="rung-desc">All tools available. Search, read documents, explore. No restrictions.</div>
+                </div>
+            </div>
+            <div class="rung r1">
+                <div class="rung-bar"></div>
+                <div class="rung-body">
+                    <div class="rung-header"><span class="rung-name">Nudge</span><span class="rung-iter">iter 4</span></div>
+                    <div class="rung-desc">Prompt injected: "You have enough context. Call generate_file NOW."</div>
+                </div>
+            </div>
+            <div class="rung r2">
+                <div class="rung-bar"></div>
+                <div class="rung-body">
+                    <div class="rung-header"><span class="rung-name">Restrict</span><span class="rung-iter">iter 5</span></div>
+                    <div class="rung-desc">Search tools physically removed from the tool list. Only action tools remain.</div>
+                </div>
+            </div>
+            <div class="rung r3">
+                <div class="rung-bar"></div>
+                <div class="rung-body">
+                    <div class="rung-header"><span class="rung-name">Force</span><span class="rung-iter">iter 6+</span></div>
+                    <div class="rung-desc">tool_choice locked to generate_file. The LLM cannot call any other tool.</div>
+                </div>
+            </div>
+            <div class="rung r4">
+                <div class="rung-bar"></div>
+                <div class="rung-body">
+                    <div class="rung-header"><span class="rung-name">Programmatic Fallback</span><span class="rung-iter">exhaustion</span></div>
+                    <div class="rung-desc">LLM bypassed entirely. System constructs the generate_file call from gathered tool results.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <p>The escalation ladder means the LLM gets progressively less freedom to procrastinate. At level 3, it literally cannot search anymore — the only tool available is the one that creates the file. And if it <em>still</em> refuses, the system bypasses the LLM entirely and constructs the API call from the gathered context.</p>
+
+    <h3>Phase 4: Verify and complete</h3>
+    <p>After every action, check that it actually worked. If <code>generate_file</code> reports success, verify the file exists on disk and has content. Track task state persistently — tasks survive across messages, auto-reset after 3 failures.</p>
+
+    <!-- PIPELINE DIAGRAM -->
+    <div class="diagram">
+        <div class="pipeline">
+            <div class="pipe-stage p1"><div class="pipe-num">Stage 1</div><div class="pipe-name">Classify</div><div class="pipe-desc">Heuristic intent. No LLM call.</div></div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-stage p2"><div class="pipe-num">Stage 2</div><div class="pipe-name">Context</div><div class="pipe-desc">Intent-aware retrieval.</div></div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-stage p3"><div class="pipe-num">Stage 3</div><div class="pipe-name">Execute</div><div class="pipe-desc">Phase-aware tool loop.</div></div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-stage p4"><div class="pipe-num">Stage 4</div><div class="pipe-name">Verify</div><div class="pipe-desc">Hallucination + file checks.</div></div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-stage p5"><div class="pipe-num">Stage 5</div><div class="pipe-name">Complete</div><div class="pipe-desc">Task state + metrics.</div></div>
+        </div>
+    </div>
+
+    <h2>The infrastructure problem nobody talks about</h2>
+    <p>Even with the right architecture, Khalil kept failing. The phase transition would fire correctly at iteration 4, but the API call would time out. Every time.</p>
+    <p>After deep investigation, I found the real killer: <strong>background tasks were sabotaging user requests.</strong></p>
+    <p>Every time Khalil saved a message to the database, it triggered a background summarization job. That job made its own LLM API call. Between tool-use iterations, 2-3 background summarizers would fire, each making API calls through the same client. When they timed out, they tripped a circuit breaker — which then blocked the user's tool-use loop.</p>
+    <p>The user's request would fail not because anything was wrong with their request, but because a background housekeeping task used up the API's patience.</p>
+    <p>The fix: <strong>failure domain isolation.</strong></p>
+    <ul>
+        <li>Separate circuit breakers for foreground (user requests, threshold=5) and background (summarization, threshold=2)</li>
+        <li>Suppress background LLM calls entirely during active tool-use loops</li>
+        <li>Separate connection pool for long-running file generation</li>
+        <li>Automatic retry for transient errors with escalating timeouts</li>
+    </ul>
+    <p>This is infrastructure work that no demo or tutorial ever shows you. But without it, nothing works reliably.</p>
+
+    <h2>The moment it worked</h2>
+    <p>After the architecture redesign, the execution hardening, and the phase-aware execution — I asked again:</p>
+    <blockquote><p>Build me an HTML presentation about Fall 2026 messaging platform planning.</p></blockquote>
+    <p>Khalil called <code>generate_file</code> on <strong>iteration 0</strong>. No research loop. No preamble. Straight to action.</p>
+    <p>Two minutes later: a 704-line, 25,764-character HTML presentation. Opus model, first attempt.</p>
+    <p>It had taken 5 failed attempts over 2 days to get here. But the system didn't just work once — it worked <em>structurally</em>. The architecture prevents the failure modes, not just patches them.</p>
+
+    <h2>Building the safety net</h2>
+    <p>Working software is great. Software that <em>stays</em> working is better. I built a 4-tier quality system:</p>
+    <ul>
+        <li><strong>CI gates:</strong> Every PR runs 77 tests including 24 behavioral contracts — formalized invariants like "the research cap must be 4 iterations" and "background circuit breaker failures must not trip the foreground breaker."</li>
+        <li><strong>Post-restart smoke test:</strong> Every time Khalil restarts, it verifies the pipeline is wired correctly. Intent classifier works? PhaseTracker loads? Core tools present? All checked in under 1 second.</li>
+        <li><strong>Metric baselines:</strong> Frozen thresholds for tool success rate (&gt;80%), latency P95 (&lt;60s), and error cascade rate (&lt;10%).</li>
+        <li><strong>Behavioral contracts:</strong> 24 tests that encode invariants, not implementation details. You can refactor the PhaseTracker however you want — the contract still holds.</li>
+    </ul>
+
+    <h2>What Khalil can do today</h2>
+    <p><strong>59 skills, 200+ actions</strong> across Google Workspace, Apple ecosystem (Health, Music, Notes, Reminders, HomeKit), developer tools (GitHub, terminal, Cursor IDE, Claude Code), communication (Telegram, Slack, Discord, WhatsApp), productivity (Pomodoro, expense tracking, fasting, fitness), knowledge (Anki, Obsidian, Bear Notes, Readwise), and home automation.</p>
+    <p>The self-improvement loop runs 4x daily: detect capability gaps from conversation signals, generate new action modules, self-heal recurring failures, and open PRs against its own codebase.</p>
+    <p>Model cascade: Claude Opus → Sonnet → GPT-5.2 → Gemini 2.5 Pro → Ollama (local fallback). All running on a MacBook, managed by launchd, with a 150MB SQLite database.</p>
+
+    <hr>
+
+    <h2>What I actually learned</h2>
+
+    <div class="lesson">
+        <div class="lesson-num">01</div>
+        <div class="lesson-title">Architecture > patches</div>
+        <p class="lesson-body">I spent 3 days adding patches to a flat tool-routing loop. Each patch introduced new edge cases. The architectural redesign (intent classification + phase-aware execution) solved 7 failure modes at once.</p>
+    </div>
+    <div class="lesson">
+        <div class="lesson-num">02</div>
+        <div class="lesson-title">Background tasks are invisible killers</div>
+        <p class="lesson-body">The hardest bug to find was background summarization tripping a circuit breaker that killed user requests. The fix (failure domain isolation) is infrastructure work that's unglamorous but essential.</p>
+    </div>
+    <div class="lesson">
+        <div class="lesson-num">03</div>
+        <div class="lesson-title">LLMs need structure, not freedom</div>
+        <p class="lesson-body">Given unlimited tool iterations, the LLM will research forever. The escalation ladder (nudge → restrict → force → programmatic) is the key insight: progressively remove the LLM's ability to procrastinate.</p>
+    </div>
+    <div class="lesson">
+        <div class="lesson-num">04</div>
+        <div class="lesson-title">Behavioral contracts > unit tests</div>
+        <p class="lesson-body">Unit tests verify implementation. Contracts verify invariants. When you refactor, unit tests break (by design). Contracts survive — they test what must be true, not how it's implemented.</p>
+    </div>
+    <div class="lesson">
+        <div class="lesson-num">05</div>
+        <div class="lesson-title">Self-improvement is real, but fragile</div>
+        <p class="lesson-body">Khalil generated 30+ capabilities autonomously. But the evolution engine needs guardrails — CI gates, eval suites, sandbox execution. Without them, self-improvement becomes self-destruction.</p>
+    </div>
+    <div class="lesson">
+        <div class="lesson-num">06</div>
+        <div class="lesson-title">The demo is the easy part</div>
+        <p class="lesson-body">Getting "Build me a presentation" to work once is a weekend project. Getting it to work reliably — across API outages, timeout cascades, LLM behavioral quirks — took 2 weeks of architectural work.</p>
+    </div>
+
+    <hr>
+
+    <p style="text-align:center; color: var(--text3); font-size: 14px; margin-top: 40px;">
+        Khalil is open source at <a href="https://github.com/ahmedkhaledmohamed/khalil">github.com/ahmedkhaledmohamed/khalil</a><br>
+        Built by <a href="https://ahmedkhaledmohamed.github.io/me/">Ahmed Khaled Mohamed</a>
+    </p>
+</article>
+
+</body>
+</html>
