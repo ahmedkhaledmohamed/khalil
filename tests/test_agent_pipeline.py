@@ -1,10 +1,11 @@
-"""Tests for the agent pipeline: intent classification + task state management."""
+"""Tests for the agent pipeline: intent classification + task state + context assembly."""
 
+import asyncio
 import json
 import os
 import sqlite3
 import sys
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -117,3 +118,133 @@ class TestTaskManager:
             assert "Build FL26 deck" in ctx
             assert "search_knowledge" in ctx
             assert "generate_file" in ctx
+
+
+def _run(coro):
+    """Run async test in sync context."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+class TestContextAssembly:
+    """Test intent-aware context assembly rules."""
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="")
+    def test_continuation_skips_kb_search(self, mock_ctx, mock_plans, mock_summary,
+                                          mock_msgs, mock_proactive, mock_live,
+                                          mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        _run(assemble_context(Intent.CONTINUATION, "Yes", chat_id=123))
+        mock_kb.assert_not_called()
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="")
+    def test_chat_skips_kb_search(self, mock_ctx, mock_plans, mock_summary,
+                                   mock_msgs, mock_proactive, mock_live,
+                                   mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        _run(assemble_context(Intent.CHAT, "Hello", chat_id=123))
+        mock_kb.assert_not_called()
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[{"title": "test", "content": "data"}])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="personal info")
+    def test_question_uses_kb_search(self, mock_ctx, mock_plans, mock_summary,
+                                      mock_msgs, mock_proactive, mock_live,
+                                      mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        result = _run(assemble_context(Intent.QUESTION, "What's the weather?", chat_id=123))
+        mock_kb.assert_called_once()
+        assert "knowledge base search" in result
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[{"title": "FL26", "content": "data", "category": "work:planning"}])
+    @patch("context._auto_read_full_documents", new_callable=AsyncMock, return_value="[Full Document: work:planning]\nFull content here")
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="personal info")
+    def test_task_uses_deep_retrieval(self, mock_ctx, mock_plans, mock_summary,
+                                       mock_msgs, mock_proactive, mock_live,
+                                       mock_memories, mock_full_docs, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        result = _run(assemble_context(Intent.TASK, "Build FL26 presentation", chat_id=123))
+        mock_kb.assert_called_once()
+        mock_full_docs.assert_called_once()
+        assert "Full Document" in result
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="recent msgs")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="")
+    def test_continuation_limits_history(self, mock_ctx, mock_plans, mock_summary,
+                                          mock_msgs, mock_proactive, mock_live,
+                                          mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        _run(assemble_context(Intent.CONTINUATION, "Yes", chat_id=123))
+        mock_msgs.assert_called_once_with(123, limit=10)
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="")
+    def test_continuation_skips_live_state(self, mock_ctx, mock_plans, mock_summary,
+                                            mock_msgs, mock_proactive, mock_live,
+                                            mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        _run(assemble_context(Intent.CONTINUATION, "Yes", chat_id=123))
+        mock_live.assert_not_called()
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="live data")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="personal info")
+    def test_question_includes_live_state(self, mock_ctx, mock_plans, mock_summary,
+                                           mock_msgs, mock_proactive, mock_live,
+                                           mock_memories, mock_kb):
+        from context import assemble_context
+        from intent import Intent
+        result = _run(assemble_context(Intent.QUESTION, "What's running?", chat_id=123))
+        mock_live.assert_called_once()
+        assert "live state" in result
