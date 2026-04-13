@@ -2706,6 +2706,39 @@ async def call_llm_with_tools(
             except Exception:
                 continue
 
+     # Last resort for artifact tasks: programmatic generate_file fallback
+     if _is_artifact and _phase.total_research >= 2 and not _phase.generate_file_attempted:
+        log.warning("Exhaustion path: programmatic generate_file fallback")
+        _collected = "\n\n".join(
+            m["content"][:1000] for m in messages
+            if isinstance(m, dict) and m.get("role") == "tool"
+        )
+        if _collected:
+            _artifact_path = _extract_artifact_path(query)
+            if not _artifact_path:
+                slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
+                _artifact_path = os.path.expanduser(
+                    f"~/Developer/Personal/presentations/{slug}/index.html"
+                )
+            class _ExhSynth:
+                class function:
+                    name = "generate_file"
+                    arguments = json.dumps({
+                        "description": f"{query}\n\nContext gathered:\n{_collected[:3000]}",
+                        "target_path": _artifact_path,
+                    })
+                id = f"programmatic_exhaustion"
+            try:
+                _gen_result = await _execute_tool_call(_ExhSynth())
+                if '"success"' in _gen_result[:200]:
+                    log.info("Programmatic fallback (exhaustion) succeeded")
+                    await _safe_edit(progress_msg, _gen_result[:4096])
+                    return _gen_result
+                else:
+                    log.warning("Programmatic fallback (exhaustion) returned: %s", _gen_result[:200])
+            except Exception as _pf_e:
+                log.warning("Programmatic fallback (exhaustion) failed: %s", _pf_e)
+
      _step_summary = " → ".join(_progress_steps) if _progress_steps else "multiple steps"
      _fallback = (
         f"I completed {_step_summary} but ran out of iterations before finishing. "
