@@ -71,30 +71,37 @@ body {
 
 .k-nav a,
 .k-nav a:link,
-.k-nav a:visited {
-    color: #9d9db5;
-    text-decoration: none;
+.k-nav a:visited,
+.k-nav-links a,
+.k-nav-links a:link,
+.k-nav-links a:visited {
+    color: #9d9db5 !important;
+    text-decoration: none !important;
     font-size: 14px;
     font-weight: 500;
     transition: color 0.2s;
 }
 
-.k-nav a:hover { color: #e8e8f0; }
+.k-nav a:hover,
+.k-nav-links a:hover { color: #e8e8f0 !important; }
 
 .k-nav .k-logo,
 .k-nav .k-logo:link,
 .k-nav .k-logo:visited {
     font-size: 18px;
     font-weight: 700;
-    color: #e8e8f0;
+    color: #e8e8f0 !important;
 }
 
 .k-nav .k-logo span { color: #8b5cf6; }
 
 .k-nav .k-active,
 .k-nav .k-active:link,
-.k-nav .k-active:visited {
-    color: #e8e8f0;
+.k-nav .k-active:visited,
+.k-nav-links .k-active,
+.k-nav-links .k-active:link,
+.k-nav-links .k-active:visited {
+    color: #e8e8f0 !important;
     font-weight: 600;
 }
 
