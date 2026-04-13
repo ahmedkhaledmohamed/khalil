@@ -5969,92 +5969,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 _task_mgr.reset_task(_active_task.id)
                 _active_task = _task_mgr.get_active_task(chat_id)
 
-        # --- Context Gathering (conditional on intent) ---
+        # --- Context Assembly (intent-aware) ---
         _t_ctx_start = _time_mod.monotonic()
-
-        async def _tg_search():
-            # Skip KB search for continuations and chat — prevents noise injection
-            if _intent in (Intent.CONTINUATION, Intent.CHAT):
-                log.info("Skipping KB search for %s intent", _intent.value)
-                return []
-            try:
-                return await asyncio.wait_for(hybrid_search(query, limit=6), timeout=15.0)
-            except asyncio.TimeoutError:
-                log.warning("hybrid_search timed out after 15s for query: %s", query[:80])
-                return []
-
-        async def _tg_live():
-            try:
-                from state.collector import collect_live_state, format_for_prompt
-                live = await asyncio.wait_for(collect_live_state(), timeout=5.0)
-                return format_for_prompt(live)
-            except asyncio.TimeoutError:
-                log.warning("Live state collection timed out after 5s")
-                return ""
-            except Exception as e:
-                log.warning("Live state collection failed: %s", e)
-                return ""
-
-        async def _tg_proactive():
-            try:
-                from memory.session_continuity import get_session_continuity
-                from knowledge.entity_resolver import get_entity_resolver
-
-                async def _session_ctx():
-                    return get_session_continuity(chat_id, query)
-
-                async def _entity_ctx():
-                    resolver = get_entity_resolver()
-                    entities = await resolver.resolve_entities_in_query(query)
-                    return resolver.format_entity_context(entities)
-
-                session_ctx, entity_ctx = await asyncio.gather(
-                    _session_ctx(), _entity_ctx(), return_exceptions=True,
-                )
-                parts = []
-                if isinstance(session_ctx, str) and session_ctx:
-                    parts.append(session_ctx)
-                if isinstance(entity_ctx, str) and entity_ctx:
-                    parts.append(entity_ctx)
-                return "\n\n".join(parts) if parts else ""
-            except Exception as e:
-                log.debug("Proactive context injection failed: %s", e)
-                return ""
-
-        results, conversation_context, live_context, proactive_context = await asyncio.gather(
-            _tg_search(),
-            get_conversation_context(chat_id, query),
-            _tg_live(),
-            _tg_proactive(),
+        from context import assemble_context
+        voice_mode = getattr(ctx, '_voice_mode', False)
+        full_context = await assemble_context(
+            intent=_intent,
+            query=query,
+            chat_id=chat_id,
+            task=_active_task,
+            voice_mode=voice_mode,
         )
         _t_search = _time_mod.monotonic() - _t_ctx_start
-        _t_context = 0  # included in parallel gather
-
-        archive_context = truncate_context(results) if results else "No relevant archive data found."
-        personal_context = get_relevant_context(query, max_chars=2000)
-
-        full_context = f"[Source: CONTEXT.md]\n{personal_context}\n\n[Source: knowledge base search]\n{archive_context}"
-        if conversation_context:
-            full_context = f"{conversation_context}\n\n{full_context}"
-        if proactive_context:
-            full_context = proactive_context + "\n\n" + full_context
-        if live_context:
-            full_context = f"[Source: live state]\n{live_context}\n\n{full_context}"
-
-        # Voice mode
-        voice_mode = getattr(ctx, '_voice_mode', False)
-        if voice_mode:
-            full_context = (
-                "[Voice mode: User is speaking via voice. Keep your response concise "
-                "(1-3 sentences), conversational, and easy to read aloud. "
-                "Avoid markdown formatting, bullet lists, and emojis.]\n\n"
-                + full_context
-            )
-
-        # Task context injection — give the LLM awareness of active task
-        if _active_task:
-            _task_context = _task_mgr.get_task_context_for_llm(_active_task)
-            full_context = _task_context + "\n\n" + full_context
+        _t_context = 0  # included in assemble_context
 
         # Strategy tools (generate_file, delegate_tasks, spawn_watcher) are now available
         # in the tool-use loop — the LLM decides when to use them, no hardcoded bypass needed.
