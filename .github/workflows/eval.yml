@@ -41,7 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyyaml pytest anthropic httpx keyring
+          pip install pyyaml pytest anthropic httpx keyring apscheduler fastapi python-telegram-bot
 
       - name: Syntax check — all Python files
         run: |
