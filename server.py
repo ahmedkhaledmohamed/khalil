@@ -1812,12 +1812,12 @@ async def _execute_tool_call(tool_call) -> str:
 
             from config import CLAUDE_MODEL_FAST
             _GEN_CASCADE = [
-                (CLAUDE_MODEL, 90.0, "opus"),        # Best quality, generous timeout
-                (CLAUDE_MODEL_FAST, 60.0, "sonnet"),  # Faster fallback
+                (CLAUDE_MODEL, 300.0, "opus"),        # 5 min — 16K token generation takes 3-5 min
+                (CLAUDE_MODEL_FAST, 180.0, "sonnet"),  # 3 min — faster model, still needs time
             ]
             # Add Ollama as final fallback if available
             if LLM_BACKEND == "ollama" or OLLAMA_URL:
-                _GEN_CASCADE.append(("local", 120.0, "ollama"))
+                _GEN_CASCADE.append(("local", 180.0, "ollama"))
 
             content = ""
             _used_model = ""
