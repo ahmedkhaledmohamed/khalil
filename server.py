@@ -2277,7 +2277,9 @@ async def call_llm_with_tools(
             stream_gen = ask_llm_stream(query, context, system_extra)
             return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
 
-        # API call with 1 retry for transient errors (429, 503, overloaded)
+        # API call with 1 retry for transient errors (429, 503, timeout)
+        # Timeout scales with iteration — later iterations have larger message histories
+        _tool_timeout = CLAUDE_TIMEOUT + (iteration * 3)  # 15s base + 3s per iteration
         response = None
         for _tool_attempt in range(2):
             try:
@@ -2287,7 +2289,7 @@ async def call_llm_with_tools(
                     messages=messages,
                     tools=tools,
                     tool_choice=_tc,
-                    timeout=CLAUDE_TIMEOUT,
+                    timeout=_tool_timeout,
                     temperature=0.0,
                 )
                 _cb_claude_fg.record_success()
@@ -2295,7 +2297,7 @@ async def call_llm_with_tools(
             except Exception as e:
                 _cb_claude_fg.record_failure()
                 _err_str = str(e).lower()
-                _is_transient = any(s in _err_str for s in ("429", "rate", "overloaded", "503"))
+                _is_transient = any(s in _err_str for s in ("429", "rate", "overloaded", "503", "timeout", "timed out"))
                 if _is_transient and _tool_attempt == 0:
                     log.warning("Tool-use transient error (iteration %d), retrying in 2s: %s", iteration, e)
                     await asyncio.sleep(2.0)
