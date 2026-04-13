@@ -257,6 +257,7 @@ class TestVerification:
         from verification import detect_hallucinated_tools
         assert detect_hallucinated_tools("[Called tool: search_knowledge]\nresults...")
         assert detect_hallucinated_tools("  [tool_call: generate_file]\n...")
+        assert detect_hallucinated_tools('[MCP_CALL: the-hub.search | {"query":"test"}]')
         assert not detect_hallucinated_tools("I searched for the information you asked about")
         assert not detect_hallucinated_tools("The tool [Called tool: x] was mentioned in docs")
 

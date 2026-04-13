@@ -16,7 +16,7 @@ from pathlib import Path
 log = logging.getLogger("khalil.verification")
 
 # Hallucinated tool call pattern — line starts with fake tool invocation
-_FAKE_TOOL_RE = re.compile(r'^\s*\[(?:Called tool|tool_call)[:\s]', re.MULTILINE)
+_FAKE_TOOL_RE = re.compile(r'^\s*\[(?:Called tool|tool_call|MCP_CALL)[:\s|]', re.MULTILINE)
 
 # Preamble patterns — LLM announces intent instead of delivering results
 _PREAMBLE_PATTERNS = [
