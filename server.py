@@ -75,23 +75,7 @@ def _redact_sensitive(text: str) -> str:
 
 
 # --- Artifact Generation Mode ---
-
-_ARTIFACT_SIGNALS = re.compile(
-    r"\b(build|create|write|generate|make)\s+.{0,40}"
-    r"\b(presentation|html|page|script|file|document|deck|slides?|report|template|website|summary|readme)\b",
-    re.IGNORECASE,
-)
-_ARTIFACT_PATH_RE = re.compile(r'\.(html|css|js|py|md|txt|json|sh|yaml|yml)\b')
-_ARTIFACT_SAVE_RE = re.compile(r'\b(save|write|put)\s+(?:it\s+)?(?:to|in|at)\s+', re.IGNORECASE)
-
-
-def _is_artifact_request(query: str) -> bool:
-    """Detect if the user is asking to create a file/artifact."""
-    if _ARTIFACT_SIGNALS.search(query):
-        return True
-    if _ARTIFACT_SAVE_RE.search(query) and _ARTIFACT_PATH_RE.search(query):
-        return True
-    return False
+# Note: artifact detection now lives in intent.py (is_artifact_request)
 
 
 def _extract_artifact_path(query: str) -> str | None:
@@ -1576,52 +1560,6 @@ def _is_preamble_response(text: str) -> bool:
     return bool(_PREAMBLE_RE.search(text.strip()))
 
 
-def _save_pending_task(chat_id: int | str, query: str, tool_names: list[str]) -> None:
-    """Save a marker when a tool-use task didn't fully complete.
-
-    Only overwrites if the new query is more descriptive than the existing one.
-    Prevents "Yes" / "Continue" from replacing the original task description.
-    """
-    try:
-        existing = db_conn.execute(
-            "SELECT value FROM settings WHERE key = ?", (f"pending_task_{chat_id}",)
-        ).fetchone()
-        if existing:
-            old_task = json.loads(existing[0])
-            old_query = old_task.get("query", "")
-            # Keep the longer/more descriptive query
-            if len(query) < len(old_query) and len(query) < 30:
-                # Update tools used but keep original query
-                old_task["tools_used"] = tool_names[:10]
-                old_task["timestamp"] = datetime.now(timezone.utc).isoformat()
-                db_conn.execute(
-                    "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-                    (f"pending_task_{chat_id}", json.dumps(old_task)),
-                )
-                db_conn.commit()
-                return
-
-        db_conn.execute(
-            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
-            (f"pending_task_{chat_id}", json.dumps({
-                "query": query[:500],
-                "tools_used": tool_names[:10],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })),
-        )
-        db_conn.commit()
-    except Exception as e:
-        log.debug("Failed to save pending task: %s", e)
-
-
-def _clear_pending_task(chat_id: int | str) -> None:
-    """Clear pending task marker after successful completion."""
-    try:
-        db_conn.execute("DELETE FROM settings WHERE key = ?", (f"pending_task_{chat_id}",))
-        db_conn.commit()
-    except Exception:
-        pass
-
 
 def _get_tool_source_path(action_type: str) -> str:
     """Map action_type to source file path via skill registry."""
@@ -2449,7 +2387,8 @@ async def call_llm_with_tools(
 
         # If the user asked to BUILD something and we have search results but
         # never called generate_file — the LLM chose text over action. Nudge once.
-        if final_text and _has_tool_results and _is_artifact_request(query):
+        from intent import is_artifact_request as _is_artifact_req
+        if final_text and _has_tool_results and _is_artifact_req(query):
             _used_generate = any(
                 isinstance(m, dict) and m.get("role") == "tool"
                 and "generate_file" in str(m.get("content", ""))[:100]
