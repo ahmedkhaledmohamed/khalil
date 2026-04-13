@@ -7808,6 +7808,17 @@ async def startup():
         test_results = await run_startup_self_test()
         report = format_startup_report(test_results)
         log.info("Startup self-test:\n%s", report)
+
+        # Pipeline smoke test — verify the agent pipeline is wired correctly
+        from monitoring import run_pipeline_smoke_test, format_pipeline_smoke_report
+        pipeline_results = run_pipeline_smoke_test()
+        pipeline_report = format_pipeline_smoke_report(pipeline_results)
+        log.info("Pipeline smoke test:\n%s", pipeline_report)
+        if pipeline_results["overall"] != "ok":
+            test_results["overall"] = "degraded"
+            test_results.setdefault("issues", []).extend(pipeline_results["issues"])
+            report += "\n\n" + pipeline_report
+
         # Send report to owner via Telegram if there are issues
         if test_results["overall"] != "ok" and OWNER_CHAT_ID and channel:
             try:

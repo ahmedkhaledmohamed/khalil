@@ -41,7 +41,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install pyyaml pytest anthropic httpx keyring
+          pip install pyyaml pytest anthropic httpx keyring apscheduler fastapi python-telegram-bot
 
       - name: Syntax check — all Python files
         run: |
@@ -72,9 +72,18 @@ jobs:
           assert total > 400, f'Expected >400 golden cases, got {total}'
           "
 
-      - name: Unit tests
+      - name: Critical module imports
         run: |
-          python -m pytest tests/test_agent_orchestration.py -v --tb=short
+          python -c "
+          import sys; sys.path.insert(0, '.')
+          for mod in ['intent', 'verification', 'task_manager', 'context', 'tool_catalog']:
+              __import__(mod)
+          print('All critical modules import OK')
+          "
+
+      - name: Unit tests + pipeline tests + behavioral contracts
+        run: |
+          python -m pytest tests/test_agent_orchestration.py tests/test_agent_pipeline.py tests/test_behavioral_contracts.py -v --tb=short
 
       - name: Tool-use eval (swarm gate + schema + param + filter + bypass)
         run: |
@@ -93,8 +102,10 @@ jobs:
             const body = `### Eval Gate Results
             - ✅ Syntax check passed
             - ✅ Golden YAML valid
-            - ✅ Unit tests passed
+            - ✅ Critical module imports OK
+            - ✅ Unit + pipeline + contract tests passed
             - ✅ Tool-use eval passed
+            - ✅ Reasoning eval passed
 
             > Full frozen eval (851 cases) requires local Ollama — run manually before merge:
             > \`python -m eval --cases eval/fixtures/cases.json --parallel\``;
