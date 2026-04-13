@@ -328,6 +328,95 @@ def format_startup_report(results: dict) -> str:
     return "\n".join(lines)
 
 
+def run_pipeline_smoke_test() -> dict:
+    """Verify the agent pipeline is wired correctly after restart.
+
+    No LLM calls, no network — all deterministic checks.
+    Catches broken imports, changed function signatures, missing tools.
+    """
+    results = {}
+    issues = []
+
+    # 1. Intent classification
+    try:
+        from intent import classify_intent, Intent
+        result = classify_intent("Build me a presentation", has_active_task=False)
+        results["intent"] = {"status": "ok" if result == Intent.TASK else "failed"}
+        if result != Intent.TASK:
+            issues.append("Intent: 'Build presentation' not classified as TASK")
+    except Exception as e:
+        results["intent"] = {"status": "error", "error": str(e)[:100]}
+        issues.append(f"Intent: {e}")
+
+    # 2. PhaseTracker
+    try:
+        from server import _PhaseTracker
+        p = _PhaseTracker(is_artifact=True)
+        tc, _, prompt = p.get_config(0, [{"function": {"name": "generate_file"}}])
+        results["phase_tracker"] = {"status": "ok" if tc == "auto" and prompt is None else "failed"}
+        if tc != "auto":
+            issues.append("PhaseTracker: unexpected tool_choice at iteration 0")
+    except Exception as e:
+        results["phase_tracker"] = {"status": "error", "error": str(e)[:100]}
+        issues.append(f"PhaseTracker: {e}")
+
+    # 3. Tool catalog — generate_file and search_knowledge present
+    try:
+        from tool_catalog import _CORE_TOOLS
+        has_gen = "generate_file" in _CORE_TOOLS
+        has_search = "search_knowledge" in _CORE_TOOLS
+        results["tool_catalog"] = {
+            "status": "ok" if has_gen and has_search else "failed",
+            "core_tools": len(_CORE_TOOLS),
+        }
+        if not has_gen:
+            issues.append("ToolCatalog: generate_file missing from core tools")
+        if not has_search:
+            issues.append("ToolCatalog: search_knowledge missing from core tools")
+    except Exception as e:
+        results["tool_catalog"] = {"status": "error", "error": str(e)[:100]}
+        issues.append(f"ToolCatalog: {e}")
+
+    # 4. Verification layer
+    try:
+        from verification import detect_hallucinated_tools
+        detected = detect_hallucinated_tools("[Called tool: test]\nresults")
+        results["verification"] = {"status": "ok" if detected else "failed"}
+        if not detected:
+            issues.append("Verification: hallucination detection not working")
+    except Exception as e:
+        results["verification"] = {"status": "error", "error": str(e)[:100]}
+        issues.append(f"Verification: {e}")
+
+    # 5. Circuit breaker isolation
+    try:
+        from server import _cb_claude_fg, _cb_claude_bg
+        isolated = _cb_claude_fg is not _cb_claude_bg
+        results["circuit_breakers"] = {"status": "ok" if isolated else "failed"}
+        if not isolated:
+            issues.append("CircuitBreakers: fg and bg are the same instance")
+    except Exception as e:
+        results["circuit_breakers"] = {"status": "error", "error": str(e)[:100]}
+        issues.append(f"CircuitBreakers: {e}")
+
+    results["overall"] = "ok" if not issues else "degraded"
+    results["issues"] = issues
+    return results
+
+
+def format_pipeline_smoke_report(results: dict) -> str:
+    """Format pipeline smoke test results."""
+    status_icons = {"ok": "✅", "failed": "❌", "error": "❌"}
+    lines = []
+    for subsystem in ["intent", "phase_tracker", "tool_catalog", "verification", "circuit_breakers"]:
+        info = results.get(subsystem, {})
+        icon = status_icons.get(info.get("status", "error"), "❓")
+        lines.append(f"  {icon} {subsystem.replace('_', ' ').title()}")
+    overall_icon = "✅" if results["overall"] == "ok" else "❌"
+    lines.append(f"\n{overall_icon} Pipeline: {results['overall'].upper()}")
+    return "\n".join(lines)
+
+
 async def generate_self_check_message() -> str | None:
     """Generate a self-check notification if there are issues. Returns None if all clear."""
     report = await run_health_check()

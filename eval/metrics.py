@@ -400,6 +400,47 @@ def print_metrics(snapshot: MetricsSnapshot) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def compare_to_baseline(
+    snapshot: MetricsSnapshot,
+    baseline_path: str | Path | None = None,
+) -> dict:
+    """Compare a metrics snapshot against the frozen baseline.
+
+    Returns: {metric_name: {"current": float, "threshold": float, "status": "ok"|"violation"}}
+    """
+    if baseline_path is None:
+        baseline_path = Path(__file__).parent / "fixtures" / "metrics_baseline.json"
+    baseline_path = Path(baseline_path)
+    if not baseline_path.exists():
+        return {"error": "Baseline file not found"}
+
+    baseline = json.loads(baseline_path.read_text())
+    thresholds = baseline.get("thresholds", {})
+    results = {}
+
+    # Map threshold keys to snapshot fields
+    _metric_map = {
+        "tool_success_rate": getattr(snapshot, "tool_success_rate", None),
+        "latency_p95_s": getattr(snapshot, "latency_p95", None),
+        "error_cascade_rate": getattr(snapshot, "error_cascade_rate", None),
+    }
+
+    for metric, spec in thresholds.items():
+        current = _metric_map.get(metric)
+        if current is None:
+            results[metric] = {"current": None, "threshold": spec, "status": "skipped"}
+            continue
+
+        if "min" in spec:
+            status = "ok" if current >= spec["min"] else "violation"
+            results[metric] = {"current": current, "threshold": spec["min"], "status": status}
+        elif "max" in spec:
+            status = "ok" if current <= spec["max"] else "violation"
+            results[metric] = {"current": current, "threshold": spec["max"], "status": status}
+
+    return results
+
+
 def main() -> None:
     snapshot = compute_metrics()
 

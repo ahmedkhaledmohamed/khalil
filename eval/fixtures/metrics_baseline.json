@@ -1,0 +1,12 @@
+{
+  "frozen_at": "2026-04-13",
+  "milestone": "FL26 artifact creation working end-to-end",
+  "description": "Baseline frozen after architecture redesign (PRs #277-288). Artifact creation, intent classification, phase-aware execution, execution hardening all verified working.",
+  "thresholds": {
+    "tool_success_rate": {"min": 0.80, "description": "Fraction of tool calls that succeed"},
+    "artifact_success_rate": {"min": 0.50, "description": "Fraction of generate_file calls that produce a file"},
+    "latency_p95_s": {"max": 60.0, "description": "95th percentile response latency in seconds"},
+    "error_cascade_rate": {"max": 0.10, "description": "Fraction of requests where 2+ consecutive errors occur"},
+    "research_loop_rate": {"max": 0.15, "description": "Fraction of artifact tasks that exhaust iterations without calling generate_file"}
+  }
+}
