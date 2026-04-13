@@ -9,28 +9,34 @@ A self-improving AI agent that runs on a laptop. Classifies intent, assembles co
 ## Quick Start
 
 ```bash
-# 1. Set up
+git clone git@github.com:ahmedkhaledmohamed/khalil.git
+cd khalil
+make install
+```
+
+The installer handles everything interactively: system deps (Homebrew, Ollama, Python), secrets, database, and LaunchAgent. Safe to re-run.
+
+```bash
+make status    # Check health
+make logs      # Tail logs
+make restart   # Restart daemon
+make secrets   # Re-configure secrets
+make test      # Run 910 tests
+```
+
+<details>
+<summary>Manual setup (without installer)</summary>
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-# 2. Configure secrets
 python3 -c "import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')"
 python3 -c "import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')"
-
-# 3. Start Ollama (for embeddings + local LLM)
-ollama serve &
-ollama pull nomic-embed-text
-ollama pull qwen3:14b
-
-# 4. Run
+ollama serve & ollama pull nomic-embed-text
 python3 server.py
 ```
 
-Or run as a macOS daemon:
-```bash
-cp com.khalil.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist
-```
+</details>
 
 Or use the CLI (no Telegram required):
 ```bash
