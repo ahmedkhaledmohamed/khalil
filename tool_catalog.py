@@ -37,7 +37,7 @@ _INCLUDE_SKILLS = {
 # Core tools always included regardless of query relevance
 _CORE_TOOLS = {
     "shell", "reminder", "web_search", "clarify", "search_knowledge",
-    "generate_file", "delegate_tasks",
+    "read_full_document", "generate_file", "delegate_tasks",
 }
 
 # Manual tool schema for search_knowledge (not from skill registry)
@@ -153,9 +153,42 @@ _SPAWN_WATCHER_SCHEMA = {
     },
 }
 
+_READ_FULL_DOCUMENT_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "read_full_document",
+        "description": (
+            "Retrieve the FULL content of a document from the knowledge base. "
+            "Use AFTER search_knowledge when you need the complete text, not just a snippet. "
+            "Provide the category and title_prefix from search results. "
+            "Returns up to 8000 chars of the full document (all chunks reassembled). "
+            "Essential for tasks requiring deep context: writing, analysis, summarization."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": "Document category from search results (e.g., 'work:sandbox:Planning/Fall-2026')",
+                },
+                "title_prefix": {
+                    "type": "string",
+                    "description": "Title or title prefix to match (e.g., 'Tier 1' or 'Fall 2026 Strategy')",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "description": "Maximum characters to return (default 8000)",
+                },
+            },
+            "required": ["category"],
+        },
+    },
+}
+
 # All manual tool schemas (not from skill registry)
 _MANUAL_TOOL_SCHEMAS = [
     _SEARCH_KNOWLEDGE_SCHEMA,
+    _READ_FULL_DOCUMENT_SCHEMA,
     _GENERATE_FILE_SCHEMA,
     _DELEGATE_TASKS_SCHEMA,
     _SPAWN_WATCHER_SCHEMA,

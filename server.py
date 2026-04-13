@@ -480,7 +480,8 @@ KHALIL_IDENTITY = (
     "- For novel tasks, reason from first principles using available tools.\n"
     "- Never say 'I can't' — figure out how with what you have.\n"
     "- If a tool fails, try a different approach immediately.\n"
-    "- Don't search forever. 1-2 searches max, then act.\n\n"
+    "- Don't search forever. 1-2 searches max, then act.\n"
+    "- For deep context: search_knowledge to FIND docs, then read_full_document to GET full text.\n\n"
 )
 
 
@@ -1748,7 +1749,7 @@ async def _execute_tool_call(tool_call) -> str:
                 formatted.append({
                     "title": doc.get("title", "")[:100],
                     "category": doc.get("category", ""),
-                    "content": doc.get("content", "")[:500],
+                    "content": doc.get("content", "")[:1500],
                 })
             _record_tool_analytics(fn_name, search_query, True, 0)
             return json.dumps({"results": formatted, "count": len(formatted)})
@@ -1758,6 +1759,74 @@ async def _execute_tool_call(tool_call) -> str:
         except Exception as e:
             _record_tool_analytics(fn_name, search_query, False, 0, error=str(e)[:200])
             return json.dumps({"error": True, "message": f"Search failed: {e}"})
+
+    # Handle read_full_document tool — reassemble full document from KB chunks
+    if fn_name == "read_full_document":
+        category = args.get("category", "")
+        title_prefix = args.get("title_prefix", "")
+        max_chars = args.get("max_chars", 8000)
+        if not category:
+            return json.dumps({"error": True, "message": "Missing category parameter"})
+        try:
+            import sqlite3 as _sql
+            from config import DB_PATH
+            _conn = _sql.connect(str(DB_PATH))
+            _conn.row_factory = _sql.Row
+
+            if title_prefix:
+                rows = _conn.execute(
+                    "SELECT title, content FROM documents WHERE category = ? AND title LIKE ? "
+                    "ORDER BY id",
+                    (category, f"%{title_prefix}%"),
+                ).fetchall()
+            else:
+                rows = _conn.execute(
+                    "SELECT title, content FROM documents WHERE category = ? ORDER BY id",
+                    (category,),
+                ).fetchall()
+            _conn.close()
+
+            if not rows:
+                # Try prefix match on category
+                _conn = _sql.connect(str(DB_PATH))
+                _conn.row_factory = _sql.Row
+                rows = _conn.execute(
+                    "SELECT title, content FROM documents WHERE category LIKE ? ORDER BY id LIMIT 50",
+                    (category + "%",),
+                ).fetchall()
+                _conn.close()
+
+            if not rows:
+                _record_tool_analytics(fn_name, category, False, 0, error="not_found")
+                return json.dumps({"error": True, "message": f"No documents found for category '{category}'"})
+
+            # Reassemble chunks into full document
+            full_text = ""
+            current_title = ""
+            for r in rows:
+                title = r["title"]
+                content = r["content"]
+                if title != current_title:
+                    if current_title:
+                        full_text += "\n\n---\n\n"
+                    full_text += f"## {title}\n\n"
+                    current_title = title
+                full_text += content + "\n"
+                if len(full_text) >= max_chars:
+                    full_text = full_text[:max_chars] + "\n\n[... truncated at max_chars]"
+                    break
+
+            _record_tool_analytics(fn_name, f"{category}/{title_prefix}", True, 0)
+            return json.dumps({
+                "success": True,
+                "category": category,
+                "chunks": len(rows),
+                "chars": len(full_text),
+                "content": full_text,
+            })
+        except Exception as e:
+            _record_tool_analytics(fn_name, category, False, 0, error=str(e)[:200])
+            return json.dumps({"error": True, "message": f"Read failed: {e}"})
 
     # Handle generate_file tool — artifact generation mode
     if fn_name == "generate_file":
