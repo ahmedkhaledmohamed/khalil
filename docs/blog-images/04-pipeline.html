@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Pipeline</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px; }
+  .card { background: #12121a; border-radius: 20px; padding: 48px; border: 1px solid #1e1e2e; max-width: 900px; width: 100%; }
+  .title { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: #8b5cf6; margin-bottom: 8px; }
+  .heading { font-size: 26px; font-weight: 800; color: #f0f0f5; margin-bottom: 32px; }
+  .pipeline { display: flex; gap: 0; align-items: stretch; }
+  .stage { flex: 1; display: flex; flex-direction: column; align-items: center; position: relative; }
+  .stage-box { width: 100%; padding: 20px 14px; border-radius: 12px; text-align: center; border: 1px solid; position: relative; z-index: 1; }
+  .stage-num { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+  .stage-name { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+  .stage-desc { font-size: 11px; line-height: 1.5; }
+  .stage-arrow { display: flex; align-items: center; justify-content: center; width: 36px; flex-shrink: 0; color: #333; font-size: 20px; }
+
+  .s1 .stage-box { background: #161225; border-color: #2e1e4a; }
+  .s1 .stage-num { color: #7c3aed; }
+  .s1 .stage-name { color: #a78bfa; }
+  .s1 .stage-desc { color: #8878a8; }
+
+  .s2 .stage-box { background: #121a25; border-color: #1e2e4a; }
+  .s2 .stage-num { color: #2563eb; }
+  .s2 .stage-name { color: #60a5fa; }
+  .s2 .stage-desc { color: #7888a8; }
+
+  .s3 .stage-box { background: #1a1e12; border-color: #2e3a1e; }
+  .s3 .stage-num { color: #65a30d; }
+  .s3 .stage-name { color: #a3e635; }
+  .s3 .stage-desc { color: #88a878; }
+
+  .s4 .stage-box { background: #1a1812; border-color: #3a3422; }
+  .s4 .stage-num { color: #d97706; }
+  .s4 .stage-name { color: #fbbf24; }
+  .s4 .stage-desc { color: #a89868; }
+
+  .s5 .stage-box { background: #121a14; border-color: #1a3a22; }
+  .s5 .stage-num { color: #16a34a; }
+  .s5 .stage-name { color: #4ade80; }
+  .s5 .stage-desc { color: #78a888; }
+
+  .details { margin-top: 32px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .detail { padding: 14px; border-radius: 10px; background: #0e0e16; border: 1px solid #1a1a28; }
+  .detail-label { font-size: 10px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .detail-value { font-size: 13px; color: #ccc; font-weight: 500; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="title">Every Message Goes Through</div>
+  <div class="heading">The Agent Pipeline</div>
+
+  <div class="pipeline">
+    <div class="stage s1">
+      <div class="stage-box">
+        <div class="stage-num">Stage 1</div>
+        <div class="stage-name">Classify</div>
+        <div class="stage-desc">Heuristic intent detection. TASK, QUESTION, CHAT, or CONTINUATION. No LLM call.</div>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage s2">
+      <div class="stage-box">
+        <div class="stage-num">Stage 2</div>
+        <div class="stage-name">Context</div>
+        <div class="stage-desc">Intent-aware assembly. Tasks get deep retrieval. Continuations skip KB search.</div>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage s3">
+      <div class="stage-box">
+        <div class="stage-num">Stage 3</div>
+        <div class="stage-name">Execute</div>
+        <div class="stage-desc">Phase-aware tool loop. Research capped. Escalation ladder for artifacts.</div>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage s4">
+      <div class="stage-box">
+        <div class="stage-num">Stage 4</div>
+        <div class="stage-name">Verify</div>
+        <div class="stage-desc">Hallucination check. File exists on disk. Preamble detection. Side effects confirmed.</div>
+      </div>
+    </div>
+    <div class="stage-arrow">→</div>
+    <div class="stage s5">
+      <div class="stage-box">
+        <div class="stage-num">Stage 5</div>
+        <div class="stage-name">Complete</div>
+        <div class="stage-desc">Task state updated. Deferred summaries run. Metrics recorded.</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="details">
+    <div class="detail">
+      <div class="detail-label">Resilience</div>
+      <div class="detail-value">Isolated circuit breakers (fg/bg). Background tasks suppressed during execution.</div>
+    </div>
+    <div class="detail">
+      <div class="detail-label">Model Cascade</div>
+      <div class="detail-value">Opus → Sonnet → GPT-5.2 → Gemini → Ollama. Automatic fallback per stage.</div>
+    </div>
+    <div class="detail">
+      <div class="detail-label">Quality Gate</div>
+      <div class="detail-value">24 behavioral contracts. 910 tests. Smoke test on restart. Metric baselines.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Khalil Stats</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px; }
+  .card { background: #12121a; border-radius: 20px; padding: 48px; border: 1px solid #1e1e2e; max-width: 800px; width: 100%; }
+  .header { text-align: center; margin-bottom: 40px; }
+  .logo { font-size: 32px; font-weight: 800; color: #f0f0f5; letter-spacing: -1px; }
+  .logo span { color: #8b5cf6; }
+  .tagline { font-size: 14px; color: #666; margin-top: 6px; }
+  .period { font-size: 12px; color: #444; margin-top: 4px; font-family: monospace; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+  .stat { background: #0e0e16; border-radius: 12px; padding: 20px 16px; text-align: center; border: 1px solid #1a1a28; }
+  .stat-num { font-size: 36px; font-weight: 800; letter-spacing: -1px; margin-bottom: 4px; }
+  .stat-label { font-size: 11px; font-weight: 600; color: #666; text-transform: uppercase; letter-spacing: 1px; }
+  .s-purple .stat-num { color: #a78bfa; }
+  .s-green .stat-num { color: #4ade80; }
+  .s-blue .stat-num { color: #60a5fa; }
+  .s-amber .stat-num { color: #fbbf24; }
+  .s-pink .stat-num { color: #f472b6; }
+  .s-cyan .stat-num { color: #22d3ee; }
+  .s-orange .stat-num { color: #fb923c; }
+  .s-lime .stat-num { color: #a3e635; }
+  .row2 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+  .stack { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .stack-tag { padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #1a1a28; color: #999; border: 1px solid #252535; }
+  .stack-tag.primary { background: #1e1040; color: #a78bfa; border-color: #2e1e4a; }
+  .divider { height: 1px; background: #1e1e2e; margin: 28px 0; }
+  .footer { text-align: center; font-size: 12px; color: #444; }
+  .footer a { color: #8b5cf6; text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <div class="logo">khalil<span>.</span></div>
+    <div class="tagline">Autonomous AI Personal Agent</div>
+    <div class="period">March 15 - April 13, 2026 &middot; 29 days</div>
+  </div>
+
+  <div class="grid">
+    <div class="stat s-purple">
+      <div class="stat-num">668</div>
+      <div class="stat-label">Commits</div>
+    </div>
+    <div class="stat s-green">
+      <div class="stat-num">273</div>
+      <div class="stat-label">PRs Merged</div>
+    </div>
+    <div class="stat s-blue">
+      <div class="stat-num">200+</div>
+      <div class="stat-label">Actions</div>
+    </div>
+    <div class="stat s-amber">
+      <div class="stat-num">59</div>
+      <div class="stat-label">Skills</div>
+    </div>
+  </div>
+
+  <div class="row2">
+    <div class="stat s-pink">
+      <div class="stat-num">910</div>
+      <div class="stat-label">Tests</div>
+    </div>
+    <div class="stat s-cyan">
+      <div class="stat-num">46K</div>
+      <div class="stat-label">Docs Indexed</div>
+    </div>
+    <div class="stat s-orange">
+      <div class="stat-num">30+</div>
+      <div class="stat-label">Self-Generated</div>
+    </div>
+    <div class="stat s-lime">
+      <div class="stat-num">24</div>
+      <div class="stat-label">Contracts</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <div class="stack">
+    <span class="stack-tag primary">Claude Opus</span>
+    <span class="stack-tag">GPT-5.2</span>
+    <span class="stack-tag">Gemini 2.5</span>
+    <span class="stack-tag">Ollama</span>
+    <span class="stack-tag">Python</span>
+    <span class="stack-tag">FastAPI</span>
+    <span class="stack-tag">SQLite</span>
+    <span class="stack-tag">sqlite-vec</span>
+    <span class="stack-tag">Telegram</span>
+    <span class="stack-tag">Slack</span>
+    <span class="stack-tag">MCP</span>
+    <span class="stack-tag">Git</span>
+  </div>
+
+  <div class="divider"></div>
+  <div class="footer">Built by <a href="#">Ahmed Khaled Mohamed</a> &middot; One laptop, zero cloud infrastructure</div>
+</div>
+</body>
+</html>

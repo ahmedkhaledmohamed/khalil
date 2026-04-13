@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Failure Domain Isolation</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px; }
+  .container { display: flex; gap: 48px; max-width: 1100px; }
+  .panel { flex: 1; background: #12121a; border-radius: 16px; padding: 32px; border: 1px solid #1e1e2e; }
+  .panel-label { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  .panel-before .panel-label { color: #ef4444; }
+  .panel-after .panel-label { color: #22c55e; }
+  .panel-title { font-size: 20px; font-weight: 700; color: #f0f0f5; margin-bottom: 20px; }
+
+  .domain { border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+  .domain-name { font-size: 13px; font-weight: 700; margin-bottom: 6px; }
+  .domain-items { display: flex; flex-wrap: wrap; gap: 6px; }
+  .domain-item { font-size: 11px; padding: 4px 10px; border-radius: 6px; font-weight: 500; }
+
+  /* Shared domain (before) */
+  .shared { background: #1a1218; border: 1px solid #2a1a1a; }
+  .shared .domain-name { color: #f87171; }
+  .shared .domain-item { background: #2a1418; color: #fca5a5; border: 1px solid #3a2028; }
+
+  /* Foreground (after) */
+  .fg { background: #121a14; border: 1px solid #1a3a22; }
+  .fg .domain-name { color: #4ade80; }
+  .fg .domain-item { background: #14352a; color: #86efac; border: 1px solid #1e4a28; }
+
+  /* Background (after) */
+  .bg { background: #16121a; border: 1px solid #2e1e3a; }
+  .bg .domain-name { color: #a78bfa; }
+  .bg .domain-item { background: #251540; color: #c4b5fd; border: 1px solid #3b2860; }
+
+  /* Generation (after) */
+  .gen { background: #1a1812; border: 1px solid #3a3422; }
+  .gen .domain-name { color: #fbbf24; }
+  .gen .domain-item { background: #352d14; color: #fde68a; border: 1px solid #4a3d1e; }
+
+  .cb { margin-top: 12px; padding: 10px 14px; border-radius: 8px; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .cb-icon { font-size: 14px; }
+
+  .panel-before .cb { background: #1a0e0e; color: #f87171; border: 1px solid #3b1818; }
+  .cb-fg { background: #0e1a12; color: #4ade80; border: 1px solid #1a3a22; }
+  .cb-bg { background: #140e1a; color: #a78bfa; border: 1px solid #2e1e3a; }
+
+  .cascade { margin-top: 16px; padding: 12px; border-radius: 8px; background: #0e0e16; border: 1px solid #1a1a28; }
+  .cascade-title { font-size: 10px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .cascade-flow { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .cascade-step { font-size: 11px; padding: 4px 8px; border-radius: 4px; font-weight: 600; }
+  .cascade-arrow { color: #333; font-size: 12px; }
+  .c-timeout { background: #2a1418; color: #fca5a5; }
+  .c-open { background: #1a0a0a; color: #ef4444; font-weight: 800; }
+  .c-kill { background: #1a0a0a; color: #ef4444; border: 1px solid #3b1818; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="panel panel-before">
+    <div class="panel-label">The Problem</div>
+    <div class="panel-title">Shared Failure Domain</div>
+
+    <div class="domain shared">
+      <div class="domain-name">One Client, One Circuit Breaker</div>
+      <div class="domain-items">
+        <span class="domain-item">Tool-use loop</span>
+        <span class="domain-item">Summarization</span>
+        <span class="domain-item">Memory extraction</span>
+        <span class="domain-item">generate_file</span>
+        <span class="domain-item">Post-interaction</span>
+      </div>
+    </div>
+
+    <div class="cb"><span class="cb-icon">🔴</span> Single _cb_claude (threshold=3)</div>
+
+    <div class="cascade">
+      <div class="cascade-title">Actual Failure Chain (April 13)</div>
+      <div class="cascade-flow">
+        <span class="cascade-step c-timeout">BG summary timeout</span>
+        <span class="cascade-arrow">→</span>
+        <span class="cascade-step c-timeout">BG memory timeout</span>
+        <span class="cascade-arrow">→</span>
+        <span class="cascade-step c-timeout">BG summary timeout</span>
+        <span class="cascade-arrow">→</span>
+        <span class="cascade-step c-open">CB OPENS</span>
+        <span class="cascade-arrow">→</span>
+        <span class="cascade-step c-kill">User request killed</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel panel-after">
+    <div class="panel-label">The Fix</div>
+    <div class="panel-title">Isolated Failure Domains</div>
+
+    <div class="domain fg">
+      <div class="domain-name">Foreground (user requests)</div>
+      <div class="domain-items">
+        <span class="domain-item">Tool-use loop</span>
+        <span class="domain-item">Streaming responses</span>
+      </div>
+    </div>
+
+    <div class="domain bg">
+      <div class="domain-name">Background (housekeeping)</div>
+      <div class="domain-items">
+        <span class="domain-item">Summarization</span>
+        <span class="domain-item">Memory extraction</span>
+        <span class="domain-item">Post-interaction</span>
+      </div>
+    </div>
+
+    <div class="domain gen">
+      <div class="domain-name">Generation (separate pool)</div>
+      <div class="domain-items">
+        <span class="domain-item">generate_file (5 min calls)</span>
+      </div>
+    </div>
+
+    <div class="cb cb-fg"><span class="cb-icon">🟢</span> _cb_claude_fg (threshold=5, cooldown=30s)</div>
+    <div class="cb cb-bg"><span class="cb-icon">🟣</span> _cb_claude_bg (threshold=2, cooldown=120s)</div>
+  </div>
+</div>
+</body>
+</html>
