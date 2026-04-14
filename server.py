@@ -7306,6 +7306,27 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
+    # Tier 2: Knowledge freshness — scan watched repos for changes every 5 min
+    async def _knowledge_freshness_poll():
+        try:
+            from knowledge.watcher import scan_and_reindex
+            result = await scan_and_reindex()
+            if result.get("indexed", 0) > 0:
+                log.info("Knowledge freshness: indexed %d files (%d queued)",
+                         result["indexed"], result.get("queued", 0))
+        except Exception as e:
+            log.debug("Knowledge freshness poll: %s", e)
+
+    from config import WATCH_POLL_INTERVAL
+    scheduler.add_job(
+        _knowledge_freshness_poll,
+        "interval",
+        minutes=WATCH_POLL_INTERVAL,
+        id="knowledge_freshness_poll",
+        name="Tier 2: Knowledge Freshness Poll",
+        replace_existing=True,
+    )
+
     # M11: Pre-meeting brief — check every 5 minutes for upcoming meetings
     async def _meeting_brief_job():
         if not _can_send():
