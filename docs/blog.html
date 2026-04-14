@@ -3,10 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>I Built an AI Agent That Improves Itself — Khalil</title>
-    <meta name="description" content="668 commits. 273 PRs. 200+ actions. From a research loop that ran for 36 hours to a system that generates artifacts in 2 minutes. Here's the full story.">
-    <meta property="og:title" content="I Built an AI Agent That Improves Itself">
-    <meta property="og:description" content="668 commits in 29 days. An AI that classifies intent, manages task state, and fixes its own bugs.">
+    <title>Building a Self-Improving AI Agent — Khalil</title>
+    <meta name="description" content="Technical writeup on building an autonomous AI agent: intent classification, phase-aware execution, failure domain isolation, and quality regression prevention.">
+    <meta property="og:title" content="Building a Self-Improving AI Agent">
+    <meta property="og:description" content="Architecture, failures, and what worked — building an autonomous personal AI agent over 29 days.">
     <meta property="og:image" content="blog-images/00-hero-chaos-to-structure.png">
     <meta property="og:type" content="article">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -165,8 +165,8 @@
 <article>
     <img src="blog-images/00-hero-chaos-to-structure.png" alt="From chaos to structure — the Khalil journey" class="hero-img">
 
-    <h1>I Built an AI Agent That Improves Itself. Here's What I Learned in 29 Days.</h1>
-    <p class="subtitle">668 commits. 273 PRs. 200+ actions. One laptop.</p>
+    <h1>Building a Self-Improving AI Agent: Architecture, Failures, and What Worked</h1>
+    <p class="subtitle">A technical writeup on building an autonomous personal AI agent over 29 days.</p>
     <div class="meta">
         <span>Ahmed Khaled Mohamed</span>
         <span class="meta-dot"></span>
@@ -182,26 +182,29 @@
         <div class="stat s-amber"><div class="stat-num">910</div><div class="stat-label">Tests</div></div>
     </div>
 
-    <h2>The idea</h2>
-    <p>I wanted a personal AI assistant — not a chatbot, not a wrapper around an API, but something that actually <em>does things</em>. Reads my email. Checks my calendar. Controls my IDE. Generates files. And when it can't do something, it figures out how to build the capability itself.</p>
-    <p>I called it Khalil.</p>
+    <h2>What is Khalil</h2>
+    <p>Khalil is a personal AI agent that runs as a macOS daemon. It connects to email, calendar, terminal, IDE, and 200+ other actions through a Telegram interface. It indexes 46,000 documents into a local vector database, uses Claude/GPT/Ollama for reasoning, and can generate artifacts (files, presentations, scripts) from its knowledge base.</p>
+    <p>When Khalil detects a capability gap — a request it can't handle — it generates a new action module, tests it in a sandbox, and opens a PR against its own codebase. 30+ capabilities were built this way.</p>
 
-    <h2>Day 1: March 15, 2026</h2>
-    <p>First commit at 7:14 PM. By 8:40 PM — 86 minutes later — Khalil opened its first self-generated PR. It detected that it couldn't read Slack, wrote a Slack integration module, tested it, and submitted the code for review. I merged it.</p>
-    <p>By midnight, 8 PRs were merged. Five of them were written by Khalil.</p>
-    <p>That was the moment I knew this wasn't going to be a weekend project.</p>
+    <h2>Timeline</h2>
+    <p><strong>March 15:</strong> First commit. Within 86 minutes, Khalil opened its first self-generated PR — a Slack integration module it determined was needed after a failed request. By midnight, 8 PRs merged, 5 written by Khalil.</p>
 
-    <h2>The architecture (how it started)</h2>
-    <p>The initial design was simple: a Telegram bot backed by a FastAPI server. You send a message, the LLM picks a tool, the tool runs, you get a response.</p>
+    <p><strong>March 16:</strong> Highest-velocity day — 63 commits. 100 improvements identified and batched into 14 PRs. Terminal control, Cursor IDE integration, MCP tools, extension versioning.</p>
+    <p><strong>March 23-31:</strong> Stability. Skill handler migration, eval suite expansion (26% → 76% pass rate), legacy code removal.</p>
+    <p><strong>April 1-6:</strong> Evolution engine goes live. Self-extension, self-healing, and learning loop become closed-loop and autonomous.</p>
+    <p><strong>April 8-9:</strong> All 28 items of improvement plan v2 shipped in 24 hours. Eval pass rate reaches 83.9%.</p>
+    <p><strong>April 10-13:</strong> Architecture redesign — the focus of this writeup.</p>
+
+    <h2>The initial architecture</h2>
+    <p>The first design was a flat tool-routing loop: message arrives, LLM picks a tool, tool executes, response returns.</p>
     <pre><code>Message → LLM → Pick tool → Execute → Response</code></pre>
-    <p>It worked for simple things. "What's the weather?" "Set a reminder for 3pm." "How many unread emails do I have?"</p>
-    <p>But the moment I asked for anything multi-step — "Build me a presentation about my work planning" — the whole thing fell apart.</p>
+    <p>This worked for single-turn requests — weather, reminders, email search. It broke on anything multi-step.</p>
 
-    <h2>The 36-hour failure</h2>
-    <p>I asked Khalil to build an HTML presentation about my team's Fall 2026 planning work. It had all the information in its knowledge base (46,000 indexed documents from my emails, Drive, repos, and notes).</p>
-    <p>What happened: Khalil searched the knowledge base. Found relevant documents. Then searched again. And again. And again. For <strong>36 hours</strong>. Zero files created.</p>
-    <p>The LLM kept researching because research is safe. Generating a file is risky — what if it's bad? So it defaulted to what felt productive: gathering more context. Forever.</p>
-    <p>This was the turning point. I realized the problem wasn't the LLM, the tools, or the knowledge base. <strong>The problem was the architecture.</strong> There was no structure telling the system <em>when to stop thinking and start acting</em>.</p>
+    <h2>The failure that exposed the architecture gap</h2>
+    <p>The request: "Build me an HTML presentation about Fall 2026 planning." The knowledge base had all the relevant documents (46,000 indexed from email, Drive, repos, notes).</p>
+    <p>What happened: the LLM called <code>search_knowledge</code> 10 consecutive times across 36 hours. Zero files created. It never called <code>generate_file</code>.</p>
+    <p>The root cause is a known LLM behavioral pattern: research is low-risk (always produces results), generation is high-risk (might produce a bad file). Given unlimited iterations with the same tools available, the model defaults to the safe action indefinitely.</p>
+    <p>This is not a prompting problem. It's an architectural problem — there was no mechanism to enforce a transition from research to action.</p>
 
     <!-- BEFORE/AFTER DIAGRAM -->
     <div class="diagram">
@@ -231,24 +234,24 @@
         </div>
     </div>
 
-    <h2>The redesign: thinking in phases</h2>
-    <p>I threw out the flat tool-routing loop and redesigned around phases.</p>
+    <h2>The redesign: phase-aware execution</h2>
+    <p>The fix required restructuring the pipeline into explicit phases with different rules per phase.</p>
 
-    <h3>Phase 1: What are you asking?</h3>
-    <p>Before doing anything, classify the intent. "Yes" is not the same as "Build me a presentation." A heuristic classifier (no LLM needed — pure regex and pattern matching) categorizes every message:</p>
+    <h3>Intent classification</h3>
+    <p>Before any LLM call, a heuristic classifier (regex + pattern matching, no LLM needed) categorizes the message:</p>
     <ul>
         <li><strong>TASK</strong>: "Build me a presentation" → full pipeline</li>
         <li><strong>QUESTION</strong>: "What's the weather?" → search + answer</li>
         <li><strong>CONTINUATION</strong>: "Yes", "Sounds good" → inherit active task</li>
         <li><strong>CHAT</strong>: "Hello", "Thanks" → conversational only</li>
     </ul>
-    <p>This alone fixed a bizarre bug where saying "Yes" to continue a task would trigger a knowledge base search on the word "Yes" and return random documents about rate limiting algorithms.</p>
+    <p>This fixed a class of bugs where "Yes" (to continue a task) triggered a KB search on the literal word "Yes", returning irrelevant documents.</p>
 
-    <h3>Phase 2: What context do you need?</h3>
-    <p>Different intents need different context. A continuation doesn't need a fresh KB search — it needs the task state from the previous message. A new task needs deep retrieval. Chat needs nothing but conversation history.</p>
+    <h3>Intent-aware context assembly</h3>
+    <p>Each intent type assembles different context. CONTINUATION skips KB search and uses task state + 5 recent messages. TASK gets deep retrieval (KB search + full document read). CHAT gets conversation history only.</p>
 
-    <h3>Phase 3: Execute with guardrails</h3>
-    <p>This is where the real innovation happened. I added a <code>PhaseTracker</code> that monitors tool usage during execution and enforces escalating discipline:</p>
+    <h3>Research cap and escalation</h3>
+    <p>A <code>PhaseTracker</code> monitors tool usage per iteration and enforces an escalation ladder for artifact tasks:</p>
 
     <!-- ESCALATION LADDER -->
     <div class="diagram">
@@ -291,10 +294,10 @@
         </div>
     </div>
 
-    <p>The escalation ladder means the LLM gets progressively less freedom to procrastinate. At level 3, it literally cannot search anymore — the only tool available is the one that creates the file. And if it <em>still</em> refuses, the system bypasses the LLM entirely and constructs the API call from the gathered context.</p>
+    <p>Each level removes more LLM autonomy. At level 3, the only available tool is <code>generate_file</code>. At the programmatic fallback, the system constructs the tool call directly from gathered results — the LLM is not consulted.</p>
 
-    <h3>Phase 4: Verify and complete</h3>
-    <p>After every action, check that it actually worked. If <code>generate_file</code> reports success, verify the file exists on disk and has content. Track task state persistently — tasks survive across messages, auto-reset after 3 failures.</p>
+    <h3>Verification</h3>
+    <p>Post-action verification checks that side effects actually occurred. If <code>generate_file</code> reports success, the system confirms the file exists on disk and has content. Task state persists across messages in a DB table, with auto-reset after 3 consecutive failures.</p>
 
     <!-- PIPELINE DIAGRAM -->
     <div class="diagram">
@@ -311,11 +314,10 @@
         </div>
     </div>
 
-    <h2>The infrastructure problem nobody talks about</h2>
-    <p>Even with the right architecture, Khalil kept failing. The phase transition would fire correctly at iteration 4, but the API call would time out. Every time.</p>
-    <p>After deep investigation, I found the real killer: <strong>background tasks were sabotaging user requests.</strong></p>
-    <p>Every time Khalil saved a message to the database, it triggered a background summarization job. That job made its own LLM API call. Between tool-use iterations, 2-3 background summarizers would fire, each making API calls through the same client. When they timed out, they tripped a circuit breaker — which then blocked the user's tool-use loop.</p>
-    <p>The user's request would fail not because anything was wrong with their request, but because a background housekeeping task used up the API's patience.</p>
+    <h2>Failure domain isolation</h2>
+    <p>With the phase-aware architecture in place, the system still failed — this time due to infrastructure contention.</p>
+    <p>The observed failure chain: every <code>save_message()</code> call triggered a background summarization job that made its own LLM API call. Between tool-use iterations, 2-3 background tasks would fire through the same HTTP client. When they timed out, they tripped a shared circuit breaker — which then blocked the foreground user request.</p>
+    <p>The user's request failed because a background housekeeping task consumed the API's error budget.</p>
     <p>The fix: <strong>failure domain isolation.</strong></p>
     <ul>
         <li>Separate circuit breakers for foreground (user requests, threshold=5) and background (summarization, threshold=2)</li>
@@ -323,17 +325,12 @@
         <li>Separate connection pool for long-running file generation</li>
         <li>Automatic retry for transient errors with escalating timeouts</li>
     </ul>
-    <p>This is infrastructure work that no demo or tutorial ever shows you. But without it, nothing works reliably.</p>
+    <h2>Result</h2>
+    <p>After these changes, the same request — "Build me an HTML presentation about Fall 2026 planning" — produced a 704-line file in 2 minutes on the first attempt. <code>generate_file</code> was called on iteration 0. The phase tracker, context assembly, and verification layer all functioned as designed.</p>
+    <p>The system went from 5 failed attempts over 2 days to reliable execution. The difference is structural: the architecture prevents the failure modes rather than patching individual symptoms.</p>
 
-    <h2>The moment it worked</h2>
-    <p>After the architecture redesign, the execution hardening, and the phase-aware execution — I asked again:</p>
-    <blockquote><p>Build me an HTML presentation about Fall 2026 messaging platform planning.</p></blockquote>
-    <p>Khalil called <code>generate_file</code> on <strong>iteration 0</strong>. No research loop. No preamble. Straight to action.</p>
-    <p>Two minutes later: a 704-line, 25,764-character HTML presentation. Opus model, first attempt.</p>
-    <p>It had taken 5 failed attempts over 2 days to get here. But the system didn't just work once — it worked <em>structurally</em>. The architecture prevents the failure modes, not just patches them.</p>
-
-    <h2>Building the safety net</h2>
-    <p>Working software is great. Software that <em>stays</em> working is better. I built a 4-tier quality system:</p>
+    <h2>Quality regression prevention</h2>
+    <p>To prevent degradation from this baseline, the system uses a 4-tier quality framework:</p>
     <ul>
         <li><strong>CI gates:</strong> Every PR runs 77 tests including 24 behavioral contracts — formalized invariants like "the research cap must be 4 iterations" and "background circuit breaker failures must not trip the foreground breaker."</li>
         <li><strong>Post-restart smoke test:</strong> Every time Khalil restarts, it verifies the pipeline is wired correctly. Intent classifier works? PhaseTracker loads? Core tools present? All checked in under 1 second.</li>
@@ -341,14 +338,13 @@
         <li><strong>Behavioral contracts:</strong> 24 tests that encode invariants, not implementation details. You can refactor the PhaseTracker however you want — the contract still holds.</li>
     </ul>
 
-    <h2>What Khalil can do today</h2>
-    <p><strong>59 skills, 200+ actions</strong> across Google Workspace, Apple ecosystem (Health, Music, Notes, Reminders, HomeKit), developer tools (GitHub, terminal, Cursor IDE, Claude Code), communication (Telegram, Slack, Discord, WhatsApp), productivity (Pomodoro, expense tracking, fasting, fitness), knowledge (Anki, Obsidian, Bear Notes, Readwise), and home automation.</p>
-    <p>The self-improvement loop runs 4x daily: detect capability gaps from conversation signals, generate new action modules, self-heal recurring failures, and open PRs against its own codebase.</p>
-    <p>Model cascade: Claude Opus → Sonnet → GPT-5.2 → Gemini 2.5 Pro → Ollama (local fallback). All running on a MacBook, managed by launchd, with a 150MB SQLite database.</p>
+    <h2>Current state</h2>
+    <p><strong>59 skills, 200+ actions</strong> covering: Google Workspace, Apple ecosystem, developer tools (GitHub, terminal, Cursor IDE, Claude Code), communication (Telegram, Slack, Discord, WhatsApp), productivity, knowledge management, and home automation.</p>
+    <p>Self-improvement runs 4x daily: detect capability gaps from conversation signals, generate new action modules, self-heal recurring failures, open PRs. Model cascade: Claude Opus → Sonnet → GPT-5.2 → Gemini 2.5 Pro → Ollama. Runs on a MacBook via launchd with a 150MB SQLite database and 46K-document vector index.</p>
 
     <hr>
 
-    <h2>What I actually learned</h2>
+    <h2>Observations</h2>
 
     <div class="lesson">
         <div class="lesson-num">01</div>
