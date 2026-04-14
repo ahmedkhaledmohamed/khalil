@@ -1,0 +1,9 @@
+{
+    "name": "macos_browser_tabs_readwise_highlights",
+    "command": "readtabs",
+    "description": "Actions 'macos_browser_tabs' and 'readwise_highlights' used together 46x — integration opportunity",
+    "action_module": "actions.macos_browser_tabs_readwise_highlights",
+    "handler_function": "handle_readtabs",
+    "generated_at": "2026-04-14T12:00:00",
+    "generated_for": "Actions 'macos_browser_tabs' and 'readwise_highlights' used together 46x — integration opportunity"
+}
