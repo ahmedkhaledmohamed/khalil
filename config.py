@@ -83,6 +83,32 @@ WORK_PROJECT_FILES = [
     (Path.home() / "Developer" / "ClientMessaging" / "CLAUDE.md", "work:cm-repo-guide"),
 ]
 
+# ── Knowledge Freshness (Tiered Re-indexing) ──
+# Watched directories for Tier 2 polling (scanned every 5 min for changed files)
+_DEFAULT_WATCH = [
+    str(WORK_DIR), str(CAREER_DIR), str(FINANCE_DIR),
+    str(PROJECTS_DIR), str(GOALS_DIR), str(LEARNING_DIR),
+] + [str(d) for d, _ in WORK_PROJECT_DOCS] + [str(d) for d in SIDE_PROJECT_DIRS]
+WATCH_PATHS: list[Path] = [
+    Path(p) for p in
+    os.environ.get("KHALIL_WATCH_PATHS", ":".join(_DEFAULT_WATCH)).split(":")
+    if p.strip() and Path(p).exists()
+]
+
+# Repo name → local path mapping for Tier 1 webhook-driven reindex
+# Format: "owner/repo:~/local/path;owner/repo2:~/path2"
+REPO_PATH_MAP: dict[str, Path] = {}
+for _pair in os.environ.get("KHALIL_REPO_PATH_MAP", "").split(";"):
+    if ":" in _pair and _pair.strip():
+        _repo, _path = _pair.strip().split(":", 1)
+        _expanded = Path(_path.strip()).expanduser()
+        if _expanded.exists():
+            REPO_PATH_MAP[_repo.strip()] = _expanded
+
+WATCH_POLL_INTERVAL = int(os.environ.get("KHALIL_WATCH_POLL_INTERVAL", "5"))  # minutes
+WATCH_MAX_FILES_PER_CYCLE = int(os.environ.get("KHALIL_WATCH_MAX_FILES", "20"))
+WATCH_ACTIVE_HOURS = (7, 23)  # only poll during these hours
+
 # Google OAuth (in Personal/scripts/, shared with other tools)
 CREDENTIALS_FILE = SCRIPTS_DIR / "credentials.json"
 TOKEN_FILE = SCRIPTS_DIR / "token.json"  # gmail.readonly + drive.readonly

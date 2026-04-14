@@ -243,6 +243,27 @@ def init_db() -> sqlite3.Connection:
         conn.execute("ALTER TABLE conversations ADD COLUMN message_type TEXT DEFAULT 'text'")
         conn.execute("ALTER TABLE conversations ADD COLUMN metadata TEXT")
 
+    # File freshness tracking for tiered re-indexing
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS file_freshness (
+            file_path TEXT PRIMARY KEY,
+            last_indexed_at REAL NOT NULL,
+            last_mtime REAL NOT NULL,
+            content_hash TEXT NOT NULL,
+            chunk_count INTEGER DEFAULT 0,
+            source TEXT,
+            category TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_file_freshness_source ON file_freshness(source);
+    """)
+
+    # Migration: add source_path to documents for per-file delete-and-reinsert
+    try:
+        conn.execute("SELECT source_path FROM documents LIMIT 0")
+    except Exception:
+        conn.execute("ALTER TABLE documents ADD COLUMN source_path TEXT")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_source_path ON documents(source_path)")
+
     conn.commit()
     return conn
 
@@ -557,7 +578,8 @@ def parse_cursor_transcript(
     return entries
 
 
-async def index_source(conn: sqlite3.Connection, source: str, category: str, entries: list[dict]):
+async def index_source(conn: sqlite3.Connection, source: str, category: str, entries: list[dict],
+                       source_path: str | None = None):
     """Index entries: store in documents table and generate embeddings."""
     if not entries:
         return 0
@@ -566,8 +588,9 @@ async def index_source(conn: sqlite3.Connection, source: str, category: str, ent
     doc_ids = []
     for entry in entries:
         cursor = conn.execute(
-            "INSERT INTO documents (source, category, title, content, metadata) VALUES (?, ?, ?, ?, ?)",
-            (source, category, entry["title"], entry["content"], entry.get("metadata", "")),
+            "INSERT INTO documents (source, category, title, content, metadata, source_path) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (source, category, entry["title"], entry["content"], entry.get("metadata", ""), source_path),
         )
         doc_ids.append(cursor.lastrowid)
 
@@ -584,6 +607,82 @@ async def index_source(conn: sqlite3.Connection, source: str, category: str, ent
 
     conn.commit()
     return len(entries)
+
+
+async def reindex_files(file_paths: list[str], max_files: int = 20) -> dict:
+    """Reindex specific files: delete old chunks, parse, embed, insert.
+
+    Used by the freshness watcher (Tier 2 polling) and webhook handler (Tier 1).
+    Content hash check skips files that were touched but not changed.
+
+    Returns {"indexed": N, "skipped": N, "errors": N, "queued": [...]}
+    """
+    import hashlib
+    import time as _time
+
+    conn = init_db()
+    result = {"indexed": 0, "skipped": 0, "errors": 0, "queued": []}
+
+    SUPPORTED = {".md", ".csv"}
+    to_process = [p for p in file_paths if Path(p).suffix in SUPPORTED and Path(p).exists()]
+
+    # Rate limit: queue excess files for next cycle
+    if len(to_process) > max_files:
+        result["queued"] = to_process[max_files:]
+        to_process = to_process[:max_files]
+
+    for fp in to_process:
+        try:
+            filepath = Path(fp)
+            content = filepath.read_text(encoding="utf-8", errors="replace")
+            content_hash = hashlib.sha256(content.encode()).hexdigest()
+
+            # Check if content actually changed
+            row = conn.execute(
+                "SELECT content_hash FROM file_freshness WHERE file_path = ?", (fp,)
+            ).fetchone()
+            if row and row[0] == content_hash:
+                result["skipped"] += 1
+                continue
+
+            # Delete old chunks for this file
+            old_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM documents WHERE source_path = ?", (fp,)
+            ).fetchall()]
+            if old_ids:
+                placeholders = ",".join("?" * len(old_ids))
+                conn.execute(f"DELETE FROM document_embeddings WHERE id IN ({placeholders})", old_ids)
+                conn.execute(f"DELETE FROM documents WHERE id IN ({placeholders})", old_ids)
+
+            # Parse file
+            if filepath.suffix == ".md":
+                entries = parse_markdown_file(filepath)
+            elif filepath.suffix == ".csv":
+                entries = parse_csv_file(filepath)
+            else:
+                continue
+
+            # Categorize
+            source, category = _categorize_repo_file(filepath)
+
+            # Index with source_path
+            n = await index_source(conn, source, category, entries, source_path=fp)
+
+            # Update freshness tracking
+            conn.execute(
+                "INSERT OR REPLACE INTO file_freshness "
+                "(file_path, last_indexed_at, last_mtime, content_hash, chunk_count, source, category) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (fp, _time.time(), filepath.stat().st_mtime, content_hash, n, source, category),
+            )
+            conn.commit()
+            result["indexed"] += 1
+
+        except Exception as e:
+            log.warning("reindex_files: error on %s: %s", fp, e)
+            result["errors"] += 1
+
+    return result
 
 
 async def index_all(force: bool = False):
