@@ -36,6 +36,8 @@ class GitHubWebhookHandler(WebhookHandler):
         if "pusher" in payload:
             event_type = "push"
             result = self._handle_push(payload)
+            # Tier 1: trigger knowledge reindex for changed files
+            await self._trigger_reindex_from_push(payload)
         elif "pull_request" in payload:
             event_type = "pull_request"
             result = self._handle_pr(payload)
@@ -64,6 +66,57 @@ class GitHubWebhookHandler(WebhookHandler):
             log.debug("Workflow trigger from webhook failed: %s", e)
 
         return result
+
+    async def _trigger_reindex_from_push(self, payload: dict):
+        """Tier 1: map changed files from push to local paths and reindex."""
+        from config import REPO_PATH_MAP
+        repo_name = payload.get("repository", {}).get("full_name", "")
+        local_root = REPO_PATH_MAP.get(repo_name)
+        if not local_root or not local_root.exists():
+            return  # No local mapping — skip
+
+        # git pull to get latest changes locally
+        import subprocess
+        try:
+            subprocess.run(
+                ["git", "pull", "--ff-only"],
+                cwd=str(local_root), capture_output=True, timeout=30,
+            )
+        except Exception as e:
+            log.warning("git pull failed for %s: %s", repo_name, e)
+
+        # Collect changed files from all commits
+        changed, removed = set(), set()
+        for commit in payload.get("commits", []):
+            changed.update(commit.get("added", []))
+            changed.update(commit.get("modified", []))
+            removed.update(commit.get("removed", []))
+
+        SUPPORTED = {".md", ".csv"}
+        local_changed = [
+            str(local_root / f) for f in changed
+            if any(f.endswith(ext) for ext in SUPPORTED)
+        ]
+        local_removed = [
+            str(local_root / f) for f in removed
+            if any(f.endswith(ext) for ext in SUPPORTED)
+        ]
+
+        if local_changed:
+            try:
+                from knowledge.watcher import trigger_reindex_files
+                result = await trigger_reindex_files(local_changed)
+                log.info("Webhook reindex for %s: %d indexed, %d skipped",
+                         repo_name, result.get("indexed", 0), result.get("skipped", 0))
+            except Exception as e:
+                log.warning("Webhook reindex failed for %s: %s", repo_name, e)
+
+        if local_removed:
+            try:
+                from knowledge.watcher import remove_indexed_files
+                await remove_indexed_files(local_removed)
+            except Exception as e:
+                log.warning("Webhook remove failed for %s: %s", repo_name, e)
 
     def _handle_push(self, payload: dict) -> str:
         repo = payload.get("repository", {}).get("full_name", "unknown")

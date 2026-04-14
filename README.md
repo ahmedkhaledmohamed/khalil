@@ -9,28 +9,47 @@ A self-improving AI agent that runs on a laptop. Classifies intent, assembles co
 ## Quick Start
 
 ```bash
-# 1. Set up
+git clone git@github.com:ahmedkhaledmohamed/khalil.git
+cd khalil
+make install
+```
+
+The interactive installer walks you through 9 phases — all optional except the core (Telegram token + API key):
+
+1. System deps (Homebrew, Python, Ollama)
+2. Python environment (venv + 67 packages)
+3. Ollama models (embeddings required, local LLM optional)
+4. Core secrets (Telegram + Anthropic)
+5. **Data sources** (Google Workspace, Slack, Spotify, Notion, Home Assistant — all optional)
+6. Database (restore backup, import knowledge, or fresh start)
+7. **Knowledge base indexing** (indexes your emails, docs, repos — optional, 10-30 min)
+8. LaunchAgent (macOS daemon)
+9. Start + health check
+
+Safe to re-run — skips completed phases.
+
+```bash
+make status    # Check health
+make logs      # Tail logs
+make restart   # Restart daemon
+make secrets   # Re-configure integrations
+make index     # Re-index knowledge base
+make test      # Run 910 tests
+```
+
+<details>
+<summary>Manual setup (without installer)</summary>
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-# 2. Configure secrets
 python3 -c "import keyring; keyring.set_password('khalil-assistant', 'telegram-bot-token', 'YOUR_TOKEN')"
 python3 -c "import keyring; keyring.set_password('khalil-assistant', 'anthropic-api-key', 'YOUR_KEY')"
-
-# 3. Start Ollama (for embeddings + local LLM)
-ollama serve &
-ollama pull nomic-embed-text
-ollama pull qwen3:14b
-
-# 4. Run
+ollama serve & ollama pull nomic-embed-text
 python3 server.py
 ```
 
-Or run as a macOS daemon:
-```bash
-cp com.khalil.daemon.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.khalil.daemon.plist
-```
+</details>
 
 Or use the CLI (no Telegram required):
 ```bash

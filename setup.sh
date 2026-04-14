@@ -1,6 +1,9 @@
 #!/bin/bash
-# Khalil — Setup Script
-# Run once to set up the environment.
+# Khalil — Legacy Setup Script
+# Preserved for backward compatibility. For the full interactive installer, use:
+#   make install
+# or:
+#   bash install.sh
 
 set -e
 

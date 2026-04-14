@@ -1,5 +1,7 @@
 # Porting Khalil to a New Machine
 
+> **Automated setup**: Run `make install` for an interactive wizard that handles all steps below. The manual guide is preserved as reference.
+
 Step-by-step guide to get Khalil fully operational on a new macOS device. Estimated time: ~30 minutes (excluding OAuth flows).
 
 ## Prerequisites
