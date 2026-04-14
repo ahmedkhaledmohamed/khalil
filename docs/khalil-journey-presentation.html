@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Khalil: The Journey of an AI Assistant</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e0e0e0;
+            overflow: hidden;
+            height: 100vh;
+        }
+
+        .presentation-container {
+            position: relative;
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .slide {
+            position: absolute;
+            width: 90%;
+            max-width: 1200px;
+            height: 85vh;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            border-radius: 20px;
+            padding: 60px;
+            box-shadow: 0 20px 60px rgba(0, 206, 209, 0.1);
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .slide.active {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .slide.prev {
+            transform: translateX(-100%);
+        }
+
+        h1 {
+            font-size: 3.5em;
+            font-weight: 700;
+            margin-bottom: 30px;
+            background: linear-gradient(135deg, #00CED1 0%, #48D1CC 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            line-height: 1.2;
+        }
+
+        h2 {
+            font-size: 2.5em;
+            font-weight: 600;
+            margin-bottom: 40px;
+            color: #00CED1;
+        }
+
+        h3 {
+            font-size: 1.8em;
+            font-weight: 500;
+            margin-bottom: 20px;
+            color: #48D1CC;
+        }
+
+        p, li {
+            font-size: 1.3em;
+            line-height: 1.8;
+            margin-bottom: 20px;
+            color: #b0b0b0;
+        }
+
+        .subtitle {
+            font-size: 1.6em;
+            color: #888;
+            margin-bottom: 40px;
+        }
+
+        .navigation {
+            position: fixed;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 20px;
+            z-index: 100;
+        }
+
+        .nav-btn {
+            background: rgba(0, 206, 209, 0.2);
+            border: 2px solid #00CED1;
+            color: #00CED1;
+            padding: 12px 24px;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .nav-btn:hover {
+            background: #00CED1;
+            color: #0a0a0a;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(0, 206, 209, 0.4);
+        }
+
+        .nav-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+
+        .slide-indicator {
+            position: fixed;
+            top: 40px;
+            right: 40px;
+            color: #666;
+            font-size: 1.2em;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+
+        .card {
+            background: rgba(0, 206, 209, 0.1);
+            border: 1px solid rgba(0, 206, 209, 0.3);
+            border-radius: 15px;
+            padding: 30px;
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 206, 209, 0.2);
+            border-color: #00CED1;
+        }
+
+        .tech-stack {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .tech-badge {
+            background: rgba(0, 206, 209, 0.2);
+            color: #00CED1;
+            padding: 8px 20px;
+            border-radius: 20px;
+            font-size: 1em;
+            border: 1px solid rgba(0, 206, 209, 0.4);
+        }
+
+        .feature-list {
+            list-style: none;
+            margin-top: 30px;
+        }
+
+        .feature-list li {
+            position: relative;
+            padding-left: 40px;
+            margin-bottom: 20px;
+        }
+
+        .feature-list li:before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: #00CED1;
+            font-size: 1.5em;
+        }
+
+        .architecture-diagram {
+            background: rgba(0, 0, 0, 0.5);
+            border: 1px solid #333;
+            border-radius: 15px;
+            padding: 40px;
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .flow-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .flow-box {
+            background: rgba(0, 206, 209, 0.1);
+            border: 2px solid #00CED1;
+            border-radius: 10px;
+            padding: 20px 30px;
+            font-size: 1.2em;
+            color: #00CED1;
+            position: relative;
+        }
+
+        .flow-arrow {
+            color: #00CED1;
+            font-size: 2em;
+        }
+
+        .code-block {
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            overflow-x: auto;
+        }
+
+        .highlight {
+            color: #00CED1;
+            font-weight: 600;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-in {
+            animation: fadeIn 0.8s ease-out forwards;
+        }
+
+        .timeline {
+            position: relative;
+            margin: 40px 0;
+        }
+
+        .timeline-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 30px;
+            opacity: 0;
+            animation: fadeIn 0.8s ease-out forwards;
+        }
+
+        .timeline-item:nth-child(1) { animation-delay: 0.2s; }
+        .timeline-item:nth-child(2) { animation-delay: 0.4s; }
+        .timeline-item:nth-child(3) { animation-delay: 0.6s; }
+        .timeline-item:nth-child(4) { animation-delay: 0.8s; }
+
+        .timeline-dot {
+            width: 20px;
+            height: 20px;
+            background: #00CED1;
+            border-radius: 50%;
+            margin-right: 30px;
+            position: relative;
+        }
+
+        .timeline-dot::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 9px;
+            width: 2px;
+            height: 40px;
+            background: rgba(0, 206, 209, 0.3);
+        }
+
+        .timeline-item:last-child .timeline-dot::after {
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 1000;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00CED1 0%, #48D1CC 100%);
+            transition: width 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressBar"></div>
+    </div>
+
+    <div class="slide-indicator" id="slideIndicator">1 / 10</div>
+
+    <div class="presentation-container">
+        <!-- Slide 1: Title -->
+        <div class="slide active">
+            <h1>Khalil</h1>
+            <p class="subtitle">The Journey of an AI Assistant</p>
+            <div style="margin-top: 60px;">
+                <p style="font-size: 1.4em; color: #888;">A personal AI that learns, adapts, and acts</p>
+                <div class="tech-stack">
+                    <span class="tech-badge">Python</span>
+                    <span class="tech-badge">FastAPI</span>
+                    <span class="tech-badge">Claude API</span>
+                    <span class="tech-badge">MCP Protocol</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 2: Origins & Vision -->
+        <div class="slide">
+            <h2>Origins & Vision</h2>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>The Spark</h3>
+                        <p>Started as a simple Telegram bot to answer questions</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>The Vision</h3>
+                        <p>Evolved into a comprehensive personal AI assistant</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>The Goal</h3>
+                        <p>Create an AI that truly understands context and takes action</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 3: Early Struggles -->
+        <div class="slide">
+            <h2>Early Struggles</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>Authentication Maze</h3>
+                    <p>Wrestling with OAuth flows, API keys, and service permissions</p>
+                </div>
+                <div class="card">
+                    <h3>Context Limitations</h3>
+                    <p>Managing conversation history within token limits</p>
+                </div>
+                <div class="card">
+                    <h3>API Rate Limits</h3>
+                    <p>Balancing functionality with service constraints</p>
+                </div>
+                <div class="card">
+                    <h3>Integration Complexity</h3>
+                    <p>Connecting disparate services into a cohesive system</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 4: Technical Architecture -->
+        <div class="slide">
+            <h2>Technical Architecture</h2>
+            <div class="architecture-diagram">
+                <div class="flow-container">
+                    <div class="flow-box">User Input</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">FastAPI Backend</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">MCP Router</div>
+                </div>
+                <div class="flow-container">
+                    <div class="flow-box">Claude API</div>
+                    <span class="flow-arrow">↔</span>
+                    <div class="flow-box">Tool Execution</div>
+                    <span class="flow-arrow">↔</span>
+                    <div class="flow-box">Response</div>
+                </div>
+            </div>
+            <div class="code-block">
+                <span class="highlight">@app.post</span>("/chat")
+                <br>async def chat(message: str):
+                <br>&nbsp;&nbsp;&nbsp;&nbsp;context = await load_context()
+                <br>&nbsp;&nbsp;&nbsp;&nbsp;tools = await mcp.get_available_tools()
+                <br>&nbsp;&nbsp;&nbsp;&nbsp;response = await claude.complete(message, tools)
+                <br>&nbsp;&nbsp;&nbsp;&nbsp;return execute_and_respond(response)
+            </div>
+        </div>
+
+        <!-- Slide 5: Core Capabilities -->
+        <div class="slide">
+            <h2>Core Capabilities</h2>
+            <ul class="feature-list">
+                <li><span class="highlight">Knowledge Search</span> - Semantic search across personal documents</li>
+                <li><span class="highlight">File Generation</span> - Create documents, presentations, and code</li>
+                <li><span class="highlight">Web Search</span> - Real-time information retrieval</li>
+                <li><span class="highlight">Calendar Management</span> - Schedule and manage events</li>
+                <li><span class="highlight">Task Automation</span> - Execute shell commands and workflows</li>
+                <li><span class="highlight">Smart Delegation</span> - Route tasks to appropriate services</li>
+            </ul>
+        </div>
+
+        <!-- Slide 6: MCP Integrations -->
+        <div class="slide">
+            <h2>MCP Integrations</h2>
+            <p style="margin-bottom: 40px;">Connected services through Model Context Protocol</p>
+            <div class="grid">
+                <div class="card">
+                    <h3>📁 Storage</h3>
+                    <p>Google Drive, Dropbox, Local filesystem</p>
+                </div>
+                <div class="card">
+                    <h3>🍎 Apple Services</h3>
+                    <p>Notes, Reminders, Calendar, Contacts</p>
+                </div>
+                <div class="card">
+                    <h3>💻 Development</h3>
+                    <p>GitHub, Shell commands, Code execution</p>
+                </div>
+                <div class="card">
+                    <h3>🔍 Information</h3>
+                    <p>Web search, Knowledge base, Documentation</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 7: Knowledge System -->
+        <div class="slide">
+            <h2>Knowledge System</h2>
+            <div class="architecture-diagram">
+                <h3>How It Works</h3>
+                <div class="flow-container" style="margin-top: 30px;">
+                    <div class="flow-box">Document Ingestion</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">Embedding Generation</div>
+                </div>
+                <div class="flow-container">
+                    <div class="flow-box">Vector Storage</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-box">Semantic Search</div>
+                </div>
+            </div>
+            <ul class="feature-list" style="margin-top: 40px;">
+                <li>Indexes emails, documents, and notes automatically</li>
+                <li>Uses embeddings for semantic similarity search</li>
+                <li>Maintains context across different data sources</li>
+                <li>Updates in real-time as new content arrives</li>
+            </ul>
+        </div>
+
+        <!-- Slide 8: Workflow Examples -->
+        <div class="slide">
+            <h2>Real-World Workflows</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>📊 Fall 2026 Planning</h3>
+                    <p>"Analyze my calendar and create a presentation about Q4 goals"</p>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">→ Searches calendar, analyzes patterns, generates slides</p>
+                </div>
+                <div class="card">
+                    <h3>📧 Email Intelligence</h3>
+                    <p>"What did Sarah say about the project timeline?"</p>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">→ Searches emails, extracts relevant context</p>
+                </div>
+                <div class="card">
+                    <h3>🎯 Task Automation</h3>
+                    <p>"Set up the development environment for the new project"</p>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">→ Executes shell commands, creates files, configures services</p>
+                </div>
+                <div class="card">
+                    <h3>📝 Content Generation</h3>
+                    <p>"Create a technical blog post about our architecture"</p>
+                    <p style="font-size: 0.9em; color: #666; margin-top: 10px;">→ Analyzes codebase, generates formatted content</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 9: Current Limitations -->
+        <div class="slide">
+            <h2>Current Limitations</h2>
+            <div class="grid">
+                <div class="card">
+                    <h3>🧠 Context Windows</h3>
+                    <p>Limited by token constraints, requiring careful context management</p>
+                </div>
+                <div class="card">
+                    <h3>💾 Session Memory</h3>
+                    <p>No persistent memory between sessions without explicit storage</p>
+                </div>
+                <div class="card">
+                    <h3>🔌 API Dependencies</h3>
+                    <p>Reliant on external services and their availability</p>
+                </div>
+                <div class="card">
+                    <h3>⚡ Processing Speed</h3>
+                    <p>Complex queries can take time due to multiple API calls</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Slide 10: Future Vision -->
+        <div class="slide">
+            <h2>The Future of Khalil</h2>
+            <div class="timeline">
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>Persistent Memory</h3>
+                        <p>Long-term memory system for continuous learning</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>Proactive Intelligence</h3>
+                        <p>Anticipate needs and suggest actions before being asked</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>Multi-Modal Understanding</h3>
+                        <p>Process images, audio, and video alongside text</p>
+                    </div>
+                </div>
+                <div class="timeline-item">
+                    <div class="timeline-dot"></div>
+                    <div>
+                        <h3>Distributed Architecture</h3>
+                        <p>Scale beyond a single machine to handle more complex tasks</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="navigation">
+        <button class="nav-btn" id="prevBtn" onclick="changeSlide(-1)">← Previous</button>
+        <button class="nav-btn" id="nextBtn" onclick="changeSlide(1)">Next →</button>
+    </div>
+
+    <script>
+        let currentSlide = 0;
+        const slides = document.querySelectorAll('.slide');
+        const totalSlides = slides.length;
+
+        function updateSlideVisibility() {
+            slides.forEach((slide, index) => {
+                slide.classList.remove('active', 'prev');
+                if (index === currentSlide) {
+                    slide.classList.add('active');
+                } else if (index < currentSlide) {
+                    slide.classList.add('prev');
+                }
+            });
+
+            // Update navigation buttons
+            document.getElementById('prevBtn').disabled = currentSlide === 0;
+            document.getElementById('nextBtn').disabled = currentSlide === totalSlides - 1;
+
+            // Update slide indicator
+            document.getElementById('slideIndicator').textContent = `${currentSlide + 1} / ${totalSlides}`;
+
+            // Update progress bar
+            const progress = ((currentSlide + 1) / totalSlides) * 100;
+            document.getElementById('progressBar').style.width = `${progress}%`;
+        }
+
+        function changeSlide(direction) {
+            const newSlide = currentSlide + direction;
+            if (newSlide >= 0 && newSlide < totalSlides) {
+                currentSlide = newSlide;
+                updateSlideVisibility();
+            }
+        }
+
+        // Keyboard navigation
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft') changeSlide(-1);
+            if (e.key === 'ArrowRight') changeSlide(1);
+        });
+
+        // Touch/swipe support
+        let touchStartX = 0;
+        let touchEndX = 0;
+
+        document.addEventListener('touchstart', (e) => {
+            touchStartX = e.changedTouches[0].screenX;
+        });
+
+        document.addEventListener('touchend', (e) => {
+            touchEndX = e.changedTouches[0].screenX;
+            handleSwipe();
+        });
+
+        function handleSwipe() {
+            if (touchEndX < touchStartX - 50) changeSlide(1);
+            if (touchEndX > touchStartX + 50) changeSlide(-1);
+        }
+
+        // Initialize
+        updateSlideVisibility();
+    </script>
+</body>
+</html>

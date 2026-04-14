@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Escalation Ladder</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px; }
+  .card { background: #12121a; border-radius: 20px; padding: 48px; border: 1px solid #1e1e2e; max-width: 720px; width: 100%; }
+  .title { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; color: #8b5cf6; margin-bottom: 8px; }
+  .heading { font-size: 26px; font-weight: 800; color: #f0f0f5; margin-bottom: 8px; }
+  .subtitle { font-size: 14px; color: #666; margin-bottom: 36px; line-height: 1.5; }
+  .ladder { display: flex; flex-direction: column; gap: 0; }
+  .rung { display: flex; align-items: stretch; gap: 0; }
+  .rung-left { width: 100px; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; }
+  .rung-iter { font-size: 12px; font-weight: 700; color: #666; font-family: 'JetBrains Mono', monospace; }
+  .rung-line { width: 2px; flex: 1; min-height: 16px; }
+  .rung-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid; flex-shrink: 0; }
+  .rung-body { flex: 1; padding: 16px 20px; border-radius: 12px; margin: 6px 0; border: 1px solid; }
+  .rung-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .rung-desc { font-size: 13px; line-height: 1.5; }
+  .rung-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 4px; margin-top: 6px; letter-spacing: 0.5px; text-transform: uppercase; }
+
+  /* Level 0 - green */
+  .l0 .rung-dot { border-color: #22c55e; background: #0a1a0e; }
+  .l0 .rung-line { background: linear-gradient(to bottom, transparent, #22c55e40); }
+  .l0 .rung-body { background: #0e1a12; border-color: #1a3a22; }
+  .l0 .rung-name { color: #4ade80; }
+  .l0 .rung-desc { color: #88b898; }
+  .l0 .rung-tag { background: #14532d; color: #4ade80; }
+
+  /* Level 1 - yellow */
+  .l1 .rung-dot { border-color: #eab308; background: #1a1a0a; }
+  .l1 .rung-line { background: linear-gradient(to bottom, #22c55e40, #eab30840); }
+  .l1 .rung-body { background: #1a1812; border-color: #3a3422; }
+  .l1 .rung-name { color: #facc15; }
+  .l1 .rung-desc { color: #b8a878; }
+  .l1 .rung-tag { background: #422d07; color: #facc15; }
+
+  /* Level 2 - orange */
+  .l2 .rung-dot { border-color: #f97316; background: #1a120a; }
+  .l2 .rung-line { background: linear-gradient(to bottom, #eab30840, #f9731640); }
+  .l2 .rung-body { background: #1a1412; border-color: #3a2a1e; }
+  .l2 .rung-name { color: #fb923c; }
+  .l2 .rung-desc { color: #b89878; }
+  .l2 .rung-tag { background: #431407; color: #fb923c; }
+
+  /* Level 3 - red */
+  .l3 .rung-dot { border-color: #ef4444; background: #1a0a0a; }
+  .l3 .rung-line { background: linear-gradient(to bottom, #f9731640, #ef444440); }
+  .l3 .rung-body { background: #1a1214; border-color: #3a1e22; }
+  .l3 .rung-name { color: #f87171; }
+  .l3 .rung-desc { color: #b87878; }
+  .l3 .rung-tag { background: #450a0a; color: #f87171; }
+
+  /* Level 4 - purple */
+  .l4 .rung-dot { border-color: #8b5cf6; background: #140a1a; }
+  .l4 .rung-line { background: linear-gradient(to bottom, #ef444440, #8b5cf640); }
+  .l4 .rung-body { background: #16121a; border-color: #2e1e3a; }
+  .l4 .rung-name { color: #a78bfa; }
+  .l4 .rung-desc { color: #9888b8; }
+  .l4 .rung-tag { background: #2e1065; color: #a78bfa; }
+
+  .freedom-bar { margin-top: 28px; display: flex; align-items: center; gap: 12px; }
+  .freedom-label { font-size: 11px; color: #666; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; white-space: nowrap; }
+  .freedom-track { flex: 1; height: 6px; border-radius: 3px; background: linear-gradient(to right, #22c55e, #eab308, #f97316, #ef4444, #8b5cf6); opacity: 0.6; }
+  .freedom-ends { display: flex; justify-content: space-between; font-size: 11px; color: #555; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="title">Phase-Aware Execution</div>
+  <div class="heading">The Escalation Ladder</div>
+  <div class="subtitle">For artifact tasks, the LLM gets progressively less freedom to procrastinate. At Level 3, the only available tool is generate_file. At Level 4, the system bypasses the LLM entirely.</div>
+
+  <div class="ladder">
+    <div class="rung l0">
+      <div class="rung-left">
+        <div class="rung-iter">iter 0-3</div>
+        <div class="rung-dot"></div>
+        <div class="rung-line"></div>
+      </div>
+      <div class="rung-body">
+        <div class="rung-name">Free Research</div>
+        <div class="rung-desc">All tools available. Search, read documents, explore. No restrictions.</div>
+        <div class="rung-tag">Full autonomy</div>
+      </div>
+    </div>
+
+    <div class="rung l1">
+      <div class="rung-left">
+        <div class="rung-line"></div>
+        <div class="rung-iter">iter 4</div>
+        <div class="rung-dot"></div>
+        <div class="rung-line"></div>
+      </div>
+      <div class="rung-body">
+        <div class="rung-name">Nudge</div>
+        <div class="rung-desc">Prompt injected: "You have enough context. Call generate_file NOW."</div>
+        <div class="rung-tag">Guided</div>
+      </div>
+    </div>
+
+    <div class="rung l2">
+      <div class="rung-left">
+        <div class="rung-line"></div>
+        <div class="rung-iter">iter 5</div>
+        <div class="rung-dot"></div>
+        <div class="rung-line"></div>
+      </div>
+      <div class="rung-body">
+        <div class="rung-name">Restrict</div>
+        <div class="rung-desc">Search tools physically removed from the tool list. Only action tools remain.</div>
+        <div class="rung-tag">Tools restricted</div>
+      </div>
+    </div>
+
+    <div class="rung l3">
+      <div class="rung-left">
+        <div class="rung-line"></div>
+        <div class="rung-iter">iter 6+</div>
+        <div class="rung-dot"></div>
+        <div class="rung-line"></div>
+      </div>
+      <div class="rung-body">
+        <div class="rung-name">Force</div>
+        <div class="rung-desc">tool_choice locked to generate_file. The LLM cannot call any other tool.</div>
+        <div class="rung-tag">Forced action</div>
+      </div>
+    </div>
+
+    <div class="rung l4">
+      <div class="rung-left">
+        <div class="rung-line"></div>
+        <div class="rung-iter">exhaustion</div>
+        <div class="rung-dot"></div>
+      </div>
+      <div class="rung-body">
+        <div class="rung-name">Programmatic Fallback</div>
+        <div class="rung-desc">LLM bypassed entirely. System constructs the generate_file call from gathered tool results.</div>
+        <div class="rung-tag">LLM bypassed</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="freedom-bar">
+    <div class="freedom-label">LLM Freedom</div>
+    <div>
+      <div class="freedom-track"></div>
+      <div class="freedom-ends"><span>Full</span><span>None</span></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Before vs After Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0a0f; font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; padding: 40px; }
+  .container { display: flex; gap: 48px; max-width: 1200px; }
+  .panel { flex: 1; background: #12121a; border-radius: 16px; padding: 36px; border: 1px solid #1e1e2e; }
+  .panel-before { border-color: #3b1818; }
+  .panel-after { border-color: #183b1e; }
+  .panel-label { font-size: 11px; font-weight: 600; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+  .panel-before .panel-label { color: #ef4444; }
+  .panel-after .panel-label { color: #22c55e; }
+  .panel-title { font-size: 22px; font-weight: 700; color: #f0f0f5; margin-bottom: 24px; }
+  .flow { display: flex; flex-direction: column; gap: 12px; }
+  .node { padding: 14px 18px; border-radius: 10px; font-size: 14px; color: #d0d0dd; display: flex; align-items: center; gap: 10px; }
+  .node-icon { font-size: 16px; flex-shrink: 0; }
+  .node-text { font-weight: 500; }
+  .node-sub { font-size: 12px; color: #666; margin-top: 2px; }
+  .panel-before .node { background: #1a1218; border: 1px solid #2a1a1a; }
+  .panel-after .node { background: #121a14; border: 1px solid #1a2a1e; }
+  .arrow { text-align: center; color: #444; font-size: 18px; line-height: 1; }
+  .node-problem { background: #2a1418 !important; border-color: #4a2028 !important; }
+  .node-problem .node-text { color: #f87171; }
+  .node-solution { background: #142a1a !important; border-color: #1e4a28 !important; }
+  .node-solution .node-text { color: #4ade80; }
+  .result { margin-top: 20px; padding: 16px; border-radius: 10px; text-align: center; font-size: 15px; font-weight: 600; }
+  .panel-before .result { background: #1a0a0a; color: #ef4444; border: 1px solid #3b1818; }
+  .panel-after .result { background: #0a1a0e; color: #22c55e; border: 1px solid #183b1e; }
+  .result-big { font-size: 28px; font-weight: 800; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="panel panel-before">
+    <div class="panel-label">Before</div>
+    <div class="panel-title">Flat Tool-Routing Loop</div>
+    <div class="flow">
+      <div class="node"><span class="node-icon">💬</span><div><div class="node-text">Message arrives</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node"><span class="node-icon">🤖</span><div><div class="node-text">LLM picks a tool</div><div class="node-sub">Same tools, same prompt, every iteration</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-problem"><span class="node-icon">🔍</span><div><div class="node-text">search_knowledge (again)</div><div class="node-sub">10 consecutive searches, never acts</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-problem"><span class="node-icon">🔍</span><div><div class="node-text">search_knowledge (again)</div><div class="node-sub">Research is safe, generation is risky</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-problem"><span class="node-icon">⏰</span><div><div class="node-text">Iterations exhausted</div><div class="node-sub">12 iterations burned on research</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-problem"><span class="node-icon">💬</span><div><div class="node-text">"I'll create the presentation..."</div><div class="node-sub">Preamble response, no file created</div></div></div>
+    </div>
+    <div class="result">
+      <div class="result-big">36 hours</div>
+      0 files created
+    </div>
+  </div>
+
+  <div class="panel panel-after">
+    <div class="panel-label">After</div>
+    <div class="panel-title">Phase-Aware Execution</div>
+    <div class="flow">
+      <div class="node"><span class="node-icon">🏷️</span><div><div class="node-text">Classify Intent</div><div class="node-sub">TASK detected → artifact pipeline</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node"><span class="node-icon">📚</span><div><div class="node-text">Assemble Context</div><div class="node-sub">KB search + full document retrieval</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-solution"><span class="node-icon">🔍</span><div><div class="node-text">Research (capped at 4)</div><div class="node-sub">PhaseTracker monitors tool usage</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-solution"><span class="node-icon">⚡</span><div><div class="node-text">Escalate → Force generate_file</div><div class="node-sub">Nudge → restrict tools → force tool_choice</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node node-solution"><span class="node-icon">📄</span><div><div class="node-text">Artifact Created</div><div class="node-sub">704 lines, 25K chars, verified on disk</div></div></div>
+      <div class="arrow">↓</div>
+      <div class="node"><span class="node-icon">✅</span><div><div class="node-text">Verify & Complete Task</div><div class="node-sub">File exists check, task state updated</div></div></div>
+    </div>
+    <div class="result">
+      <div class="result-big">2 minutes</div>
+      704-line presentation, first attempt
+    </div>
+  </div>
+</div>
+</body>
+</html>
