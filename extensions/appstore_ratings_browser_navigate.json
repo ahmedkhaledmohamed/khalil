@@ -1,0 +1,9 @@
+{
+    "name": "appstore_ratings_browser_navigate",
+    "command": "appreviews",
+    "description": "App Store ratings dashboard — fetch reviews via API and screenshot the listing page",
+    "action_module": "actions.appstore_ratings_browser_navigate",
+    "handler_function": "handle_appreviews",
+    "generated_at": "2026-04-13T12:00:00",
+    "generated_for": "Actions 'appstore_ratings' and 'browser_navigate' used together 52x — integration opportunity"
+}
