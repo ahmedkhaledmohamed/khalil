@@ -1,0 +1,9 @@
+{
+    "name": "apple_music_pause_slack_read",
+    "command": "focusslack",
+    "description": "Pause Apple Music and read Slack — focus-mode combo for catching up on messages",
+    "action_module": "actions.apple_music_pause_slack_read",
+    "handler_function": "handle_focusslack",
+    "generated_at": "2026-04-15T12:00:00",
+    "generated_for": "Actions 'apple_music_pause' and 'slack_read' used together 37x — integration opportunity"
+}
