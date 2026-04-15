@@ -3217,6 +3217,11 @@ def _try_direct_shell_intent(text: str) -> dict | None:
     text_stripped = text.strip()
     text_lower = text_stripped.lower()
 
+    # Check for colon-separated patterns that might be commands or queries
+    if ':' in text_lower and re.search(r':\w+', text_lower):
+        # Return None to let LLM handle these
+        return None
+
     # "open <App>"
     m = re.search(r"\bopen\s+(?:the\s+)?(safari|chrome|slack|finder|terminal|music|notes|calendar|spotify|mail|discord|zoom|vscode|vs code|arc|firefox|brave)\b", text_lower)
     if m:
