@@ -1,0 +1,9 @@
+{
+    "name": "anki_create_anki_status",
+    "command": "anki",
+    "description": "Actions 'anki_create' and 'anki_status' used together 26x — integration opportunity",
+    "action_module": "actions.anki_create_anki_status",
+    "handler_function": "handle_anki",
+    "generated_at": "2026-04-15T12:00:00",
+    "generated_for": "Actions 'anki_create' and 'anki_status' used together 26x — integration opportunity"
+}
