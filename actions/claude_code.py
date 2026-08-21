@@ -7,13 +7,55 @@ multi-step flows, or complex integrations.
 
 import asyncio
 import logging
-import shutil
 import subprocess
 from pathlib import Path
 
 from config import CLAUDE_CODE_BIN, KHALIL_DIR, WORKTREES_DIR
 
 log = logging.getLogger("khalil.actions.claude_code")
+
+
+class WorktreeValidationError(RuntimeError):
+    """Raised when generated work escapes its expected file boundary."""
+
+
+def _run_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run git in a repository and raise with its stderr on failure."""
+    result = subprocess.run(
+        ["git", *args],
+        cwd=str(repo_dir),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip()
+        raise RuntimeError(f"git {' '.join(args)} failed: {detail}")
+    return result
+
+
+def _normalize_expected_path(path: str) -> str:
+    """Return a safe repository-relative path using git's path separator."""
+    candidate = Path(path)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError(f"Expected path must stay inside the worktree: {path}")
+    normalized = candidate.as_posix()
+    if normalized.startswith("./"):
+        normalized = normalized[2:]
+    if not normalized:
+        raise ValueError("Expected path cannot be empty")
+    return normalized
+
+
+def resolve_worktree_path(worktree_path: Path, relative_path: str) -> Path:
+    """Resolve a validated repository-relative path inside a worktree."""
+    worktree_path = Path(worktree_path).resolve()
+    normalized = _normalize_expected_path(relative_path)
+    resolved = (worktree_path / normalized).resolve()
+    if not resolved.is_relative_to(worktree_path):
+        raise ValueError(f"Path escapes worktree: {relative_path}")
+    return resolved
 
 
 async def run_claude_code(
@@ -55,32 +97,86 @@ async def run_claude_code(
         return False, str(e)
 
 
-def create_worktree(branch_name: str) -> Path:
+def create_worktree(
+    branch_name: str,
+    *,
+    repo_dir: Path | None = None,
+    worktrees_dir: Path | None = None,
+    base_ref: str = "origin/main",
+) -> Path:
     """Create a git worktree for isolated code generation.
+
+    The branch always starts from a freshly fetched remote main commit, never
+    from the caller's current branch or working-tree state.
 
     Returns the worktree path.
     """
-    WORKTREES_DIR.mkdir(exist_ok=True)
-    wt_path = WORKTREES_DIR / branch_name.replace("/", "-")
+    repo_dir = Path(repo_dir or KHALIL_DIR).resolve()
+    worktrees_dir = Path(worktrees_dir or WORKTREES_DIR).resolve()
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    wt_path = worktrees_dir / branch_name.replace("/", "-")
     if wt_path.exists():
-        shutil.rmtree(wt_path)
+        raise RuntimeError(f"Worktree path already exists: {wt_path}")
 
-    subprocess.run(
-        ["git", "worktree", "add", str(wt_path), "-b", branch_name],
-        cwd=str(KHALIL_DIR),
-        check=True,
-        capture_output=True,
-    )
+    _run_git(repo_dir, "fetch", "origin", "main")
+    base_sha = _run_git(repo_dir, "rev-parse", f"{base_ref}^{{commit}}").stdout.strip()
+    _run_git(repo_dir, "worktree", "add", str(wt_path), "-b", branch_name, base_sha)
     return wt_path
 
 
-def cleanup_worktree(branch_name: str):
+def validate_worktree_changes(
+    worktree_path: Path,
+    expected_paths: set[str] | list[str] | tuple[str, ...],
+    *,
+    base_ref: str = "origin/main",
+    require_changes: bool = True,
+) -> list[str]:
+    """Return changed paths, rejecting anything outside ``expected_paths``."""
+    worktree_path = Path(worktree_path).resolve()
+    allowed = {_normalize_expected_path(path) for path in expected_paths}
+
+    tracked = _run_git(
+        worktree_path,
+        "diff",
+        "--name-only",
+        "--diff-filter=ACDMRTUXB",
+        base_ref,
+        "--",
+    ).stdout.splitlines()
+    untracked = _run_git(
+        worktree_path,
+        "ls-files",
+        "--others",
+        "--exclude-standard",
+    ).stdout.splitlines()
+    changed = sorted({path for path in tracked + untracked if path})
+
+    if require_changes and not changed:
+        raise WorktreeValidationError("Generated worktree contains no changes")
+
+    unexpected = sorted(set(changed) - allowed)
+    if unexpected:
+        raise WorktreeValidationError(
+            "Generated worktree changed unexpected files: " + ", ".join(unexpected)
+        )
+
+    return changed
+
+
+def cleanup_worktree(
+    branch_name: str,
+    *,
+    repo_dir: Path | None = None,
+    worktrees_dir: Path | None = None,
+):
     """Remove a worktree after use."""
-    wt_path = WORKTREES_DIR / branch_name.replace("/", "-")
+    repo_dir = Path(repo_dir or KHALIL_DIR).resolve()
+    worktrees_dir = Path(worktrees_dir or WORKTREES_DIR).resolve()
+    wt_path = worktrees_dir / branch_name.replace("/", "-")
     try:
         subprocess.run(
             ["git", "worktree", "remove", str(wt_path), "--force"],
-            cwd=str(KHALIL_DIR),
+            cwd=str(repo_dir),
             capture_output=True,
         )
     except Exception as e:
@@ -90,7 +186,7 @@ def cleanup_worktree(branch_name: str):
     try:
         subprocess.run(
             ["git", "branch", "-D", branch_name],
-            cwd=str(KHALIL_DIR),
+            cwd=str(repo_dir),
             capture_output=True,
         )
     except Exception:

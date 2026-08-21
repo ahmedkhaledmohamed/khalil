@@ -1,14 +1,195 @@
 """Tests for improved gap detection (semantic gate) and smoke test."""
 
+import asyncio
 import os
+import subprocess
 import sys
 import textwrap
+from pathlib import Path
 
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from actions.extend import detect_capability_gap, GAP_GATE_PATTERNS, smoke_test_module
+from actions.claude_code import (
+    WorktreeValidationError,
+    cleanup_worktree,
+    create_worktree,
+    resolve_worktree_path,
+    validate_worktree_changes,
+)
+
+
+def _git(repo: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _repo_with_remote(tmp_path: Path) -> tuple[Path, Path]:
+    remote = tmp_path / "origin.git"
+    repo = tmp_path / "source"
+    subprocess.run(["git", "init", "--bare", str(remote)], check=True, capture_output=True)
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    _git(repo, "config", "user.name", "Khalil Test")
+    _git(repo, "config", "user.email", "khalil@example.com")
+    (repo / "README.md").write_text("main\n")
+    _git(repo, "add", "README.md")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "branch", "-M", "main")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+    return repo, remote
+
+
+class TestGeneratedWorktreeIsolation:
+    def test_remote_main_isolated_from_ambient_head_and_dirty_files(self, tmp_path):
+        repo, _ = _repo_with_remote(tmp_path)
+        _git(repo, "checkout", "-b", "ambient-feature")
+        (repo / "ambient.txt").write_text("unrelated commit\n")
+        _git(repo, "add", "ambient.txt")
+        _git(repo, "commit", "-m", "ambient work")
+        (repo / "dirty.txt").write_text("uncommitted user work\n")
+
+        worktrees_dir = tmp_path / "worktrees"
+        worktree = create_worktree(
+            "generated/test",
+            repo_dir=repo,
+            worktrees_dir=worktrees_dir,
+        )
+        try:
+            assert _git(worktree, "rev-parse", "HEAD") == _git(repo, "rev-parse", "origin/main")
+            assert not (worktree / "ambient.txt").exists()
+            assert not (worktree / "dirty.txt").exists()
+            assert _git(repo, "branch", "--show-current") == "ambient-feature"
+            assert "dirty.txt" in _git(repo, "status", "--short")
+        finally:
+            cleanup_worktree(
+                "generated/test",
+                repo_dir=repo,
+                worktrees_dir=worktrees_dir,
+            )
+
+    def test_rejects_changes_outside_expected_file_set(self, tmp_path):
+        repo, _ = _repo_with_remote(tmp_path)
+        worktrees_dir = tmp_path / "worktrees"
+        worktree = create_worktree(
+            "generated/test",
+            repo_dir=repo,
+            worktrees_dir=worktrees_dir,
+        )
+        try:
+            action_file = worktree / "actions" / "demo.py"
+            action_file.parent.mkdir()
+            action_file.write_text("async def handle():\n    pass\n")
+            (worktree / "UNRELATED.md").write_text("unexpected\n")
+
+            with pytest.raises(WorktreeValidationError, match="UNRELATED.md"):
+                validate_worktree_changes(worktree, {"actions/demo.py"})
+
+            (worktree / "UNRELATED.md").unlink()
+            assert validate_worktree_changes(
+                worktree,
+                {"actions/demo.py"},
+            ) == ["actions/demo.py"]
+        finally:
+            cleanup_worktree(
+                "generated/test",
+                repo_dir=repo,
+                worktrees_dir=worktrees_dir,
+            )
+
+    def test_rejects_target_path_outside_worktree(self, tmp_path):
+        with pytest.raises(ValueError, match="inside the worktree"):
+            resolve_worktree_path(tmp_path, "../outside.py")
+
+    def test_simple_extension_pr_does_not_mutate_source_worktree(self, tmp_path, monkeypatch):
+        repo, _ = _repo_with_remote(tmp_path)
+        _git(repo, "checkout", "-b", "ambient-feature")
+        (repo / "dirty.txt").write_text("uncommitted user work\n")
+        worktrees_dir = tmp_path / "worktrees"
+
+        monkeypatch.setattr("actions.claude_code.KHALIL_DIR", repo)
+        monkeypatch.setattr("actions.claude_code.WORKTREES_DIR", worktrees_dir)
+
+        def fake_gh(*args, **kwargs):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="https://github.com/example/khalil/pull/1\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr("actions.extend._run_gh", fake_gh)
+
+        from actions.extend import create_extension_pr
+
+        result = asyncio.run(create_extension_pr(
+            "demo",
+            "async def handle():\n    pass\n",
+            {"name": "demo", "command": "demo", "description": "Demo"},
+        ))
+
+        assert result.endswith("/pull/1")
+        assert _git(repo, "branch", "--show-current") == "ambient-feature"
+        assert "dirty.txt" in _git(repo, "status", "--short")
+        assert not (repo / "actions" / "demo.py").exists()
+        assert _git(
+            repo,
+            "diff",
+            "--name-only",
+            "origin/main...origin/khalil-extend/demo",
+        ).splitlines() == ["actions/demo.py", "extensions/demo.json"]
+
+    def test_healing_pr_does_not_mutate_source_worktree(self, tmp_path, monkeypatch):
+        repo, _ = _repo_with_remote(tmp_path)
+        _git(repo, "checkout", "-b", "ambient-feature")
+        (repo / "dirty.txt").write_text("uncommitted user work\n")
+        worktrees_dir = tmp_path / "worktrees"
+
+        monkeypatch.setattr("actions.claude_code.KHALIL_DIR", repo)
+        monkeypatch.setattr("actions.claude_code.WORKTREES_DIR", worktrees_dir)
+
+        def fake_gh(*args, **kwargs):
+            return subprocess.CompletedProcess(
+                args,
+                0,
+                stdout="https://github.com/example/khalil/pull/2\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr("actions.extend._run_gh", fake_gh)
+
+        from healing import create_healing_pr
+
+        result = asyncio.run(create_healing_pr(
+            "README.md",
+            "healed\n",
+            {
+                "fingerprint": "failure:shell",
+                "summary": "repair shell routing",
+                "failure_count": 3,
+                "sample_queries": ["open localhost"],
+                "source_context": [{"file": "README.md"}],
+            },
+        ))
+
+        assert result.endswith("/pull/2")
+        assert _git(repo, "branch", "--show-current") == "ambient-feature"
+        assert "dirty.txt" in _git(repo, "status", "--short")
+        assert (repo / "README.md").read_text() == "main\n"
+        assert _git(
+            repo,
+            "diff",
+            "--name-only",
+            "origin/main...origin/khalil-heal/failure-shell",
+        ).splitlines() == ["README.md"]
 
 
 class TestSemanticGate:
