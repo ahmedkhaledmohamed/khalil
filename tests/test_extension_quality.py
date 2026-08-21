@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import types
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from actions.claude_code import (
     WorktreeValidationError,
     cleanup_worktree,
     create_worktree,
+    run_codex,
     resolve_worktree_path,
     validate_worktree_changes,
 )
@@ -190,6 +192,77 @@ class TestGeneratedWorktreeIsolation:
             "--name-only",
             "origin/main...origin/khalil-heal/failure-shell",
         ).splitlines() == ["README.md"]
+
+
+class TestCodexCodingAgent:
+    def test_runs_sdk_in_explicit_worktree(self, tmp_path, monkeypatch):
+        calls = {}
+
+        class FakeThread:
+            async def run(self, prompt, **options):
+                calls["run"] = (prompt, options)
+                return types.SimpleNamespace(
+                    error=None,
+                    final_response="Implemented the requested change.",
+                )
+
+        class FakeCodex:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return None
+
+            async def thread_start(self, **options):
+                calls["thread_start"] = options
+                return FakeThread()
+
+        fake_sdk = types.SimpleNamespace(
+            AsyncCodex=FakeCodex,
+            ApprovalMode=types.SimpleNamespace(auto_review="auto-review"),
+            Sandbox=types.SimpleNamespace(workspace_write="workspace-write"),
+        )
+        monkeypatch.setitem(sys.modules, "openai_codex", fake_sdk)
+        monkeypatch.setattr("actions.claude_code.CODEX_MODEL", "")
+        monkeypatch.setattr("actions.claude_code.CODEX_REASONING_EFFORT", "high")
+
+        success, output = asyncio.run(run_codex("Fix the bug", tmp_path))
+
+        assert success is True
+        assert output == "Implemented the requested change."
+        assert calls["thread_start"] == {
+            "cwd": str(tmp_path.resolve()),
+            "sandbox": "workspace-write",
+            "approval_mode": "auto-review",
+        }
+        assert calls["run"] == (
+            "Fix the bug",
+            {
+                "cwd": str(tmp_path.resolve()),
+                "sandbox": "workspace-write",
+                "effort": "high",
+            },
+        )
+
+    def test_does_not_fall_back_from_codex_to_claude(self, tmp_path, monkeypatch):
+        import actions.claude_code as coding_runtime
+
+        async def failed_codex(*args, **kwargs):
+            return False, "Codex auth failed"
+
+        async def unexpected_claude(*args, **kwargs):
+            raise AssertionError("Claude fallback must be explicit")
+
+        monkeypatch.setattr(coding_runtime, "CODING_AGENT_BACKEND", "codex")
+        monkeypatch.setattr(coding_runtime, "run_codex", failed_codex)
+        monkeypatch.setattr(coding_runtime, "run_claude_code", unexpected_claude)
+
+        success, output = asyncio.run(
+            coding_runtime.run_coding_agent("Fix the bug", tmp_path)
+        )
+
+        assert success is False
+        assert output == "Codex auth failed"
 
 
 class TestSemanticGate:

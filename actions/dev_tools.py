@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-"""Dev tools status — check Claude Code sessions, git status, terminal activity.
+"""Dev tools status — check coding-agent sessions and terminal activity.
 
-Answers questions like "is Claude Code waiting on me?" by inspecting running processes.
+Answers questions like "is Codex working?" by inspecting running processes.
 """
 
 import asyncio
@@ -13,9 +13,11 @@ log = logging.getLogger("khalil.actions.dev_tools")
 
 SKILL = {
     "name": "dev_tools",
-    "description": "Check developer tool status — Claude Code sessions, git, terminals",
+    "description": "Check developer tool status — Codex, Claude Code, git, terminals",
     "category": "development",
     "patterns": [
+        (r"\bcodex\s+(?:status|session|instance|process)", "claude_code_status"),
+        (r"\b(?:is|any)\s+codex\s+(?:waiting|running|active|idle|working)\b", "claude_code_status"),
         (r"\bclaude\s*code\b", "claude_code_status"),
         (r"\bclaude\s+(?:session|instance|process)", "claude_code_status"),
         (r"\b(?:is|any)\s+claude\s+(?:waiting|running|active|idle)\b", "claude_code_status"),
@@ -25,20 +27,20 @@ SKILL = {
         {
             "type": "claude_code_status",
             "handler": "handle_intent",
-            "keywords": "claude code session waiting running active idle terminal",
-            "description": "Check Claude Code CLI session status",
+            "keywords": "codex claude code coding agent session waiting running active idle terminal",
+            "description": "Check coding-agent session status",
         },
     ],
     "examples": [
+        "Is Codex working?",
+        "Any active coding agent sessions?",
         "Is Claude Code waiting on me?",
-        "Any active Claude Code sessions?",
-        "Claude Code status",
     ],
 }
 
 
-async def _get_claude_processes() -> list[dict]:
-    """Get running Claude Code CLI processes with their state."""
+async def _get_coding_agent_processes() -> list[dict]:
+    """Get running Codex and Claude Code CLI processes with their state."""
     proc = await asyncio.create_subprocess_exec(
         "ps", "aux",
         stdout=asyncio.subprocess.PIPE,
@@ -48,12 +50,12 @@ async def _get_claude_processes() -> list[dict]:
 
     processes = []
     for line in stdout.decode().splitlines():
-        # Match claude CLI processes (not the desktop app)
-        if "claude" not in line.lower():
+        line_lower = line.lower()
+        if "claude" not in line_lower and "codex" not in line_lower:
             continue
-        # Skip the desktop app, helper processes, grep, and this ps call
+        # Skip desktop apps, helpers, grep, and this ps call.
         if any(skip in line for skip in [
-            "Claude.app", "Claude Helper", "crashpad", "ShipIt", "grep", "ps aux",
+            "Claude.app", "Claude Helper", "Codex.app", "crashpad", "ShipIt", "grep", "ps aux",
         ]):
             continue
 
@@ -66,6 +68,7 @@ async def _get_claude_processes() -> list[dict]:
         tty = parts[6]   # e.g. s057, s131, ??
         started = parts[8]
         command = parts[10]
+        agent = "Codex" if "codex" in command.lower() else "Claude Code"
 
         # Determine status
         if "S+" in stat and cpu < 1.0:
@@ -84,6 +87,7 @@ async def _get_claude_processes() -> list[dict]:
             "stat": stat,
             "started": started,
             "status": status,
+            "agent": agent,
             "command": command[:60],
         })
 
@@ -92,6 +96,14 @@ async def _get_claude_processes() -> list[dict]:
         p["cwd"] = await _resolve_cwd(p["pid"])
 
     return processes
+
+
+async def _get_claude_processes() -> list[dict]:
+    """Compatibility helper for features that specifically target Claude TTYs."""
+    return [
+        process for process in await _get_coding_agent_processes()
+        if process["agent"] == "Claude Code"
+    ]
 
 
 async def _resolve_cwd(pid: int) -> str | None:
@@ -116,31 +128,31 @@ async def _resolve_cwd(pid: int) -> str | None:
 def _format_processes(processes: list[dict]) -> str:
     """Format process list for Telegram display."""
     if not processes:
-        return "No Claude Code sessions running."
+        return "No coding-agent sessions running."
 
     waiting = [p for p in processes if "waiting" in p["status"]]
     working = [p for p in processes if "working" in p["status"]]
 
-    lines = [f"**Claude Code Sessions** ({len(processes)} total)\n"]
+    lines = [f"**Coding Agent Sessions** ({len(processes)} total)\n"]
 
     if waiting:
         lines.append(f"⏳ **{len(waiting)} waiting for your input:**")
         for p in waiting:
             cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
-            lines.append(f"  • Terminal {p['tty']} (started {p['started']}){cwd}")
+            lines.append(f"  • {p['agent']} on {p['tty']} (started {p['started']}){cwd}")
 
     if working:
         lines.append(f"🔄 **{len(working)} actively working:**")
         for p in working:
             cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
-            lines.append(f"  • Terminal {p['tty']} — CPU {p['cpu']:.0f}%{cwd}")
+            lines.append(f"  • {p['agent']} on {p['tty']} — CPU {p['cpu']:.0f}%{cwd}")
 
     idle = [p for p in processes if p not in waiting and p not in working]
     if idle:
         lines.append(f"💤 **{len(idle)} idle:**")
         for p in idle:
             cwd = f"\n    📂 {p['cwd']}" if p.get("cwd") else ""
-            lines.append(f"  • Terminal {p['tty']} (started {p['started']}){cwd}")
+            lines.append(f"  • {p['agent']} on {p['tty']} (started {p['started']}){cwd}")
 
     return "\n".join(lines)
 
@@ -148,7 +160,7 @@ def _format_processes(processes: list[dict]) -> str:
 async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle dev tools queries."""
     if action == "claude_code_status":
-        processes = await _get_claude_processes()
+        processes = await _get_coding_agent_processes()
         response = _format_processes(processes)
         await ctx.reply(response)
         return True

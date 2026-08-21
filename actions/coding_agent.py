@@ -1,7 +1,6 @@
-"""Coding agent — delegate coding tasks to Claude Code from Telegram.
+"""Coding agent — delegate repository tasks to Codex from Telegram.
 
-User-facing skill that wraps the existing claude_code.py utility module.
-Adds project selection, async task tracking, and result reporting.
+Adds project selection, isolated worktrees, async task tracking, and reporting.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ log = logging.getLogger("khalil.actions.coding_agent")
 
 SKILL = {
     "name": "coding_agent",
-    "description": "Delegate coding tasks to Claude Code — fix bugs, refactor, add features",
+    "description": "Delegate coding tasks to Codex — fix bugs, refactor, add features",
     "category": "development",
     "patterns": [
         (r"\b(?:fix|debug)\s+(?:the\s+)?(?:bug|error|issue|test|failing)\b", "code_task"),
@@ -80,7 +79,7 @@ def _detect_project(query: str) -> tuple[str, Path]:
 
 async def run_coding_task(prompt: str, project_path: Path, chat_id: int, ctx) -> None:
     """Run a coding task in the background and notify when done."""
-    from actions.claude_code import run_claude_code, create_worktree, cleanup_worktree
+    from actions.claude_code import run_coding_agent, create_worktree, cleanup_worktree
 
     task = _active_tasks.get(chat_id)
     if not task:
@@ -103,7 +102,7 @@ async def run_coding_task(prompt: str, project_path: Path, chat_id: int, ctx) ->
             repo_dir=project_path,
             worktrees_dir=worktrees_dir,
         )
-        success, output = await run_claude_code(prompt, worktree_path, timeout=300)
+        success, output = await run_coding_agent(prompt, worktree_path, timeout=300)
 
         task.output = output
         task.finished_at = time.time()

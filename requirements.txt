@@ -62,5 +62,8 @@ accelerate>=0.25.0
 scipy>=1.12.0
 pillow>=10.0.0
 
+# Local coding-agent runtime
+openai-codex==0.144.4
+
 # Testing
 pytest>=8.0.0

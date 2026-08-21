@@ -1,4 +1,4 @@
-"""Machine control meta-tool — unified access to terminal sessions, Claude Code, system state, GUI.
+"""Machine control meta-tool — terminals, coding agents, system state, and GUI.
 
 Composes existing modules (terminal, tmux_control, dev_tools, macos, gui_automation)
 into one LLM-facing tool with ~12 actions. The LLM sees:
@@ -17,12 +17,13 @@ log = logging.getLogger("khalil.actions.machine")
 
 SKILL = {
     "name": "machine",
-    "description": "Machine control — terminal sessions, Claude Code processes, system info, GUI automation",
+    "description": "Machine control — terminals, coding-agent processes, system info, GUI automation",
     "category": "system",
     "patterns": [
         (r"\b(?:list|show|what)\b.*\b(?:terminal|session)s?\b", "list_sessions"),
         (r"\bread\s+(?:the\s+)?(?:terminal|output|screen)\b", "read_terminal"),
         (r"\bclaude\s*code\s+(?:status|session|instance|process)", "claude_code_status"),
+        (r"\bcodex\s+(?:status|session|instance|process)", "claude_code_status"),
         (r"\bsystem\s+(?:info|status)\b", "system_info"),
         (r"\b(?:show|list|what)\s+(?:are\s+)?(?:the\s+)?(?:running|active|open)\s*(?:apps?|applications?|processes?)\b", "macos_apps"),
         (r"\b(?:running|active|open)\s+(?:apps?|applications?|processes?)\b", "macos_apps"),
@@ -56,7 +57,7 @@ SKILL = {
             "type": "claude_code_status",
             "handler": "handle_intent",
             "keywords": "claude code session process running waiting active idle cwd",
-            "description": "Show Claude Code processes with CWD, TTY, and state",
+            "description": "Show Codex and Claude Code processes with CWD, TTY, and state",
         },
         {
             "type": "system_info",
@@ -125,7 +126,7 @@ SKILL = {
         },
     ],
     "examples": [
-        "What Claude Code sessions are running?",
+        "What coding agent sessions are running?",
         "Read the output in ttys057",
         "Send 'git status' to the terminal",
         "What's running on my machine?",
@@ -268,9 +269,9 @@ async def _handle_read_terminal(target: str, lines: int, ctx) -> bool:
 
 
 async def _handle_claude_code_status(ctx) -> bool:
-    """Show Claude Code processes with CWD."""
-    from actions.dev_tools import _get_claude_processes, _format_processes
-    processes = await _get_claude_processes()
+    """Show coding-agent processes with CWD."""
+    from actions.dev_tools import _get_coding_agent_processes, _format_processes
+    processes = await _get_coding_agent_processes()
     await ctx.reply(_format_processes(processes))
     return True
 
