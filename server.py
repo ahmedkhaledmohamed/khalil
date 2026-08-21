@@ -7694,22 +7694,32 @@ async def startup():
     register_webhook("github", GitHubWebhookHandler())
 
     # Wire up execution bus with LLM + composite actions (M8: Layer Composition)
-    from execution import get_execution_bus, ExecutionContext, ExecutionSource, ExecutionResult
+    from execution import (
+        ActionErrorKind,
+        ActionResult,
+        ExecutionContext,
+        ExecutionSource,
+        get_execution_bus,
+    )
     _exec_bus = get_execution_bus()
     if _exec_bus:
         _exec_bus._ask_llm = ask_llm
 
         # M8: Register composite action handlers
-        async def _composite_orchestrate(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+        async def _composite_orchestrate(params: dict, ctx: ExecutionContext) -> ActionResult:
             """Decompose a natural language task into a plan and execute it."""
             from orchestrator import decompose_request, execute_plan as execute_task_plan, format_plan_summary, ensure_table as ensure_plans_table
             ensure_plans_table()
             task_desc = params.get("task", params.get("description", ""))
             if not task_desc:
-                return ExecutionResult(success=False, output="", error="No task description provided")
+                return ActionResult.failed(
+                    "No task description provided", kind=ActionErrorKind.VALIDATION,
+                )
             steps = await decompose_request(task_desc, "", ask_llm)
             if not steps:
-                return ExecutionResult(success=False, output="", error="Could not decompose into steps")
+                return ActionResult.failed(
+                    "Could not decompose into steps", kind=ActionErrorKind.VALIDATION,
+                )
             child_ctx = ctx.child(ExecutionSource.ORCHESTRATOR, parent_plan_id=None)
             async def _step_fn(step, prior_results=None):
                 r = await _exec_bus.execute(
@@ -7721,37 +7731,54 @@ async def startup():
                 steps, task_desc, channel, ctx.chat_id or OWNER_CHAT_ID, _step_fn,
                 ask_llm_fn=ask_llm,
             )
-            return ExecutionResult(success=plan_result.status == "completed",
-                                   output=format_plan_summary(plan_result))
+            summary = format_plan_summary(plan_result)
+            if plan_result.status == "completed":
+                return ActionResult.succeeded(summary)
+            return ActionResult.failed(
+                f"Plan ended with status: {plan_result.status}", output=summary,
+            )
 
-        async def _composite_tool_reason(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+        async def _composite_tool_reason(params: dict, ctx: ExecutionContext) -> ActionResult:
             """Run a query through the tool-use LLM loop."""
             query_text = params.get("query", params.get("task", ""))
             if not query_text:
-                return ExecutionResult(success=False, output="", error="No query provided")
+                return ActionResult.failed(
+                    "No query provided", kind=ActionErrorKind.VALIDATION,
+                )
             response = await ask_llm(query_text, "", "")
-            return ExecutionResult(success=True, output=response)
+            return ActionResult.succeeded(response)
 
-        async def _composite_workflow(params: dict, ctx: ExecutionContext) -> ExecutionResult:
+        async def _composite_workflow(params: dict, ctx: ExecutionContext) -> ActionResult:
             """Trigger a named workflow."""
             workflow_name = params.get("workflow", params.get("name", ""))
             if not workflow_name:
-                return ExecutionResult(success=False, output="", error="No workflow name provided")
+                return ActionResult.failed(
+                    "No workflow name provided", kind=ActionErrorKind.VALIDATION,
+                )
             try:
                 from workflows import get_engine
                 engine = get_engine()
                 if not engine:
-                    return ExecutionResult(success=False, output="", error="Workflow engine not initialized")
+                    return ActionResult.failed(
+                        "Workflow engine not initialized", kind=ActionErrorKind.NOT_FOUND,
+                    )
                 wf = engine.get_workflow(workflow_name)
                 if not wf:
-                    return ExecutionResult(success=False, output="", error=f"Workflow '{workflow_name}' not found")
+                    return ActionResult.failed(
+                        f"Workflow '{workflow_name}' not found",
+                        kind=ActionErrorKind.NOT_FOUND,
+                    )
                 results = await engine._execute_steps(wf, params.get("event_data", {}))
                 output = "\n".join(
                     f"{'ok' if r.get('ok') else 'fail'}: {r.get('action', '?')}" for r in results
                 )
-                return ExecutionResult(success=all(r.get("ok") for r in results), output=output)
+                if all(r.get("ok") for r in results):
+                    return ActionResult.succeeded(output)
+                return ActionResult.failed(
+                    "One or more workflow steps failed", output=output,
+                )
             except Exception as e:
-                return ExecutionResult(success=False, output="", error=str(e)[:500])
+                return ActionResult.failed(str(e)[:500])
 
         _exec_bus.register_composite_action("orchestrate", _composite_orchestrate)
         _exec_bus.register_composite_action("tool_reason", _composite_tool_reason)
