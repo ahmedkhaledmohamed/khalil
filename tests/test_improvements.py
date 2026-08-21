@@ -12,6 +12,51 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
+# --- Taskforce model configuration ---
+
+class TestTaskforceModelConfiguration:
+    def test_supported_model_aliases_are_the_defaults(self):
+        from config import CLAUDE_MODEL, CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_FAST
+
+        assert CLAUDE_MODEL == "claude-sonnet-4-5"
+        assert CLAUDE_MODEL_COMPLEX == "claude-opus-4-6"
+        assert CLAUDE_MODEL_FAST == "claude-haiku-4-5"
+
+    def test_health_check_uses_configured_fast_model_and_valid_system_prompt(self, monkeypatch):
+        import llm_client
+        from config import CLAUDE_MODEL_FAST
+        from monitoring import _check_claude
+
+        call = {}
+
+        def fake_call(client, client_type, model, system, user_msg, max_tokens):
+            call.update(
+                client=client,
+                client_type=client_type,
+                model=model,
+                system=system,
+                user_msg=user_msg,
+                max_tokens=max_tokens,
+            )
+            return "OK"
+
+        fake_client = object()
+        monkeypatch.setattr(llm_client, "get_llm_client", lambda: (fake_client, "openai"))
+        monkeypatch.setattr(llm_client, "call_llm_sync", fake_call)
+
+        result = asyncio.run(_check_claude())
+
+        assert result == {"status": "ok", "model": CLAUDE_MODEL_FAST}
+        assert call == {
+            "client": fake_client,
+            "client_type": "openai",
+            "model": CLAUDE_MODEL_FAST,
+            "system": "You are a service health probe.",
+            "user_msg": "Reply OK.",
+            "max_tokens": 5,
+        }
+
+
 # --- #17: SQLite WAL Mode ---
 
 class TestSQLiteWAL:

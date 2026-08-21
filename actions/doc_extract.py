@@ -64,9 +64,10 @@ async def _analyze_image_with_llm(image_path: str, prompt: str) -> str:
 
     try:
         import anthropic
+        from config import CLAUDE_MODEL
         client = anthropic.Anthropic()
         message = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=CLAUDE_MODEL,
             max_tokens=1024,
             messages=[
                 {

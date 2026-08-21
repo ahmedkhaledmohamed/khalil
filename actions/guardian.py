@@ -4,12 +4,12 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
-from config import ActionType, KEYRING_SERVICE
+from config import ActionType, CLAUDE_MODEL_FAST, KEYRING_SERVICE
 
 log = logging.getLogger("khalil.guardian")
 
-# Fast model for guardian reviews — configurable but defaults to haiku for speed/cost
-GUARDIAN_MODEL = "claude-haiku-4-5-20251001"
+# Fast model for guardian reviews — configurable via KHALIL_CLAUDE_MODEL_FAST.
+GUARDIAN_MODEL = CLAUDE_MODEL_FAST
 
 TOOL_REVIEW_PROMPT = """\
 You are a security guardian reviewing a tool call before it executes on macOS.

@@ -38,6 +38,7 @@ from config import (
     ActionType,
     AutonomyLevel,
     CLAUDE_MODEL,
+    CLAUDE_MODEL_FAST,
     CLAUDE_BASE_URL,
     CLAUDE_API_KEY_HEADER,
     GOOGLE_BASE_URL,
@@ -922,7 +923,7 @@ async def _try_recover_ollama() -> bool:
 
 # #18: Graceful degradation chain — Ollama local → Ollama cloud (kimi) → Claude → OpenAI → Google → cached
 _OLLAMA_CLOUD_FALLBACK = "kimi-k2.5:cloud"
-_FALLBACK_MODELS = [CLAUDE_MODEL, "claude-sonnet-4-20250514", "claude-haiku-4-5-20251001"]
+_FALLBACK_MODELS = list(dict.fromkeys((CLAUDE_MODEL, CLAUDE_MODEL_FAST)))
 
 # Backup provider fallback chain (tried after all Claude models fail)
 _BACKUP_PROVIDERS: list[tuple[str, str]] = [
