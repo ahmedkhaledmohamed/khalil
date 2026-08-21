@@ -16,7 +16,7 @@ import logging
 import sqlite3
 
 from config import DB_PATH
-from intent import Intent
+from intent import Intent, is_greeting
 from knowledge.context import get_relevant_context
 from knowledge.search import hybrid_search
 
@@ -257,8 +257,20 @@ async def assemble_context(
     """
     parts = []
 
-    # Task context always injected first when present
-    if task:
+    # Standalone greetings should never revive context from an older session.
+    if intent == Intent.CHAT and is_greeting(query):
+        if voice_mode:
+            return (
+                "[Voice mode: User is speaking via voice. Keep your response concise "
+                "(1-3 sentences), conversational, and easy to read aloud. "
+                "Avoid markdown formatting, bullet lists, and emojis.]"
+            )
+        log.info("Context assembled for fresh greeting: 0 chars")
+        return ""
+
+    # Only task and continuation turns inherit task state. Chat and questions
+    # remain independent even when a task is still active for later resumption.
+    if task and intent in (Intent.TASK, Intent.CONTINUATION):
         from task_manager import TaskManager
         mgr = TaskManager()
         parts.append(mgr.get_task_context_for_llm(task))
