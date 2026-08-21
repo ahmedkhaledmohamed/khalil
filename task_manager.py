@@ -12,9 +12,9 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from config import DB_PATH
+from config import DB_PATH, TASK_STALE_HOURS
 
 log = logging.getLogger("khalil.task_manager")
 
@@ -25,7 +25,7 @@ class Task:
     chat_id: str | int
     original_query: str
     task_type: str  # "artifact", "question", "multi_step", "background"
-    status: str = "active"  # "active", "blocked", "completed", "failed"
+    status: str = "active"  # "active", "blocked", "completed", "failed", "expired"
     context_summary: str = ""
     tools_used: list[str] = field(default_factory=list)
     results: list[str] = field(default_factory=list)
@@ -83,9 +83,33 @@ class TaskManager:
             "ORDER BY updated_at DESC LIMIT 1",
             (str(chat_id),),
         ).fetchone()
-        conn.close()
         if not row:
+            conn.close()
             return None
+
+        try:
+            updated_at = datetime.fromisoformat(row["updated_at"])
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            stale_before = datetime.now(timezone.utc) - timedelta(hours=TASK_STALE_HOURS)
+            if TASK_STALE_HOURS > 0 and updated_at < stale_before:
+                conn.execute(
+                    "UPDATE agent_tasks SET status = 'expired', results = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (
+                        json.dumps([f"Expired after {TASK_STALE_HOURS} hours without activity"]),
+                        datetime.now(timezone.utc).isoformat(),
+                        row["id"],
+                    ),
+                )
+                conn.commit()
+                conn.close()
+                log.info("Task expired after %d hours: %s", TASK_STALE_HOURS, row["id"])
+                return None
+        except (TypeError, ValueError):
+            log.warning("Task has invalid updated_at timestamp: %s", row["id"])
+
+        conn.close()
         return Task(
             id=row["id"],
             chat_id=row["chat_id"],

@@ -42,6 +42,11 @@ class TestIntentClassification:
         assert classify_intent("Hello", has_active_task=False) == Intent.CHAT
         assert classify_intent("Thanks", has_active_task=False) == Intent.CHAT
 
+    def test_greeting_with_active_task_is_chat(self):
+        from intent import classify_intent, Intent
+        assert classify_intent("Hi", has_active_task=True) == Intent.CHAT
+        assert classify_intent("Good morning", has_active_task=True) == Intent.CHAT
+
     def test_whats_the_status_with_task_is_continuation(self):
         from intent import classify_intent, Intent
         # "What's the status" with active task → continuation (inherits task)
@@ -119,6 +124,29 @@ class TestTaskManager:
             assert "search_knowledge" in ctx
             assert "generate_file" in ctx
 
+    def test_stale_task_expires(self, tmp_path):
+        from task_manager import TaskManager
+        with patch("task_manager.DB_PATH", tmp_path / "test.db"), \
+             patch("task_manager.TASK_STALE_HOURS", 24):
+            mgr = TaskManager()
+            task = mgr.create_task("chat_123", "Old task", "task")
+            conn = sqlite3.connect(tmp_path / "test.db")
+            conn.execute(
+                "UPDATE agent_tasks SET updated_at = ? WHERE id = ?",
+                ("2026-01-01T00:00:00+00:00", task.id),
+            )
+            conn.commit()
+            conn.close()
+
+            assert mgr.get_active_task("chat_123") is None
+
+            conn = sqlite3.connect(tmp_path / "test.db")
+            status = conn.execute(
+                "SELECT status FROM agent_tasks WHERE id = ?", (task.id,),
+            ).fetchone()[0]
+            conn.close()
+            assert status == "expired"
+
 
 def _run(coro):
     """Run async test in sync context."""
@@ -163,6 +191,31 @@ class TestContextAssembly:
         from intent import Intent
         _run(assemble_context(Intent.CHAT, "Hello", chat_id=123))
         mock_kb.assert_not_called()
+
+    @patch("context._search_kb", new_callable=AsyncMock, return_value=[])
+    @patch("context._get_memories", new_callable=AsyncMock, return_value="")
+    @patch("context._get_live_state", new_callable=AsyncMock, return_value="")
+    @patch("context._get_proactive_context", new_callable=AsyncMock, return_value="")
+    @patch("context._get_recent_messages", return_value="")
+    @patch("context._get_session_summary", return_value="")
+    @patch("context._get_active_plans", return_value="")
+    @patch("context.get_relevant_context", return_value="")
+    def test_chat_does_not_inherit_active_task(self, mock_ctx, mock_plans, mock_summary,
+                                                mock_msgs, mock_proactive, mock_live,
+                                                mock_memories, mock_kb, tmp_path):
+        from context import assemble_context
+        from intent import Intent
+        from task_manager import TaskManager
+
+        with patch("task_manager.DB_PATH", tmp_path / "test.db"):
+            task = TaskManager().create_task(123, "Old unrelated task")
+            result = _run(assemble_context(Intent.CHAT, "Hi", chat_id=123, task=task))
+
+        assert result == ""
+        mock_memories.assert_not_called()
+        mock_msgs.assert_not_called()
+        mock_summary.assert_not_called()
+        mock_plans.assert_not_called()
 
     @patch("context._search_kb", new_callable=AsyncMock, return_value=[{"title": "test", "content": "data"}])
     @patch("context._get_memories", new_callable=AsyncMock, return_value="")

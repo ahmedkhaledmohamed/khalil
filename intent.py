@@ -20,6 +20,11 @@ _CONTINUATION_CUES = {
     "finish it", "complete it", "keep it", "do the work",
 }
 
+_GREETING_CUES = {
+    "hi", "hello", "hey", "good morning", "good afternoon", "good evening",
+    "gm", "howdy",
+}
+
 # Action verbs that indicate a task (build, create, write, send, etc.)
 _ACTION_VERBS = re.compile(
     r"\b(build|create|write|generate|make|send|draft|schedule|set|run|"
@@ -51,6 +56,11 @@ class Intent(Enum):
     CHAT = "chat"                  # "Hello", "Thanks" — conversational only
 
 
+def is_greeting(query: str) -> bool:
+    """Return whether a message is a standalone greeting."""
+    return query.strip().rstrip("!.,").lower() in _GREETING_CUES
+
+
 def classify_intent(query: str, has_active_task: bool = False) -> Intent:
     """Classify user message intent. No LLM needed — pure heuristics.
 
@@ -64,6 +74,10 @@ def classify_intent(query: str, has_active_task: bool = False) -> Intent:
     stripped = query.strip().rstrip("!.,")
     lower = stripped.lower()
     words = lower.split()
+
+    # Greetings always start a conversational turn, even if a task is active.
+    if is_greeting(query):
+        return Intent.CHAT
 
     # Very short messages with active task → continuation
     if has_active_task and len(words) <= 5:

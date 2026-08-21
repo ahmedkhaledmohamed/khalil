@@ -165,6 +165,7 @@ CONVERSATION_CONTEXT_WINDOW = int(os.getenv("KHALIL_CONTEXT_WINDOW", "30"))
 CONVERSATION_MIN_WINDOW = int(os.getenv("KHALIL_MIN_WINDOW", "8"))
 SUMMARIZE_THRESHOLD = int(os.getenv("KHALIL_SUMMARIZE_THRESHOLD", "15"))
 SESSION_GAP_SECONDS = int(os.getenv("KHALIL_SESSION_GAP_SECONDS", "7200"))
+TASK_STALE_HOURS = int(os.getenv("KHALIL_TASK_STALE_HOURS", "24"))
 
 # Family/shared calendar — set to a Google Calendar ID to include family events
 # in morning briefs and scheduling conflict detection.
