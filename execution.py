@@ -35,6 +35,47 @@ class ExecutionSource(str, Enum):
     BACKGROUND_AGENT = "background_agent"
 
 
+class ActionStatus(str, Enum):
+    """Observable state of one action execution."""
+
+    SUCCEEDED = "succeeded"
+    EMPTY = "empty"
+    FAILED = "failed"
+    REJECTED = "rejected"
+    WAITING_FOR_APPROVAL = "waiting_for_approval"
+
+
+class ActionErrorKind(str, Enum):
+    """Stable failure categories for routing, recovery, and metrics."""
+
+    VALIDATION = "validation"
+    AUTHENTICATION = "authentication"
+    NETWORK = "network"
+    APPROVAL_REQUIRED = "approval_required"
+    RATE_LIMITED = "rate_limited"
+    NOT_FOUND = "not_found"
+    TIMEOUT = "timeout"
+    OPERATIONAL = "operational"
+    INTERNAL = "internal"
+
+
+class ApprovalDecision(str, Enum):
+    """Approval state attached to an action outcome."""
+
+    NOT_REQUIRED = "not_required"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    REQUIRED = "required"
+
+
+class VerificationStatus(str, Enum):
+    """Whether an action's requested outcome has been verified."""
+
+    NOT_RUN = "not_run"
+    PASSED = "passed"
+    FAILED = "failed"
+
+
 @dataclass
 class ExecutionContext:
     """Context passed through every execution, enabling traceability and recursion control."""
@@ -61,15 +102,113 @@ class ExecutionContext:
 
 
 @dataclass
-class ExecutionResult:
-    """Result of any execution through the bus."""
-    success: bool
-    output: str
+class ActionRequest:
+    """Typed request accepted by the execution boundary."""
+
+    action: str
+    params: dict[str, Any]
+    context: ExecutionContext
+
+
+@dataclass
+class ActionError:
+    """Structured operational failure."""
+
+    kind: ActionErrorKind
+    message: str
+    retryable: bool = False
+
+
+@dataclass
+class VerificationResult:
+    """Evidence that the requested outcome occurred."""
+
+    status: VerificationStatus = VerificationStatus.NOT_RUN
+    evidence: list[str] = field(default_factory=list)
+    message: str = ""
+
+
+@dataclass
+class ActionResult:
+    """Typed result of any action through the execution boundary."""
+
+    status: ActionStatus
+    output: str = ""
+    data: Any = None
     side_effects: list[str] = field(default_factory=list)
-    error: str | None = None
+    failure: ActionError | None = None
+    approval: ApprovalDecision = ApprovalDecision.NOT_REQUIRED
+    verification: VerificationResult = field(default_factory=VerificationResult)
     latency_ms: float = 0.0
     action: str = ""
     source: str = ""
+
+    @property
+    def success(self) -> bool:
+        """Compatibility view for callers that still consume a boolean."""
+        return self.status in (ActionStatus.SUCCEEDED, ActionStatus.EMPTY)
+
+    @property
+    def error(self) -> str | None:
+        """Compatibility view for callers that still consume an error string."""
+        return self.failure.message if self.failure else None
+
+    @classmethod
+    def succeeded(cls, output: str = "", **kwargs) -> ActionResult:
+        has_result = (
+            bool(output)
+            or kwargs.get("data") is not None
+            or bool(kwargs.get("side_effects"))
+        )
+        status = ActionStatus.SUCCEEDED if has_result else ActionStatus.EMPTY
+        return cls(status=status, output=output, **kwargs)
+
+    @classmethod
+    def failed(
+        cls,
+        message: str,
+        *,
+        kind: ActionErrorKind = ActionErrorKind.OPERATIONAL,
+        retryable: bool = False,
+        **kwargs,
+    ) -> ActionResult:
+        return cls(
+            status=ActionStatus.FAILED,
+            failure=ActionError(kind=kind, message=message, retryable=retryable),
+            **kwargs,
+        )
+
+    @classmethod
+    def rejected(
+        cls,
+        message: str,
+        *,
+        kind: ActionErrorKind,
+        retryable: bool = False,
+        **kwargs,
+    ) -> ActionResult:
+        return cls(
+            status=ActionStatus.REJECTED,
+            failure=ActionError(kind=kind, message=message, retryable=retryable),
+            **kwargs,
+        )
+
+    @classmethod
+    def waiting_for_approval(cls, message: str, **kwargs) -> ActionResult:
+        return cls(
+            status=ActionStatus.WAITING_FOR_APPROVAL,
+            failure=ActionError(
+                kind=ActionErrorKind.APPROVAL_REQUIRED,
+                message=message,
+                retryable=False,
+            ),
+            approval=ApprovalDecision.REQUIRED,
+            **kwargs,
+        )
+
+
+# Compatibility name for existing extension imports during the migration.
+ExecutionResult = ActionResult
 
 
 class ExecutionBus:
@@ -104,7 +243,7 @@ class ExecutionBus:
         action: str,
         params: dict,
         context: ExecutionContext,
-    ) -> ExecutionResult:
+    ) -> ActionResult:
         """Execute an action through the bus.
 
         Routes through: depth check → autonomy check → handler lookup → execute → audit.
@@ -113,10 +252,9 @@ class ExecutionBus:
 
         # Depth guard
         if context.depth > MAX_EXECUTION_DEPTH:
-            return ExecutionResult(
-                success=False,
-                output="",
-                error=f"Max execution depth ({MAX_EXECUTION_DEPTH}) exceeded",
+            return ActionResult.rejected(
+                f"Max execution depth ({MAX_EXECUTION_DEPTH}) exceeded",
+                kind=ActionErrorKind.VALIDATION,
                 action=action,
                 source=context.source.value,
             )
@@ -134,8 +272,8 @@ class ExecutionBus:
                 return result
             except Exception as e:
                 elapsed = (time.monotonic() - t0) * 1000
-                result = ExecutionResult(
-                    success=False, output="", error=str(e)[:500],
+                result = ActionResult.failed(
+                    str(e)[:500], kind=ActionErrorKind.INTERNAL,
                     latency_ms=elapsed, action=action, source=context.source.value,
                 )
                 self._audit(action, params, context, result)
@@ -150,10 +288,8 @@ class ExecutionBus:
             # For non-user sources, check if autonomy allows auto-execution
             if context.source != ExecutionSource.USER:
                 if effective_autonomy == AutonomyLevel.SUPERVISED:
-                    return ExecutionResult(
-                        success=False,
-                        output="",
-                        error=f"Action '{action}' requires approval (supervised mode)",
+                    return ActionResult.waiting_for_approval(
+                        f"Action '{action}' requires approval (supervised mode)",
                         action=action,
                         source=context.source.value,
                         latency_ms=(time.monotonic() - t0) * 1000,
@@ -163,8 +299,9 @@ class ExecutionBus:
         if self._autonomy:
             allowed, reason = self._autonomy.check_rate_limit(action)
             if not allowed:
-                return ExecutionResult(
-                    success=False, output="", error=reason,
+                return ActionResult.rejected(
+                    reason, kind=ActionErrorKind.RATE_LIMITED,
+                    retryable=True,
                     action=action, source=context.source.value,
                     latency_ms=(time.monotonic() - t0) * 1000,
                 )
@@ -173,9 +310,9 @@ class ExecutionBus:
         registry = self._get_registry()
         handler = registry.get_handler(action)
         if handler is None:
-            return ExecutionResult(
-                success=False, output="",
-                error=f"No handler found for '{action}'",
+            return ActionResult.failed(
+                f"No handler found for '{action}'",
+                kind=ActionErrorKind.NOT_FOUND,
                 action=action, source=context.source.value,
                 latency_ms=(time.monotonic() - t0) * 1000,
             )
@@ -193,21 +330,23 @@ class ExecutionBus:
             )
             elapsed = (time.monotonic() - t0) * 1000
             output = capture_ctx.get_result()
-            result = ExecutionResult(
-                success=True, output=output,
+            result = ActionResult.succeeded(
+                output=output,
                 side_effects=capture_ctx.side_effects,
                 latency_ms=elapsed, action=action, source=context.source.value,
             )
         except asyncio.TimeoutError:
             elapsed = (time.monotonic() - t0) * 1000
-            result = ExecutionResult(
-                success=False, output="", error=f"{action} timed out after 60s",
+            result = ActionResult.failed(
+                f"{action} timed out after 60s",
+                kind=ActionErrorKind.TIMEOUT,
+                retryable=True,
                 latency_ms=elapsed, action=action, source=context.source.value,
             )
         except Exception as e:
             elapsed = (time.monotonic() - t0) * 1000
-            result = ExecutionResult(
-                success=False, output="", error=str(e)[:500],
+            result = ActionResult.failed(
+                str(e)[:500], kind=ActionErrorKind.OPERATIONAL,
                 latency_ms=elapsed, action=action, source=context.source.value,
             )
 
@@ -215,7 +354,11 @@ class ExecutionBus:
         self._record_signal(action, context, result)
         return result
 
-    def _audit(self, action: str, params: dict, context: ExecutionContext, result: ExecutionResult):
+    async def execute_request(self, request: ActionRequest) -> ActionResult:
+        """Typed adapter for callers migrating to request objects."""
+        return await self.execute(request.action, request.params, request.context)
+
+    def _audit(self, action: str, params: dict, context: ExecutionContext, result: ActionResult):
         """Write execution to audit log with source attribution."""
         if not self._autonomy:
             return
@@ -235,7 +378,7 @@ class ExecutionBus:
         except Exception as e:
             log.warning("Execution bus audit failed: %s", e)
 
-    def _record_signal(self, action: str, context: ExecutionContext, result: ExecutionResult):
+    def _record_signal(self, action: str, context: ExecutionContext, result: ActionResult):
         """Record execution signal for learning system."""
         try:
             from learning import record_signal
@@ -243,6 +386,8 @@ class ExecutionBus:
                 "action": action,
                 "source": context.source.value,
                 "success": result.success,
+                "status": result.status.value,
+                "error_kind": result.failure.kind.value if result.failure else None,
                 "latency_ms": round(result.latency_ms, 1),
                 "depth": context.depth,
                 "error": result.error[:100] if result.error else None,

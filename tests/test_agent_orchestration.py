@@ -241,3 +241,146 @@ class TestFallback:
             result = _run(decompose_to_swarm("check x and y", "ctx", mock_llm))
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Typed execution outcomes
+# ---------------------------------------------------------------------------
+
+class _Registry:
+    def __init__(self, handler=None):
+        self.handler = handler
+
+    def get_handler(self, action):
+        return self.handler
+
+
+class _Autonomy:
+    def __init__(self, *, needs_approval=False, rate_limit=(True, "")):
+        from config import AutonomyLevel
+        self.level = AutonomyLevel.SUPERVISED
+        self._needs_approval = needs_approval
+        self._rate_limit = rate_limit
+
+    def needs_approval(self, action):
+        return self._needs_approval
+
+    def check_rate_limit(self, action):
+        return self._rate_limit
+
+    def log_audit(self, **kwargs):
+        pass
+
+
+class TestTypedExecutionOutcomes:
+    def _bus(self, handler=None, autonomy=None):
+        from execution import ExecutionBus
+        registry = _Registry(handler)
+        return ExecutionBus(lambda: registry, autonomy or _Autonomy())
+
+    def _context(self, source=None):
+        from execution import ExecutionContext, ExecutionSource
+        return ExecutionContext(source=source or ExecutionSource.USER)
+
+    def test_success_and_valid_empty_are_distinct(self):
+        from execution import ActionStatus
+
+        async def with_output(action, intent, ctx):
+            await ctx.reply("done")
+
+        async def without_output(action, intent, ctx):
+            return None
+
+        output_result = asyncio.run(
+            self._bus(with_output).execute("demo", {}, self._context())
+        )
+        empty_result = asyncio.run(
+            self._bus(without_output).execute("demo", {}, self._context())
+        )
+
+        assert output_result.status == ActionStatus.SUCCEEDED
+        assert empty_result.status == ActionStatus.EMPTY
+        assert output_result.success is True
+        assert empty_result.success is True
+
+    def test_operational_failure_is_structured(self):
+        from execution import ActionErrorKind, ActionStatus
+
+        async def broken(action, intent, ctx):
+            raise ConnectionError("service unavailable")
+
+        result = asyncio.run(
+            self._bus(broken).execute("demo", {}, self._context())
+        )
+
+        assert result.status == ActionStatus.FAILED
+        assert result.failure.kind == ActionErrorKind.OPERATIONAL
+        assert result.error == "service unavailable"
+        assert result.success is False
+
+    def test_authentication_and_network_failures_are_distinct(self):
+        from execution import ActionErrorKind, ActionResult
+
+        authentication = ActionResult.failed(
+            "token expired", kind=ActionErrorKind.AUTHENTICATION,
+        )
+        network = ActionResult.failed(
+            "connection reset", kind=ActionErrorKind.NETWORK, retryable=True,
+        )
+
+        assert authentication.failure.kind == ActionErrorKind.AUTHENTICATION
+        assert authentication.failure.retryable is False
+        assert network.failure.kind == ActionErrorKind.NETWORK
+        assert network.failure.retryable is True
+
+    def test_approval_wait_is_not_reported_as_failure(self):
+        from execution import ActionStatus, ApprovalDecision, ExecutionSource
+
+        async def handler(action, intent, ctx):
+            raise AssertionError("approval should stop execution")
+
+        result = asyncio.run(
+            self._bus(handler, _Autonomy(needs_approval=True)).execute(
+                "send", {}, self._context(ExecutionSource.WORKFLOW),
+            )
+        )
+
+        assert result.status == ActionStatus.WAITING_FOR_APPROVAL
+        assert result.approval == ApprovalDecision.REQUIRED
+        assert result.success is False
+
+    def test_rate_limit_rejection_and_missing_handler_have_distinct_kinds(self):
+        from execution import ActionErrorKind, ActionStatus
+
+        rate_limited = asyncio.run(
+            self._bus(
+                handler=lambda *args: None,
+                autonomy=_Autonomy(rate_limit=(False, "slow down")),
+            ).execute("demo", {}, self._context())
+        )
+        missing = asyncio.run(
+            self._bus().execute("unknown", {}, self._context())
+        )
+
+        assert rate_limited.status == ActionStatus.REJECTED
+        assert rate_limited.failure.kind == ActionErrorKind.RATE_LIMITED
+        assert missing.status == ActionStatus.FAILED
+        assert missing.failure.kind == ActionErrorKind.NOT_FOUND
+
+    def test_typed_request_adapter_preserves_existing_execution(self):
+        from execution import ActionRequest, ActionStatus
+
+        async def handler(action, intent, ctx):
+            await ctx.reply(intent["value"])
+
+        bus = self._bus(handler)
+        request = ActionRequest(
+            action="demo",
+            params={"value": "typed"},
+            context=self._context(),
+        )
+
+        result = asyncio.run(bus.execute_request(request))
+
+        assert result.status == ActionStatus.SUCCEEDED
+        assert result.output == "typed"
