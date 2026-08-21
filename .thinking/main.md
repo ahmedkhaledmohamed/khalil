@@ -1,42 +1,43 @@
-# Thinking Trail — `feat/codex-coding-agent`
+# Thinking Trail — `sanitize/public-showcase`
 
 > Generated 2026-08-21
-> The automated extractor found no Claude session records for this worktree. This trail uses Ahmed's prompts from the active Codex conversation so the required PR record is not fabricated or omitted.
+> The automated extractor found no session records for this worktree. This trail uses Ahmed's prompts from the active Codex conversation because the PR enforcement hook requires `.thinking/main.md` even when the documented zero-prompt exception applies.
 
 ## Problem Framing
 
-Ahmed asked to continue Khalil's evolution while preserving “the current Khalil experience and capabilities and limitations and how it should evolve.” The immediate change was that Khalil “starts a Claude Code session by default to do work,” but should “use Codex instead moving forward.”
+Ahmed wanted the public showcase repositories reviewed and sanitized so sensitive personal or work information would not remain in their visible source. For Khalil, that meant keeping the project demonstrable while removing machine-specific paths, internal work references, personal defaults, and private configuration.
 
 ## Approach
 
-Ahmed chose a configured AI gateway for Khalil's conversational model path. Repository-changing work was separated into a local coding-agent runtime, with Codex operating in isolated worktrees while the existing Telegram task, status, diff, validation, Guardian, and PR workflow remains intact.
+Ahmed chose sanitization over making the showcase repositories private: “my goal is to keep khalil and the rest of the 5 public for showcasing.” The implementation replaces embedded personal and employer-specific values with generic defaults and local environment configuration.
 
 ## Key Decisions
 
-Codex is the default coding executor and Claude remains an explicit compatibility backend without automatic fallback. Ahmed also required that credentials stay out of GitHub: “I don't want the token to be on github.”
+Khalil remains public. Machine-local MCP configuration is removed from tracking, sensitive defaults become environment variables, and public author attribution remains because it supports the showcase purpose.
+
+## Pivot
+
+After one non-showcase repository was made private, Ahmed clarified that Khalil and the other five repositories should stay public. That changed the execution path from privacy-by-visibility to privacy-by-sanitization.
 
 ## Outcome
 
-Khalil now routes coding tasks and complex self-extension through the official Codex SDK using workspace-write isolation and the existing local Codex authentication. A configurable gateway handles conversational requests, and coding-agent status covers Codex plus legacy Claude sessions.
+The current Khalil tip no longer contains the targeted internal endpoints, work repository names, machine paths, personal project defaults, or exact financial figure. Historical commits still require a separate, explicitly approved rewrite if Ahmed chooses to purge them.
 
 ---
 
 <details>
-<summary>Raw Prompts (5)</summary>
+<summary>Raw Prompts (4)</summary>
 
 **[1]**
-> I think I want to use the [internal gateway redacted] API
+> I made [private repository redacted] private.. I want you to put a plan to sanitise everything else you found
 
 **[2]**
-> ok approved.. after that we can continue the evolution but keep in mind the current khalil experience and capbilities and limitiations and how it should evolve.. also currently it starts a claude code session by default to do work but I want it to use codex instead moving forward
+> ok my goal is to keep khalil and the rest of the 5 public for showcasing thats why I suggested sanitising but not make them private..
 
 **[3]**
-> I don't want the token to be on github
+> approved
 
 **[4]**
-> you take care of all khalil's PRs
-
-**[5]**
-> approved.. we will also need to introduce loop and graph engineering.
+> approve khalil diff
 
 </details>
