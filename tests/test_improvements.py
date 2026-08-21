@@ -354,6 +354,15 @@ class TestPrivacyRouting:
 # --- #72: Sensitive Data Redaction in Logs ---
 
 class TestLogRedaction:
+    def test_redact_telegram_bot_token_from_http_url(self):
+        from server import _redact_sensitive
+        token = "123456789:" + ("x" * 35)
+        text = f"HTTP Request: POST https://api.telegram.org/bot{token}/sendMessage"
+        redacted = _redact_sensitive(text)
+
+        assert token not in redacted
+        assert "https://api.telegram.org/bot[REDACTED]/sendMessage" in redacted
+
     def test_redact_phone_numbers(self):
         from server import _redact_sensitive
         text = "Call me at 416-555-1234 please"

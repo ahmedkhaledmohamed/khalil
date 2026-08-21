@@ -262,6 +262,7 @@ HARD_GUARDRAILS = [
 
 # Privacy: sensitive query patterns that should NOT be sent raw to Claude API
 SENSITIVE_PATTERNS = [
+    r"(?<=/bot)\d{6,15}:[A-Za-z0-9_-]{20,}",  # Telegram bot tokens in API URLs
     r"\b\d{3}[-.]?\d{3}[-.]?\d{4}\b",  # Phone numbers
     r"\b\d{3}[-]?\d{2}[-]?\d{4}\b",     # SSN pattern
     r"\b[A-Z]{2}\d{6}\b",                # Passport numbers
