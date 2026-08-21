@@ -46,7 +46,7 @@ Khalil records extensive interaction and tool activity, but verified task comple
 
 ## Product Objective
 
-Khalil should reliably complete and verify the ten personal workflows that create the most value for Ahmed before expanding its capability surface.
+Khalil should reliably complete and verify the ten personal workflows that create the most value for its owner before expanding its capability surface.
 
 Success means:
 

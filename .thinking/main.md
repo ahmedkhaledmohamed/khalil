@@ -9,7 +9,7 @@ Ahmed asked to continue Khalil's evolution while preserving “the current Khali
 
 ## Approach
 
-Ahmed chose the Taskforce API for Khalil's conversational model path. Repository-changing work was separated into a local coding-agent runtime, with Codex operating in isolated worktrees while the existing Telegram task, status, diff, validation, Guardian, and PR workflow remains intact.
+Ahmed chose a configured AI gateway for Khalil's conversational model path. Repository-changing work was separated into a local coding-agent runtime, with Codex operating in isolated worktrees while the existing Telegram task, status, diff, validation, Guardian, and PR workflow remains intact.
 
 ## Key Decisions
 
@@ -17,7 +17,7 @@ Codex is the default coding executor and Claude remains an explicit compatibilit
 
 ## Outcome
 
-Khalil now routes coding tasks and complex self-extension through the official Codex SDK using workspace-write isolation and the existing local Codex authentication. Taskforce remains the conversational gateway, and coding-agent status covers Codex plus legacy Claude sessions.
+Khalil now routes coding tasks and complex self-extension through the official Codex SDK using workspace-write isolation and the existing local Codex authentication. A configurable gateway handles conversational requests, and coding-agent status covers Codex plus legacy Claude sessions.
 
 ---
 
@@ -25,7 +25,7 @@ Khalil now routes coding tasks and complex self-extension through the official C
 <summary>Raw Prompts (5)</summary>
 
 **[1]**
-> I think I want to use the taskforce API
+> I think I want to use the [internal gateway redacted] API
 
 **[2]**
 > ok approved.. after that we can continue the evolution but keep in mind the current khalil experience and capbilities and limitiations and how it should evolve.. also currently it starts a claude code session by default to do work but I want it to use codex instead moving forward

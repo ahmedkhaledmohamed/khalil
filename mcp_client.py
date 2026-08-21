@@ -18,7 +18,10 @@ from mcp.client.stdio import stdio_client
 
 log = logging.getLogger("khalil.mcp_client")
 
-MCP_SERVERS_PATH = Path(__file__).parent / "mcp_servers.json"
+MCP_SERVERS_PATH = Path(os.environ.get(
+    "KHALIL_MCP_CONFIG",
+    str(Path(__file__).parent / "mcp_servers.json"),
+)).expanduser()
 
 
 @dataclass

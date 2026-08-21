@@ -129,7 +129,7 @@
   },
   {
     "id": "appstore-004",
-    "query": "zia :rating",
+    "query": "example app :rating",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -145,7 +145,7 @@
   },
   {
     "id": "appstore-005",
-    "query": "zia reviews",
+    "query": "example app reviews",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -193,7 +193,7 @@
   },
   {
     "id": "appstore-010",
-    "query": "zia :downloads",
+    "query": "example app :downloads",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -209,7 +209,7 @@
   },
   {
     "id": "appstore-011",
-    "query": "zia stats",
+    "query": "example app stats",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -225,7 +225,7 @@
   },
   {
     "id": "appstore-013",
-    "query": "how is zia",
+    "query": "how is example app",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -2177,7 +2177,7 @@
   },
   {
     "id": "appstore-016",
-    "query": "rating reviews zia",
+    "query": "rating reviews example app",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -2209,7 +2209,7 @@
   },
   {
     "id": "appstore-018",
-    "query": "downloads stats zia",
+    "query": "downloads stats example app",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -3609,7 +3609,7 @@
   },
   {
     "id": "para-015",
-    "query": "please zia :rating",
+    "query": "please example app :rating",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -3626,7 +3626,7 @@
   },
   {
     "id": "para-016",
-    "query": "please zia reviews",
+    "query": "please example app reviews",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -3677,7 +3677,7 @@
   },
   {
     "id": "para-021",
-    "query": "please zia :downloads",
+    "query": "please example app :downloads",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -3694,7 +3694,7 @@
   },
   {
     "id": "para-022",
-    "query": "please zia stats",
+    "query": "please example app stats",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",
@@ -3711,7 +3711,7 @@
   },
   {
     "id": "para-024",
-    "query": "please how is zia",
+    "query": "please how is example app",
     "category": "apps",
     "complexity": "trivial",
     "expected_path": "direct_action",

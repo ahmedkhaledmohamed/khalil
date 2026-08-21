@@ -126,9 +126,9 @@ def format_dashboard_text() -> str:
     # Overview highlights
     overview = get_financial_overview()
     if overview:
-        # Extract RRSP overcontribution status
+        # Surface the status without copying private amounts into source code.
         if "overcontribution" in overview.lower():
-            parts.append("⚠️ RRSP Overcontribution: $18,975.99 — pending CRA resolution")
+            parts.append("⚠️ RRSP overcontribution noted — review the financial overview")
 
     # Portfolio summary line
     portfolio = get_portfolio_summary()

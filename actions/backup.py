@@ -3,7 +3,7 @@
 Three export modes:
 - Full backup: all operational tables → data/backups/ (local only)
 - Knowledge export: portable knowledge tables → git-synced directory (PR workflow)
-- Full DB backup: gzipped SQLite DB → GitHub Release asset on khalil-knowledge repo
+- Full DB backup: gzipped SQLite DB → an optional GitHub Release asset
 """
 
 import gzip
@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from config import DB_PATH, DATA_DIR, TIMEZONE, KNOWLEDGE_EXPORT_DIR
+from config import DB_PATH, DATA_DIR, TIMEZONE, KNOWLEDGE_EXPORT_DIR, KNOWLEDGE_REPO
 
 log = logging.getLogger("khalil.actions.backup")
 
@@ -314,16 +314,14 @@ def _git_sync(export_dir: Path, timestamp: datetime):
 
 # --- Full DB Backup (GitHub Release asset) ---
 
-# khalil-knowledge repo for release uploads
-_KNOWLEDGE_REPO = "ahmedkhaledmohamed/khalil-knowledge"
 _DB_BACKUP_RETENTION = 7  # keep last N release backups
 
 
 def backup_full_db() -> dict:
     """Compress and upload the full SQLite DB as a GitHub Release asset.
 
-    Creates a gzipped copy of khalil.db and uploads it to the khalil-knowledge
-    repo as a release asset. Retains the last _DB_BACKUP_RETENTION releases.
+    Creates a gzipped copy of khalil.db and uploads it to the configured
+    knowledge repository as a release asset.
 
     Returns dict with status, size, and release URL.
     """
@@ -333,6 +331,8 @@ def backup_full_db() -> dict:
 
     if not DB_PATH.exists():
         return {"error": "Database not found", "path": str(DB_PATH)}
+    if not KNOWLEDGE_REPO:
+        return {"error": "KHALIL_KNOWLEDGE_REPO is not configured"}
 
     # 1. Gzip the DB to a temp file
     gz_path = DATA_DIR / "khalil_db_backup.gz"
@@ -350,7 +350,7 @@ def backup_full_db() -> dict:
         result = subprocess.run(
             ["gh", "release", "create", tag,
              str(gz_path),
-             "--repo", _KNOWLEDGE_REPO,
+             "--repo", KNOWLEDGE_REPO,
              "--title", title,
              "--notes", f"Automated full DB backup — {now.isoformat()}"],
             capture_output=True, text=True, timeout=300,  # 5 min for large upload
@@ -383,7 +383,7 @@ def _prune_old_db_releases():
     """Delete DB backup releases beyond the retention limit."""
     try:
         result = subprocess.run(
-            ["gh", "release", "list", "--repo", _KNOWLEDGE_REPO,
+            ["gh", "release", "list", "--repo", KNOWLEDGE_REPO,
              "--limit", "50", "--json", "tagName,createdAt"],
             capture_output=True, text=True, timeout=15,
         )
@@ -400,7 +400,7 @@ def _prune_old_db_releases():
         for old in db_releases[_DB_BACKUP_RETENTION:]:
             tag = old["tagName"]
             subprocess.run(
-                ["gh", "release", "delete", tag, "--repo", _KNOWLEDGE_REPO,
+                ["gh", "release", "delete", tag, "--repo", KNOWLEDGE_REPO,
                  "--yes", "--cleanup-tag"],
                 capture_output=True, timeout=15,
             )

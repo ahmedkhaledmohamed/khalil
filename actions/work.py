@@ -5,7 +5,13 @@ import logging
 import os
 from pathlib import Path
 
-from config import WORK_DIR
+from config import (
+    WORK_DESCRIPTION_COLUMN,
+    WORK_DIR,
+    WORK_ITEM_ID_COLUMN,
+    WORK_OWNER_COLUMN,
+    WORK_SECONDARY_OWNER_COLUMN,
+)
 
 log = logging.getLogger("khalil.actions.work")
 
@@ -28,7 +34,7 @@ def _load_epics() -> list[dict]:
             if any("#NAME?" in str(v) for v in values if v):
                 continue
 
-            desc = row.get("Description of Work (Squad Internal)", "").strip()
+            desc = row.get(WORK_DESCRIPTION_COLUMN, "").strip()
             if not desc:
                 continue
 
@@ -37,10 +43,11 @@ def _load_epics() -> list[dict]:
                 "description": desc,
                 "status": row.get("Status", "").strip(),
                 "priority": row.get("Priority", "").strip(),
-                "owner": row.get("Planning RM", "").strip() or row.get("Delivery RM", "").strip(),
+                "owner": row.get(WORK_OWNER_COLUMN, "").strip()
+                or (row.get(WORK_SECONDARY_OWNER_COLUMN, "").strip() if WORK_SECONDARY_OWNER_COLUMN else ""),
                 "estimate": row.get("Estimate", "").strip(),
                 "percent_complete": row.get("% Complete", "").strip(),
-                "epic_id": row.get("Epic or Contribution ID", "").strip(),
+                "epic_id": row.get(WORK_ITEM_ID_COLUMN, "").strip(),
                 "commitment": row.get("Commitment", "").strip(),
             })
     return epics

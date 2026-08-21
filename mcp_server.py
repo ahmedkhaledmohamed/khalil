@@ -25,7 +25,7 @@ async def search_knowledge(query: str, category: str | None = None) -> str:
     """Search the personal knowledge base (emails, Drive, timeline, context).
 
     Args:
-        query: Search query (e.g. "RRSP overcontribution", "Spotify messaging")
+        query: Search query (e.g. "tax deadline", "project roadmap")
         category: Optional filter (e.g. "email:finance", "life:timeline", "personal:context")
     """
     results = await hybrid_search(query, limit=8, category=category)

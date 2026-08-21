@@ -131,9 +131,9 @@ async def init_server():
         api_key = server.get_secret("anthropic-api-key")
         if api_key:
             if CLAUDE_BASE_URL:
-                # Taskforce proxy — uses OpenAI-compatible client (matches server startup)
+                # Compatible gateway client (matches server startup)
                 from openai import AsyncOpenAI
-                server._taskforce_client = AsyncOpenAI(
+                server._gateway_client = AsyncOpenAI(
                     api_key=api_key,
                     base_url=CLAUDE_BASE_URL,
                     default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},

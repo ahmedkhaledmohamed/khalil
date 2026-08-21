@@ -1,7 +1,7 @@
 """Automated GitHub authentication setup — store, verify, and manage GitHub PATs.
 
-Manages Personal Access Tokens for github.com and GHE (ghe.spotify.net) via
-the system keyring. Verifies tokens against the GitHub API and logs actions.
+Manages Personal Access Tokens for github.com and an optional GitHub Enterprise
+instance via the system keyring. Verifies tokens against the configured API.
 
 Token type: GitHub Personal Access Token (classic or fine-grained)
   - Classic: Settings > Developer settings > Personal access tokens > Tokens (classic)
@@ -13,6 +13,7 @@ Setup: /ghauth setup <token> (github.com) or /ghauth setup_ghe <token> (GHE)
 """
 import asyncio
 import logging
+import os
 import re
 import sqlite3
 
@@ -47,8 +48,11 @@ SKILL = {
 _KEY_GITHUB = "github-pat"
 _KEY_GHE = "github-enterprise-token"
 _API_GITHUB = "https://api.github.com"
-_API_GHE = "https://ghe.spotify.net/api/v3"
-_INSTANCES = [("github.com", "github"), ("GHE (ghe.spotify.net)", "ghe")]
+_GHE_URL = os.getenv("KHALIL_GITHUB_ENTERPRISE_URL", "").rstrip("/")
+_API_GHE = f"{_GHE_URL}/api/v3" if _GHE_URL else ""
+_INSTANCES = [("github.com", "github")]
+if _GHE_URL:
+    _INSTANCES.append((f"GitHub Enterprise ({_GHE_URL})", "ghe"))
 _tables_ensured = False
 
 
@@ -111,6 +115,8 @@ def _verify_token_sync(instance: str) -> dict:
     if not token:
         return {"ok": False, "error": "No token stored"}
     base_url = _API_GHE if instance == "ghe" else _API_GITHUB
+    if not base_url:
+        return {"ok": False, "error": "KHALIL_GITHUB_ENTERPRISE_URL is not configured"}
     headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
     with httpx.Client(timeout=15) as client:
         resp = client.get(f"{base_url}/user", headers=headers)
@@ -197,10 +203,14 @@ async def _cmd_status(update):
 
 
 async def _cmd_setup(update, args: list[str], instance: str):
-    label = "GHE" if instance == "ghe" else "github.com"
+    label = "GitHub Enterprise" if instance == "ghe" else "github.com"
+    if instance == "ghe" and not _GHE_URL:
+        await update.message.reply_text(
+            "Set KHALIL_GITHUB_ENTERPRISE_URL before configuring an enterprise token.")
+        return
     if not args:
         cmd = "setup_ghe" if instance == "ghe" else "setup"
-        url = "https://ghe.spotify.net/settings/tokens" if instance == "ghe" else "https://github.com/settings/tokens"
+        url = f"{_GHE_URL}/settings/tokens" if instance == "ghe" else "https://github.com/settings/tokens"
         await update.message.reply_text(
             f"Provide your {label} PAT:\n  /ghauth {cmd} ghp_xxxx\n\nGenerate at:\n  {url}")
         return

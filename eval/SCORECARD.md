@@ -50,15 +50,15 @@ Measured against GAIA, TheAgentCompany, τ-bench, ConvBench, Microsoft Failure T
 | 5 | 2026-03-29 | pending | 196 | 181 | 92.3% | +8.2pp | Param extraction, weather exclusion, network skill reclassification |
 | 6 | 2026-04-05 | production | 2,458 | 2,216 | 90.2% | -2.1pp | Full-scope production validation (frozen cases.json) |
 | 7 | 2026-04-08 | `fix/p0-p2` | 910 | 649 | 71.3% | — | Direct-action only (LLM cases excluded — API key issue) |
-| 8 | 2026-04-08 | `fix/p0-p2` | 2,774 | 650 | 23.4% | — | Full generated suite via Taskforce. handler_bad_output dominant failure |
-| 9 | **2026-04-08** | `fix/p0-p2` | **851** | **714** | **83.9%** | **-2.2pp** | Frozen cases via Taskforce. 92 fixed, 111 regressed (net -19) |
+| 8 | 2026-04-08 | `fix/p0-p2` | 2,774 | 650 | 23.4% | — | Full generated suite via configured gateway. handler_bad_output dominant failure |
+| 9 | **2026-04-08** | `fix/p0-p2` | **851** | **714** | **83.9%** | **-2.2pp** | Frozen gateway cases. 92 fixed, 111 regressed (net -19) |
 
 ### Run #9 Notes (Apples-to-Apples Baseline Comparison)
 - **Same 851 cases** that existed in both Apr 5 and Apr 8 runs
 - Apr 5 baseline on these cases: **733/851 = 86.1%**
 - Apr 8 post-fix: **714/851 = 83.9%** (-2.2pp)
 - **92 cases fixed** (was fail → now pass): calendar (+8), reminder (+5), weather (+5), github (+6), linkedin (+8), apps (+5), readwise (+4), etc.
-- **111 cases regressed** (was pass → now fail): mostly LLM response quality variability — same handler, different model behavior via Taskforce proxy vs direct Anthropic
+- **111 cases regressed** (was pass → now fail): mostly LLM response quality variability — same handler, different model behavior through the gateway versus direct Anthropic
 - Calendar: **0% → 100%** (8/8) — pattern fix working
 - Reminder: **0% → 62%** (5/8) — routing fixed, handler needs LLM for bare queries
 - Weather: **40% → 100%** — env vars now available
@@ -173,7 +173,7 @@ others              11  (5.2%)
 | Test cases (~2,500+) | `cases.py` | Pattern-based + generated cases |
 | Golden cases (479) | `fixtures/golden.yaml` | Hand-curated regression anchors |
 | 3-tier judge | `judge.py` | Deterministic → Heuristic → LLM scoring |
-| Runner | `runner.py` | Parallel execution with Taskforce proxy |
+| Runner | `runner.py` | Parallel execution through the configured gateway |
 | Gap analysis | `gap_analysis.py` | Failure categorization (9 gap types) |
 | Auto-fix | `autofix.py` | Code generation for pattern/handler fixes |
 | Scenarios (16) | `scenarios.py` | End-to-end multi-turn task tests |

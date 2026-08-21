@@ -38,9 +38,9 @@ MID_QUARTER_DATES = {
 
 # Domain mapping for goal alignment
 DOMAIN_KEYWORDS = {
-    "work": ["spotify", "sprint", "epic", "P0", "team", "roadmap", "promotion", "role",
+    "work": ["sprint", "epic", "P0", "team", "roadmap", "promotion", "role",
              "leadership", "stakeholder", "meeting", "1:1"],
-    "project": ["zia", "bezier", "bézier", "tiny grounds", "side project", "app", "ship",
+    "project": ["side project", "app", "ship",
                 "launch", "build", "code", "prototype"],
     "finance": ["invest", "rrsp", "tfsa", "rsu", "tax", "portfolio", "savings", "budget",
                 "money", "financial", "income"],

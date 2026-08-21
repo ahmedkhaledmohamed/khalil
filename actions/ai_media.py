@@ -1,7 +1,7 @@
 """AI media generation skill — generate images, videos, and audio via Replicate.
 
 Usage:
-    "generate an image of a sunset over Toronto"
+    "generate an image of a sunset over a city skyline"
     "create a video of waves on a beach"
     "make some chill lo-fi music"
 """
@@ -58,7 +58,7 @@ SKILL = {
         },
     ],
     "examples": [
-        "generate an image of a sunset over Toronto",
+        "generate an image of a sunset over a city skyline",
         "create a short video of ocean waves",
         "make some chill lo-fi background music",
         "draw a cat wearing a top hat",

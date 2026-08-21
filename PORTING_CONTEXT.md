@@ -9,21 +9,21 @@ Khalil's state is preserved across three layers:
 ```
 Layer 1: Full DB backup (GitHub Release asset)
 ├── What: gzipped khalil.db (~150-200 MB compressed)
-├── Where: github.com/ahmedkhaledmohamed/khalil-knowledge/releases
+├── Where: KHALIL_KNOWLEDGE_REPO GitHub Releases (optional, private recommended)
 ├── When: Daily at 3:15 AM
 ├── Retention: Last 7 backups
 └── Restore: gh release download → gunzip → data/khalil.db
 
 Layer 2: Knowledge JSON export (git-committed)
 ├── What: 8 portable tables as JSON (memories, summaries, preferences, etc.)
-├── Where: github.com/ahmedkhaledmohamed/khalil-knowledge (repo files)
+├── Where: KHALIL_KNOWLEDGE_EXPORT_DIR
 ├── When: Daily at 3:00 AM
 ├── Flow: branch → commit → PR → auto-squash-merge
 └── Restore: import_knowledge() merges into existing DB
 
 Layer 3: Source repos (re-indexable)
 ├── What: Work docs, side projects, archives, email
-├── Where: ~/Developer/* (various repos)
+├── Where: user-configured document sources
 ├── When: Re-indexed on demand via /sync or scheduled jobs
 └── Restore: Clone repos → index_all(force=True)
 ```
@@ -32,18 +32,18 @@ Layer 3: Source repos (re-indexable)
 
 | Data | Location | Portable? |
 |------|----------|-----------|
-| Full DB (everything) | GitHub Release on khalil-knowledge | Yes — download + gunzip |
-| Memories, preferences | khalil-knowledge repo (JSON files) | Yes — git clone + import |
-| Google OAuth tokens | ~/Developer/Personal/scripts/token_*.json | No — re-auth on new machine |
+| Full DB (everything) | Configured private GitHub Release | Yes — download + gunzip |
+| Memories, preferences | Configured export directory | Yes — copy or import |
+| Google OAuth tokens | ~/.khalil/credentials/token_*.json | No — re-auth on new machine |
 | API keys & secrets | macOS Keychain (khalil-assistant) | No — re-enter via keyring |
-| Work documents | ~/Developer/* repos | Yes — git clone + re-index |
+| Indexed documents | User-configured sources | Yes — restore sources + re-index |
 | Embeddings | data/khalil.db (documents table) | Via full DB, or regenerated via Ollama |
 | Daemon config | ~/Library/LaunchAgents/com.khalil.daemon.plist | Copy + update paths |
 
 ## New Machine Checklist
 
 ```
-[ ] Clone: khalil, khalil-knowledge, Personal repos
+[ ] Clone Khalil and restore any private document sources
 [ ] Python 3.13 + venv + pip install -r requirements.txt
 [ ] brew install ollama gh
 [ ] ollama pull nomic-embed-text

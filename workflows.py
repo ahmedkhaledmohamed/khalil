@@ -211,7 +211,7 @@ class WorkflowEngine:
         """Register built-in seed workflows."""
         seeds = [
             Workflow(
-                id="wf_zia_health", name="Zia health monitor",
+                id="wf_app_health", name="App health monitor",
                 trigger_type="cron", trigger_config={"hour": "*/6"},
                 condition={"field": "downloads_delta_pct", "op": "<", "value": -30},
                 actions=[

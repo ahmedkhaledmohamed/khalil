@@ -1,43 +1,39 @@
 """Project status tracking — read project info from repo files and knowledge base."""
 
 import logging
+import os
 from pathlib import Path
 
-from config import PERSONAL_REPO_PATH, KHALIL_DIR, PROJECTS_DIR
+from config import KHALIL_DIR
 
 log = logging.getLogger("khalil.actions.projects")
 
-# Known projects and their file locations
+# Public defaults contain only Khalil itself. Add user-specific projects with
+# KHALIL_PROJECTS="key|Display name|~/path/to/status.md;...".
 KNOWN_PROJECTS = {
-    "zia": {
-        "name": "Zia — AI Family Planning Platform",
-        "file": PROJECTS_DIR / "zia.md",
-    },
-    "tiny-grounds": {
-        "name": "Tiny Grounds — Kids Play Café",
-        "file": PROJECTS_DIR / "tiny-grounds" / "README.md",
-    },
-    "bezier": {
-        "name": "Bézier — AI Design Generation",
-        "file": PROJECTS_DIR / "bezier.md",
-    },
     "khalil": {
         "name": "Khalil — Personal AI Assistant",
         "file": KHALIL_DIR / "README.md",
     },
 }
+for _entry in os.getenv("KHALIL_PROJECTS", "").split(";"):
+    _parts = [part.strip() for part in _entry.split("|", 2)]
+    if len(_parts) == 3 and all(_parts):
+        _key, _name, _path = _parts
+        KNOWN_PROJECTS[_key.lower()] = {
+            "name": _name,
+            "file": Path(_path).expanduser(),
+        }
 
-# Aliases for fuzzy matching
+# Optional aliases use KHALIL_PROJECT_ALIASES="alias=project-key;...".
 ALIASES = {
-    "café": "tiny-grounds",
-    "cafe": "tiny-grounds",
-    "play": "tiny-grounds",
-    "bézier": "bezier",
-    "design": "bezier",
     "assistant": "khalil",
-    "family": "zia",
-    "meal": "zia",
 }
+for _entry in os.getenv("KHALIL_PROJECT_ALIASES", "").split(";"):
+    if "=" in _entry:
+        _alias, _key = (part.strip().lower() for part in _entry.split("=", 1))
+        if _alias and _key in KNOWN_PROJECTS:
+            ALIASES[_alias] = _key
 
 
 def resolve_project(name: str) -> str | None:
@@ -62,7 +58,7 @@ def get_project_status(key: str) -> str:
 
     path = project["file"]
     if not path.exists():
-        return f"{project['name']}\n\nNo project file found at {path.relative_to(PERSONAL_REPO_PATH)}"
+        return f"{project['name']}\n\nNo project file found at {path}"
 
     try:
         content = path.read_text(encoding="utf-8")

@@ -10,23 +10,21 @@ Step-by-step guide to get Khalil fully operational on a new macOS device. Estima
 - Homebrew installed
 - GitHub CLI authenticated (`gh auth login`)
 
-## 1. Clone Repos
+## 1. Clone Khalil
 
 ```bash
 # Main codebase
-git clone git@github.com:ahmedkhaledmohamed/khalil.git ~/Developer/Personal/scripts/khalil
+git clone git@github.com:ahmedkhaledmohamed/khalil.git ~/.khalil/app
 
-# Knowledge state (portable memories, preferences, summaries)
-git clone git@github.com:ahmedkhaledmohamed/khalil-knowledge.git ~/Developer/Personal/khalil-knowledge
-
-# Personal repo (archives, work context — khalil indexes this)
-git clone git@github.com:ahmedkhaledmohamed/scripts.git ~/Developer/Personal
+# Optional: point Khalil at private document and backup repositories
+export KHALIL_PERSONAL_REPO=~/.khalil/workspace
+export KHALIL_KNOWLEDGE_REPO=your-account/your-private-knowledge-repo
 ```
 
 ## 2. Python Environment
 
 ```bash
-cd ~/Developer/Personal/scripts/khalil
+cd ~/.khalil/app
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -62,7 +60,7 @@ keyring.set_password(svc, 'telegram-bot-token', '<from @BotFather>')
 keyring.set_password(svc, 'anthropic-api-key', '<from console.anthropic.com>')
 
 # Google OAuth (if using Gmail/Calendar/Drive features)
-# Place credentials.json from GCP Console in ~/Developer/Personal/scripts/
+# Place credentials.json from GCP Console in ~/.khalil/credentials/
 # Then run interactive auth — see step 5
 
 # Optional (enable specific integrations)
@@ -76,7 +74,7 @@ keyring.set_password(svc, 'replicate-api-token', '...')
 
 ## 5. Google OAuth Tokens
 
-Download your OAuth client `credentials.json` from [GCP Console](https://console.cloud.google.com/apis/credentials) and place it at `~/Developer/Personal/scripts/credentials.json`.
+Download your OAuth client `credentials.json` from [GCP Console](https://console.cloud.google.com/apis/credentials) and place it at `~/.khalil/credentials/credentials.json`.
 
 Each Google service uses a separate token file for least-privilege scoping:
 
@@ -101,10 +99,10 @@ Three options, from most complete to lightest:
 ### Option A: Full DB from GitHub Release (recommended)
 
 ```bash
-cd ~/Developer/Personal/scripts/khalil
+cd ~/.khalil/app
 
 # Download latest full DB backup
-gh release download --repo ahmedkhaledmohamed/khalil-knowledge \
+gh release download --repo "$KHALIL_KNOWLEDGE_REPO" \
   --pattern "khalil_db_backup.gz" --dir data/
 
 # Decompress
@@ -117,13 +115,13 @@ This restores everything: conversations, memories, documents, embeddings, workfl
 ### Option B: Import portable knowledge (lighter)
 
 ```bash
-cd ~/Developer/Personal/scripts/khalil
+cd ~/.khalil/app
 source .venv/bin/activate
 
 # Initialize empty DB schema
 python3 -c "from knowledge.indexer import init_db; init_db()"
 
-# Import memories, summaries, preferences, workflows from khalil-knowledge repo
+# Import memories, summaries, preferences, and workflows from the configured export
 python3 -c "from actions.backup import import_knowledge; print(import_knowledge())"
 
 # Re-index documents (work repos, archives, side projects)
@@ -153,7 +151,7 @@ Empty DB. Khalil learns from scratch. Documents indexed on first sync.
 # Copy plist template
 cp com.khalil.daemon.plist ~/Library/LaunchAgents/
 
-# Edit paths if your khalil directory differs from ~/Developer/Personal/scripts/khalil
+# Edit paths if your khalil directory differs from ~/.khalil/app
 # Key fields to check:
 #   ProgramArguments → path to .venv/bin/python3 and server.py
 #   WorkingDirectory → khalil repo root
@@ -192,34 +190,24 @@ Once running, Khalil handles its own backups:
 
 | Time | Job | What it does |
 |------|-----|-------------|
-| 3:00 AM | Knowledge export | Exports 8 tables as JSON → opens PR on khalil-knowledge |
-| 3:15 AM | Full DB backup | Gzips khalil.db → uploads as GitHub Release asset |
+| 3:00 AM | Knowledge export | Exports 8 tables as JSON to the configured directory |
+| 3:15 AM | Full DB backup | Uploads to the configured private GitHub repository |
 
 Retention: last 7 full DB backups. Knowledge PRs are squash-merged automatically.
 
 ## Directory Map
 
 ```
-~/Developer/Personal/
-├── scripts/khalil/              ← Main codebase
-│   ├── server.py                  FastAPI + Telegram entry point
-│   ├── config.py                  All configuration
-│   ├── data/khalil.db             SQLite database (~200 MB)
-│   ├── actions/                   37 skill modules
-│   ├── knowledge/                 Indexer, search, embeddings
-│   └── .venv/                     Python virtual environment
-│
-├── khalil-knowledge/            ← Portable state (git-synced)
-│   ├── memories.json              Learned memories
-│   ├── conversation_summaries.json
-│   ├── learned_preferences.json
-│   └── ...                        8 JSON files + _meta.json
-│
-├── scripts/                     ← Shared credentials
-│   ├── credentials.json           Google OAuth client
-│   └── token_*.json               Per-scope OAuth tokens
-│
-└── work/, career/, projects/    ← Content khalil indexes
+~/.khalil/
+├── app/                         ← Main codebase
+│   ├── server.py
+│   ├── config.py
+│   ├── data/                    ← Runtime database and logs (gitignored)
+│   ├── actions/
+│   └── knowledge/
+├── credentials/                 ← OAuth configuration and tokens
+├── knowledge-export/            ← Optional portable state export
+└── workspace/                   ← User-selected documents to index
 ```
 
 ## Troubleshooting

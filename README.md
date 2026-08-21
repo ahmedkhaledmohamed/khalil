@@ -444,19 +444,45 @@ Falls back to environment variables: `TELEGRAM_BOT_TOKEN`, `ANTHROPIC_API_KEY`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `KHALIL_PERSONAL_REPO` | `~/Developer/Personal` | Path to personal document repo |
+| `KHALIL_PERSONAL_REPO` | `~/.khalil/workspace` | Path to personal document repo |
+| `KHALIL_CREDENTIALS_DIR` | `~/.khalil/credentials` | Local OAuth configuration and token directory |
+| `KHALIL_ARTIFACTS_DIR` | `<workspace>/artifacts` | Generated presentation and file output directory |
+| `KHALIL_OWNER_NAME` | `User` | Owner name used in assistant prompts |
+| `KHALIL_OWNER_PROFILE` | Generic | Optional owner context used in assistant prompts |
+| `KHALIL_LOCATION_NAME` | `New York` | Display name used for location-aware responses |
+| `KHALIL_TIMEZONE` | `America/New_York` | Local timezone for schedules and digests |
+| `KHALIL_DOCUMENT_SOURCES` | — | Semicolon-separated `label=path` document directories |
+| `KHALIL_DOCUMENT_FILES` | — | Semicolon-separated `label=path` standalone documents |
+| `KHALIL_SIDE_PROJECT_DIRS` | — | Path-separated project directories to index |
+| `KHALIL_PROJECTS` | — | Semicolon-separated `key|name|path` project definitions |
+| `KHALIL_PROJECT_ALIASES` | — | Semicolon-separated `alias=project-key` mappings |
+| `KHALIL_CODING_PROJECTS` | — | Semicolon-separated `name=path` repositories available to the coding agent |
+| `KHALIL_WORK_DESCRIPTION_COLUMN` | `Description` | Description field in an optional work-planning CSV |
+| `KHALIL_WORK_OWNER_COLUMN` | `Owner` | Primary owner field in an optional work-planning CSV |
+| `KHALIL_WORK_ITEM_ID_COLUMN` | `Item ID` | Identifier field in an optional work-planning CSV |
+| `KHALIL_APPSTORE_APP_ID` | — | Optional App Store Connect app identifier |
+| `KHALIL_APPSTORE_APP_NAME` | `App` | Display name for App Store digests |
+| `KHALIL_KNOWLEDGE_REPO` | — | Optional `owner/repo` used for GitHub Release backups |
+| `KHALIL_CLAUDE_BASE_URL` | — | Optional OpenAI-compatible gateway for Claude requests |
+| `KHALIL_GITHUB_ENTERPRISE_URL` | — | Optional GitHub Enterprise base URL |
+| `KHALIL_MCP_CONFIG` | `./mcp_servers.json` | Machine-local MCP server configuration |
 | `TELEGRAM_BOT_TOKEN` | — | Fallback for keyring |
 | `ANTHROPIC_API_KEY` | — | Fallback for keyring |
 
 ### LLM Backend
 
-In `config.py`:
-```python
-LLM_BACKEND = "ollama"           # free, local — or "claude" for cloud
-OLLAMA_LLM_MODEL = "qwen3:14b"
-CLAUDE_MODEL = "claude-sonnet-4-5"
-CLAUDE_MODEL_COMPLEX = "claude-opus-4-6"  # used for code generation
+Configure the backend and models through environment variables:
+```bash
+export KHALIL_LLM_BACKEND=ollama  # or claude
+export KHALIL_CLAUDE_MODEL=claude-sonnet-4-5
+export KHALIL_CLAUDE_MODEL_COMPLEX=claude-opus-4-6
 ```
+
+### External MCP Servers
+
+Copy `mcp_servers.example.json` to the ignored `mcp_servers.json`, then add
+machine-local commands and paths. Set `KHALIL_MCP_CONFIG` to store the file
+elsewhere.
 
 ### Google OAuth
 

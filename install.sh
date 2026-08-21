@@ -34,7 +34,9 @@ STATE_FILE="${KHALIL_DIR}/data/.install_state"
 PLIST_TEMPLATE="${KHALIL_DIR}/com.khalil.daemon.plist"
 PLIST_NAME="com.khalil.daemon.plist"
 PLIST_DEST="${HOME}/Library/LaunchAgents/${PLIST_NAME}"
-PERSONAL_REPO="${KHALIL_PERSONAL_REPO:-${HOME}/Developer/Personal}"
+PERSONAL_REPO="${KHALIL_PERSONAL_REPO:-${HOME}/.khalil/workspace}"
+CREDENTIALS_DIR="${KHALIL_CREDENTIALS_DIR:-${HOME}/.khalil/credentials}"
+KNOWLEDGE_REPO="${KHALIL_KNOWLEDGE_REPO:-}"
 PORT=8033
 
 # ── CLI Args ──
@@ -269,7 +271,7 @@ if should_run 5; then
     else
         # ── Google Workspace ──
         echo -e "\n  ${BOLD}Google Workspace${NC} ${DIM}(Gmail, Calendar, Drive, Contacts, Tasks)${NC}"
-        creds_path="${PERSONAL_REPO}/scripts/credentials.json"
+        creds_path="${CREDENTIALS_DIR}/credentials.json"
         if [[ -f "$creds_path" ]]; then
             ok "credentials.json found"
             if prompt_yn "Authenticate Google services now? (opens browser)" "y"; then
@@ -393,20 +395,23 @@ if should_run 6 && ! phase_done "phase6"; then
         else
             echo -e "  Database setup:"
             echo -e "    ${BOLD}[A]${NC} Restore full DB from GitHub Release (recommended if migrating)"
-            echo -e "    ${BOLD}[B]${NC} Import portable knowledge from khalil-knowledge repo"
+            echo -e "    ${BOLD}[B]${NC} Import portable knowledge from a configured repository"
             echo -e "    ${BOLD}[C]${NC} Fresh start (empty database)"
             read -rp "  Choice [C]: " db_choice
             db_choice="${db_choice:-C}"
 
             case "${db_choice^^}" in
                 A)
-                    if ! gh auth status &>/dev/null; then
+                    if [[ -z "$KNOWLEDGE_REPO" ]]; then
+                        fail "Set KHALIL_KNOWLEDGE_REPO before restoring from a release"
+                        $PYTHON -c "import sys; sys.path.insert(0,'.'); from knowledge.indexer import init_db; init_db()"
+                    elif ! gh auth status &>/dev/null; then
                         warn "GitHub CLI not authenticated. Run: gh auth login"
                         fail "Cannot restore — falling back to fresh database"
                         $PYTHON -c "import sys; sys.path.insert(0,'.'); from knowledge.indexer import init_db; init_db()"
                     else
                         echo -e "  ${DIM}Downloading backup...${NC}"
-                        gh release download --repo ahmedkhaledmohamed/khalil-knowledge \
+                        gh release download --repo "$KNOWLEDGE_REPO" \
                             --pattern "khalil_db_backup.gz" --dir "${KHALIL_DIR}/data/" --clobber
                         gunzip -c "${KHALIL_DIR}/data/khalil_db_backup.gz" > "$db_path"
                         rm -f "${KHALIL_DIR}/data/khalil_db_backup.gz"
@@ -415,11 +420,11 @@ if should_run 6 && ! phase_done "phase6"; then
                     fi
                     ;;
                 B)
-                    knowledge_dir="${KHALIL_KNOWLEDGE_EXPORT_DIR:-${PERSONAL_REPO}/khalil-knowledge}"
+                    knowledge_dir="${KHALIL_KNOWLEDGE_EXPORT_DIR:-${HOME}/.khalil/knowledge-export}"
                     if [[ ! -d "$knowledge_dir" ]]; then
-                        warn "khalil-knowledge not found at $knowledge_dir"
-                        if prompt_yn "Clone it?" "y"; then
-                            git clone git@github.com:ahmedkhaledmohamed/khalil-knowledge.git "$knowledge_dir"
+                        warn "Portable knowledge not found at $knowledge_dir"
+                        if [[ -n "$KNOWLEDGE_REPO" ]] && prompt_yn "Clone the configured repository?" "y"; then
+                            git clone "git@github.com:${KNOWLEDGE_REPO}.git" "$knowledge_dir"
                         fi
                     fi
                     $PYTHON -c "import sys; sys.path.insert(0,'.'); from knowledge.indexer import init_db; init_db()"
