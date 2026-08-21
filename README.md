@@ -454,8 +454,8 @@ In `config.py`:
 ```python
 LLM_BACKEND = "ollama"           # free, local — or "claude" for cloud
 OLLAMA_LLM_MODEL = "qwen3:14b"
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
-CLAUDE_MODEL_COMPLEX = "claude-opus-4-20250514"  # used for code generation
+CLAUDE_MODEL = "claude-sonnet-4-5"
+CLAUDE_MODEL_COMPLEX = "claude-opus-4-6"  # used for code generation
 ```
 
 ### Google OAuth

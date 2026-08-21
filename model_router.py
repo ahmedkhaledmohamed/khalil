@@ -17,10 +17,9 @@ class ModelTier(Enum):
 
 
 # Default tier → model mapping
-# #16: FAST queries use Sonnet (cheaper, faster) instead of Opus
 MODEL_MAP: dict[ModelTier, str] = {
-    ModelTier.FAST: CLAUDE_MODEL_FAST,    # Sonnet for greetings, simple lookups
-    ModelTier.STANDARD: CLAUDE_MODEL,     # Opus for standard queries
+    ModelTier.FAST: CLAUDE_MODEL_FAST,    # Haiku for greetings, simple lookups
+    ModelTier.STANDARD: CLAUDE_MODEL,     # Sonnet for standard queries
     ModelTier.COMPLEX: CLAUDE_MODEL_COMPLEX,  # Opus for code gen, analysis
 }
 

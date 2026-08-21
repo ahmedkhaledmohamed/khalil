@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from config import DB_PATH, OLLAMA_URL, TIMEZONE
+from config import CLAUDE_MODEL_FAST, DB_PATH, OLLAMA_URL, TIMEZONE
 
 log = logging.getLogger("khalil.monitoring")
 
@@ -145,9 +145,15 @@ async def _check_claude() -> dict:
     try:
         from llm_client import get_llm_client, call_llm_sync
         client, client_type = get_llm_client()
-        # Minimal call to verify the connection works
-        call_llm_sync(client, client_type, "claude-haiku-4-5-20251001", "", "ping", max_tokens=5)
-        return {"status": "ok"}
+        call_llm_sync(
+            client,
+            client_type,
+            CLAUDE_MODEL_FAST,
+            "You are a service health probe.",
+            "Reply OK.",
+            max_tokens=5,
+        )
+        return {"status": "ok", "model": CLAUDE_MODEL_FAST}
     except Exception as e:
         return {"status": "error", "error": str(e)[:200]}
 
