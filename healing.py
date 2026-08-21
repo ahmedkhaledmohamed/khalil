@@ -839,34 +839,33 @@ def substitute_function_in_file(file_path: Path, new_func_source: str) -> str | 
 async def create_healing_pr(target_file: str, patched_content: str, diagnosis: dict) -> str:
     """Create a branch, commit the patched file, push, and open a PR. Returns PR URL."""
     from actions.extend import _run_git, _run_gh
+    from actions.claude_code import (
+        cleanup_worktree,
+        create_worktree,
+        resolve_worktree_path,
+        validate_worktree_changes,
+    )
 
     fingerprint = diagnosis["fingerprint"].replace(":", "-")
     branch_name = f"khalil-heal/{fingerprint}"
 
     def _git_workflow():
         _run_gh("auth", "status")
-        original_branch = _run_git("branch", "--show-current").stdout.strip()
-        stashed = False
-        status = _run_git("status", "--porcelain").stdout.strip()
-        if status:
-            _run_git("stash", "push", "-m", f"khalil-heal-{fingerprint}")
-            stashed = True
+        wt_path = create_worktree(branch_name)
         try:
-            _run_git("checkout", "main")
-            _run_git("pull", "--ff-only")
-            _run_git("checkout", "-b", branch_name)
-
-            # Write patched file
-            file_path = KHALIL_DIR / target_file
+            file_path = resolve_worktree_path(wt_path, target_file)
             file_path.write_text(patched_content)
 
-            _run_git("add", str(file_path))
+            changed_paths = validate_worktree_changes(wt_path, {target_file})
+            _run_git("add", "--", *changed_paths, cwd=str(wt_path))
             _run_git("commit", "-m",
                       f"Fix {diagnosis['summary'][:60]} (auto-healed by Khalil)\n\n"
                       f"Fingerprint: {diagnosis['fingerprint']}\n"
                       f"Failures: {diagnosis['failure_count']}x in 48h\n\n"
-                      f"Co-Authored-By: Khalil Bot <khalil@local>")
-            _run_git("push", "-u", "origin", branch_name)
+                      f"Co-Authored-By: Khalil Bot <khalil@local>",
+                      cwd=str(wt_path))
+            validate_worktree_changes(wt_path, {target_file})
+            _run_git("push", "-u", "origin", branch_name, cwd=str(wt_path))
 
             body = _build_pr_body(diagnosis)
             title_prefix = "[NEEDS REVIEW] " if diagnosis.get("_guardian_blocked") else ""
@@ -874,18 +873,11 @@ async def create_healing_pr(target_file: str, patched_content: str, diagnosis: d
                 "pr", "create",
                 "--title", f"{title_prefix}Khalil self-heal: {diagnosis['summary'][:60]}",
                 "--body", body,
+                cwd=str(wt_path),
             )
             return result.stdout.strip()
         finally:
-            try:
-                _run_git("checkout", original_branch)
-            except Exception:
-                _run_git("checkout", "main")
-            if stashed:
-                try:
-                    _run_git("stash", "pop")
-                except Exception:
-                    pass
+            cleanup_worktree(branch_name)
 
     return await asyncio.to_thread(_git_workflow)
 

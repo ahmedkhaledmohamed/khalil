@@ -93,9 +93,16 @@ async def run_coding_task(prompt: str, project_path: Path, chat_id: int, ctx) ->
     slug = re.sub(r"[^a-z0-9]+", "-", prompt.lower())[:40].strip("-")
     branch_name = f"agent/{slug}"
     task.branch = branch_name
+    worktrees_dir = project_path / ".worktrees"
+    worktree_path: Path | None = None
 
     try:
-        worktree_path = await asyncio.to_thread(create_worktree, branch_name)
+        worktree_path = await asyncio.to_thread(
+            create_worktree,
+            branch_name,
+            repo_dir=project_path,
+            worktrees_dir=worktrees_dir,
+        )
         success, output = await run_claude_code(prompt, worktree_path, timeout=300)
 
         task.output = output
@@ -114,9 +121,21 @@ async def run_coding_task(prompt: str, project_path: Path, chat_id: int, ctx) ->
         )
 
         if not success:
-            await asyncio.to_thread(cleanup_worktree, branch_name)
+            await asyncio.to_thread(
+                cleanup_worktree,
+                branch_name,
+                repo_dir=project_path,
+                worktrees_dir=worktrees_dir,
+            )
 
     except Exception as e:
+        if worktree_path is not None:
+            await asyncio.to_thread(
+                cleanup_worktree,
+                branch_name,
+                repo_dir=project_path,
+                worktrees_dir=worktrees_dir,
+            )
         task.status = "failed"
         task.output = str(e)
         task.finished_at = time.time()
