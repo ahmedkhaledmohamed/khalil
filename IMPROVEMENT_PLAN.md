@@ -1,241 +1,253 @@
-# Khalil Improvement Plan v2: 28 Items Across 7 Themes
+# Khalil Evolution and Improvement Plan
 
-Khalil is at 83.9% frozen eval pass rate (target >85%), with P95 latency at 54.57s (target <10s), self-healing at 25% success, and 32 untested skills. The dominant failure mode is `handler_bad_output` (2,098 failures). The 100-improvement roadmap (executed Mar 16) covered foundational work; this plan targets the next level — reliability, intelligence, and self-sustaining improvement — grounded in GAIA, tau-bench, METR, Microsoft Failure Taxonomy, and NIST AI RMF standards.
+**Status:** Proposed
 
----
+**Last updated:** August 20, 2026
 
-## Theme 1: RELIABILITY — Fix What Is Broken
+**Planning horizon:** Five phases, delivered through independently reviewable pull requests
 
-### 1. Handler Output Normalization Layer ✅ (PR #222)
-Introduce `HandlerResponse` dataclass (`.text`, `.success`, `.metadata`) and a wrapper that normalizes every handler return. Raw text gets wrapped, exceptions get caught, None produces "empty result." Directly addresses the #1 failure mode (2,098 `handler_bad_output` failures).
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** Microsoft Failure Taxonomy
-- **Files:** `skills.py`, `server.py` (handle_action_intent), `eval/gap_analysis.py`
-- **Unlocks:** 7, 12, 22
+## Decision
 
-### 2. Graceful Empty/Whitespace Input Handling ✅ (PR #218)
-`handle_message_generic` silently returns on empty input (line ~5423). Add explicit friendly response for empty, whitespace, and 1-2 char inputs. Eliminates 100 eval failures.
-- **Effort:** S | **Impact:** MEDIUM | **Benchmark:** ConvBench
-- **Files:** `server.py` (handle_message_generic)
+Khalil should pause capability expansion and concentrate on reliable execution of its highest-value workflows. The system already has broad integration coverage, proactive loops, multi-step orchestration, self-healing, and self-extension. Its main constraint is no longer what it can attempt; it is whether an attempted task follows consistent policy, reports failures accurately, and produces a verified outcome.
 
-### 3. Fix 8 Broken Skills (Timeout Cluster) ✅ (PR #223)
-`claude_code_status`, `terminal_exec`, `tmux_*` (5), `voice_*` (2), `workflow_*` (3) all at 0%. Add availability guards that return clear "unavailable" messages when prerequisites aren't met (no tmux session, no ffmpeg, no Claude Code binary). Turns timeouts into fast, informative failures. Eliminates 145 failures.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench, GAIA
-- **Files:** `actions/tmux_control.py`, `actions/terminal.py`, `actions/claude_code.py`, `actions/voice.py`, `actions/workflows.py`
-- **Unlocks:** 8, 18
+The next evolution therefore prioritizes:
 
-### 4. LLM Timeout Retry with Fast Fallback ✅ (PR #224)
-P95 = 54.57s. Reduce per-model timeout to 8s first attempt, implement 15s total "latency budget" across fallback chain, return cached/degraded response if budget expires. Add streaming partial responses so user sees output within 2s.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
-- **Files:** `server.py` (ask_llm, _fallback_to_claude, LLM_TIMEOUT), `resilience.py`
-- **Unlocks:** 7, 17
+1. Safe and deterministic code generation.
+2. One enforceable execution and approval path.
+3. Consistent behavior across channels.
+4. Durable graph execution with bounded loops.
+5. Outcome-based evaluation and selective product expansion.
 
-### 5. Shell Path Hallucination Guard ✅ (PR #219)
-47 failures in 48h from hallucinated file paths. Add pre-execution path validation: regex-detect paths in commands, verify via `os.path.exists()`, suggest corrections via fuzzy match against cached home directory tree.
-- **Effort:** S | **Impact:** MEDIUM | **Benchmark:** GAIA (factual grounding), NIST AI RMF
-- **Files:** `actions/shell.py` (execute_shell, classify_command)
+This plan supersedes the completed 28-item improvement plan. That work added useful reliability, evaluation, observability, and self-healing mechanisms, but the mechanisms remain distributed across incompatible runtime paths.
 
-### 6. Conversational Mode Quality Floor ✅ (PR #221)
-0% pass rate on 100 conversational cases. The system prompt is tuned for action dispatch, not dialogue. Add a dedicated conversational system prompt variant when no skill pattern matches, optimized for quality conversation.
-- **Effort:** S | **Impact:** MEDIUM | **Benchmark:** ConvBench, DeepEval
-- **Files:** `server.py` (handle_message_generic, _build_system_prompt)
-- **Unlocks:** 14
+## Current-State Assessment
 
----
+The August 2026 architecture review found five structural constraints.
 
-## Theme 2: SELF-HEALING — Make the Loop Self-Sustaining
+### Safety is path-dependent
 
-### 7. Guardian Calibration — Reduce False Block Rate ✅ (PR #225)
-Guardian blocks 75% of generated patches. The CODE_REVIEW_PROMPT is overly broad. Fix: (a) whitelist safe patterns for Khalil's own codebase (subprocess to osascript/tmux/brew is expected); (b) require structured JSON output; (c) add confidence score — only BLOCK when >0.8; (d) track guardian false-positive rate.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** Anthropic Constitutional AI, NIST AI RMF
-- **Files:** `actions/guardian.py` (CODE_REVIEW_PROMPT, _parse_verdict, review_code_patch)
-- **Unlocks:** 8, 9
+`ExecutionBus` defines autonomy checks, approvals, rate limiting, and audit behavior, but the primary LLM tool loop can invoke handlers directly. Built-in actions and individual handlers also enforce policy inconsistently. A side effect can therefore receive different protection depending on how Khalil selected it.
 
-### 8. Self-Healing Patch Truncation Fix ✅ (PR #220)
-Healing generates patches with `max_tokens=1500`, causing mid-line truncation that guardian correctly blocks. Raise to 4000, add truncation detector (check for balanced brackets/parens), re-request continuation if truncated, validate with `ast.parse()` before guardian review.
-- **Effort:** S | **Impact:** HIGH | **Benchmark:** Microsoft Failure Taxonomy
-- **Files:** `healing.py` (generate_healing_patch, validate_patch), `llm_client.py`
-- **Unlocks:** 9
+### Channels do not share one runtime
 
-### 9. Closed-Loop Heal Verification ✅ (PR #236)
-Currently fire-and-forget. Implement: (a) store PR number in evolution_candidates; (b) check merge status via `gh pr view`; (c) re-run relevant eval cases post-merge; (d) auto-create "failed_heal" follow-up if eval still fails; (e) record improvement delta on success.
-- **Effort:** L | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
-- **Files:** `evolution.py` (_check_evolution_outcomes), `healing.py` (check_heal_outcomes), `eval/runner.py`
-- **Unlocks:** 17, 20
+Telegram uses task state, context assembly, the iterative tool loop, and verification. Generic channels first attempt regex-based skill dispatch and then use a simpler conversational path. The same request can select a different capability or call it with a different contract depending on the channel.
 
----
+### Capability contracts are implicit
 
-## Theme 3: OBSERVABILITY — Measure What Matters
+Skill handlers and Telegram command handlers use different signatures, while generation validation checks only whether a named function exists. Generated code can pass validation and CI without having a working entry point.
 
-### 10. Per-Tool Accuracy Breakdown ✅ (PR #226)
-Single aggregate tool_success_rate (84.4%) hides which tools are broken. Extend `metrics.py` to compute per-tool: success_rate, avg_latency, call_count from conversations table. Enables targeted investment.
-- **Effort:** S | **Impact:** MEDIUM | **Benchmark:** tau-bench
-- **Files:** `eval/metrics.py` (compute_metrics, MetricsSnapshot)
-- **Unlocks:** 1, 17
+### Loops and graphs are separate subsystems
 
-### 11. Hallucination Detection Metric ✅ (PR #233)
-No metric for factual accuracy. Implement lightweight grounding check: extract entities/numbers from response, verify they appear in retrieved context. Compute grounding_ratio = entities_grounded / entities_total. Log as signal. Pure string matching, no LLM needed.
-- **Effort:** M | **Impact:** MEDIUM | **Benchmark:** GAIA (factuality), Ragas (faithfulness)
-- **Files:** `evolution.py` (post_interaction_check), `eval/metrics.py`, `eval/validators.py`
-- **Unlocks:** 14
+The reactive tool loop, proactive agent loop, DAG orchestrator, scheduler, healing loop, and extension loop each manage execution differently. They do not share durable state, budgets, termination reasons, or a common verification model.
 
-### 12. Cost-Per-Task Tracking ✅ (PR #231)
-No cost visibility. Capture `usage.prompt_tokens` and `usage.completion_tokens` from API responses, multiply by provider pricing, record alongside latency signal. Add `cost_per_task_p50/p95` to MetricsSnapshot. Enables cost-aware routing.
-- **Effort:** S | **Impact:** LOW | **Benchmark:** TheAgentCompany
-- **Files:** `server.py` (ask_llm, call_llm_with_tools), `eval/metrics.py`, `model_router.py`
-- **Unlocks:** 16
+### Activity is measured more reliably than outcomes
 
-### 13. Recovery Time (MTTR) Metric ✅ (PR #232)
-No metric for failure-to-resolution time. Add timestamps: failure detected -> heal PR created -> PR merged -> verified. MTTR = first to last. Store in evolution_candidates table. Target: <24h critical, <7d non-critical.
-- **Effort:** S | **Impact:** MEDIUM | **Benchmark:** METR
-- **Files:** `evolution.py` (EvolutionCandidate), `eval/metrics.py`
-- **Unlocks:** 9
+Khalil records extensive interaction and tool activity, but verified task completion, false-success rate, approval correctness, latency, cost, and recovery quality are incomplete or disconnected. Green checks can therefore coexist with broken advertised behavior.
 
-### 14. Multi-Turn Coherence Scoring ✅ (PR #234)
-16 scenarios exist but lack a coherence metric. Add `MultiTurnCoherenceEval`: after all turns, check entity consistency across turns (does "Forward that email" resolve correctly?). Add `multi_turn_coherence_score` to MetricsSnapshot.
-- **Effort:** M | **Impact:** MEDIUM | **Benchmark:** ConvBench, Ragas, DeepEval
-- **Files:** `eval/judge.py`, `eval/scenario_runner.py`, `eval/scenarios.py`
-- **Unlocks:** 20
+## Product Objective
 
----
+Khalil should reliably complete and verify the ten personal workflows that create the most value for Ahmed before expanding its capability surface.
 
-## Theme 4: INTELLIGENCE — Make Khalil Smarter
+Success means:
 
-### 15. Golden Case Coverage for 32 Untested Skills ✅ (PR #227)
-32 skills have zero golden cases. Generate 3-5 per skill: 1 happy-path per action type + 1 edge case. Target: 100-160 new golden cases in `fixtures/golden.yaml`. The single biggest eval quality investment.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench, GAIA
-- **Files:** `eval/fixtures/golden.yaml`, `eval/cases.py`, `eval/case_gen.py`
-- **Unlocks:** 1, 7, 9
+- The same request behaves consistently across supported channels.
+- Every side effect passes through the same policy and approval process.
+- Empty results are distinguishable from authentication, network, and execution failures.
+- Multi-step work can resume safely without duplicating side effects.
+- Khalil can explain what completed, what failed, and what evidence supports the outcome.
+- Self-improvement produces reviewable proposals that pass deterministic behavioral tests.
 
-### 16. Cost-Aware Model Routing ✅ (PR #237)
-Model router maps all tiers to Opus via Taskforce ("free"). Route FAST queries (greetings, lookups) to Haiku/Sonnet. Keep privacy routing to Ollama. Add A/B testing: record which model produced better eval scores per query type.
-- **Effort:** M | **Impact:** MEDIUM | **Benchmark:** TheAgentCompany
-- **Files:** `model_router.py`, `config.py`, `server.py` (ask_llm)
-- **Unlocks:** 4
+## Engineering Principles
 
-### 17. LLM Response Variance Mitigation ✅ (PR #230)
-111 regressions in Run #9 from model variance. Fix: (a) `temperature=0.0` for all tool-use calls; (b) expand `_TOOL_DESCRIPTIONS` to all 50+ tools with explicit examples; (c) pin system prompt formatting order; (d) response normalization before eval comparison.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** tau-bench
-- **Files:** `tool_catalog.py`, `server.py` (call_llm_with_tools), `eval/validators.py`
-- **Unlocks:** 1, 15
+1. **Keep a modular monolith.** Khalil is a local-first, single-user system; microservices would add operational cost without solving the current problems.
+2. **One execution path.** Selection mechanisms may differ, but execution, policy, verification, and audit must not.
+3. **Structured state over prose.** Success, failure, evidence, side effects, and retryability should be typed fields rather than inferred from response text.
+4. **Compose workflows before generating code.** Co-occurring actions should produce declarative workflow proposals unless a reusable primitive is missing.
+5. **Verification is part of execution.** A handler returning without an exception does not prove that the requested outcome occurred.
+6. **Self-improvement remains human-reviewed.** Generated changes stay quarantined until Khalil demonstrates consistently safe generation and evaluation.
 
-### 18. Preference Learning Amplification ✅ (PR #239)
-27,509 signals but only 6 preferences (all <0.65 confidence). Too passive — requires `/feedback` command. Add implicit preference detection from conversation patterns, increase confidence via repeated signals, expose `/preferences` command for transparency and correction.
-- **Effort:** L | **Impact:** MEDIUM | **Benchmark:** METR, Constitutional AI
-- **Files:** `learning.py` (set_preference, get_preference), `server.py` (style_hint injection)
-- **Unlocks:** 20
+## Phase 0: Stabilize Generated Changes
 
----
+**Objective:** Prevent Khalil from producing contaminated or structurally invalid pull requests.
 
-## Theme 5: SAFETY AND TRUST
+### Deliverables
 
-### 19. Audit Trail with Provenance Chain ✅ (PR #235)
-`data/audit_trail.jsonl` exists but is dead. Tool calls saved to conversations table lack provenance (which signal triggered it, which model, guardian verdict). Write structured JSONL per tool execution: timestamp, query, tool, args, guardian verdict, model, latency, result summary, autonomy level. Add `/audit [last N]` command.
-- **Effort:** M | **Impact:** MEDIUM | **Benchmark:** NIST AI RMF (transparency, accountability)
-- **Files:** `server.py` (_execute_tool_call), `data/audit_trail.jsonl`, `autonomy.py`
-- **Unlocks:** 21
+- Create every generated branch from a fetched, explicit `origin/main` commit.
+- Refuse generation when the base repository or worktree state is ambiguous.
+- Define an allowlist of expected generated files and reject unrelated diffs.
+- Validate that manifest commands are non-empty, unique, and syntactically safe.
+- Validate exact handler contracts for skills and channel command adapters.
+- Execute every advertised natural-language example through the real dispatcher.
+- Require capability-specific tests for generated changes.
+- Include actual changed-file and commit counts in generated PR descriptions.
+- Keep generated and healed PRs in a human-review queue; do not auto-merge them.
 
-### 20. Sensitive Data Flow Map ✅ (PR #243)
-`contains_sensitive_data()` exists but no map of where PII/financial/health data flows. Add classification tags to state providers, ensure tagged data never reaches cloud LLMs when `_force_local` is true, add redaction in audit trail, add `/privacy` command showing data routing.
-- **Effort:** L | **Impact:** MEDIUM | **Benchmark:** NIST AI RMF, EU AI Act
-- **Files:** `config.py` (SENSITIVE_PATTERNS), `server.py` (contains_sensitive_data), `state/email_provider.py`, `state/calendar_provider.py`
+### Acceptance Gate
 
-### 21. Autonomy Level Promotion with Decay ✅ (PR #242)
-3-tier autonomy is static. Build trust over time: after 50 consecutive successes, auto-promote tool to next tier (with notification). After any correction/failure, demote immediately. Add trust score per tool via `/autonomy`.
-- **Effort:** M | **Impact:** LOW | **Benchmark:** NIST AI RMF (proportionality)
-- **Files:** `autonomy.py` (ACTION_RULES, AutonomyController)
-- **Unlocks:** 7
+- A deliberately malformed handler, empty command, or unrelated file change is rejected before a PR is created.
+- A generator launched from a non-main worktree still produces a branch containing only its intended changes.
+- CI exercises the same entry point used by a real user request.
 
----
+## Phase 1: Enforce Typed Execution Contracts
 
-## Theme 6: EVAL INFRASTRUCTURE
+**Objective:** Make policy, approval, execution, verification, and audit unavoidable for every action.
 
-### 22. Eval Stability Layer (Deterministic Seeding) ✅ (PR #228)
-111 phantom regressions from LLM variance. Fix: `temperature=0.0` for eval calls, semantic equivalence mode in heuristic evaluator, retry failed cases once, store raw LLM response for root-cause analysis.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** DeepEval
-- **Files:** `eval/runner.py` (run_case), `eval/judge.py` (HeuristicEval, DeterministicEval)
-- **Unlocks:** 15, 9
+### Deliverables
 
-### 23. Continuous Eval (CI Gate) ✅ (PR #229)
-Eval runs are manual. Add GitHub Actions workflow: run frozen case eval on every PR, compare against previous pass rate, block merge if >1pp drop, post summary as PR comment.
-- **Effort:** M | **Impact:** HIGH | **Benchmark:** TheAgentCompany
-- **Files:** `eval/__main__.py`, `eval/gap_analysis.py` (diff_reports), new: `.github/workflows/eval.yml`
-- **Unlocks:** 7, 9
+- Introduce typed contracts:
+  - `ActionRequest`
+  - `ActionResult`
+  - `ExecutionContext`
+  - `ApprovalDecision`
+  - `VerificationResult`
+- Represent success, data, errors, side effects, retryability, and evidence explicitly.
+- Route LLM tool calls, built-ins, generated capabilities, workflows, scheduled work, and proactive work through `ExecutionBus`.
+- Remove direct handler invocation from runtime paths.
+- Centralize autonomy classification, approval creation, rate limiting, depth limits, and audit recording.
+- Return operational failures as failures rather than successful empty results.
+- Add repository interfaces and migrations for execution state instead of opening SQLite connections throughout action modules.
 
-### 24. Scenario Coverage Expansion (GAIA-style) ✅ (PR #244)
-16 scenarios vs GAIA's 466. Expand to 50+: long-horizon multi-tool chains, cross-session context, ambiguous intent requiring clarification, error recovery mid-task, multi-channel flows.
-- **Effort:** L | **Impact:** MEDIUM | **Benchmark:** GAIA, TheAgentCompany
-- **Files:** `eval/scenarios.py`, `eval/scenario_runner.py`
-- **Unlocks:** 14
+### Acceptance Gate
 
----
+- No write, send, delete, purchase, or application-control action can bypass the execution bus.
+- Policy tests produce the same decision regardless of channel or selection method.
+- Authentication failure, network failure, valid empty result, user rejection, and successful completion are observably distinct.
 
-## Theme 7: STRATEGIC CAPABILITIES — World-Class Differentiation
+## Phase 2: Create One Channel-Neutral Runtime
 
-### 25. Proactive Intelligence Layer ✅ (PR #248)
-Agent loop is reactive (state changes only). Add: (a) daily anticipation pass at 7am (unusual meetings -> research attendees, severe weather, high-priority unread); (b) pre-meeting prep 15min before events (context, email threads with attendees); (c) weekly pattern analyzer (learn rhythms, surface relevant info).
-- **Effort:** XL | **Impact:** HIGH | **Benchmark:** METR, TheAgentCompany
-- **Files:** `agent_loop.py`, `scheduler/proactive.py`, `scheduler/planning.py`, `state/collector.py`
-- **Unlocks:** 18
+**Objective:** Make Telegram, CLI, Slack, Discord, WhatsApp, and API requests share the same behavior.
 
-### 26. Long-Horizon Task Execution (>24h) ✅ (PR #250)
-Orchestrator only handles synchronous single-turn tasks. Add: persistent task queue in DB, "task watcher" in agent loop polling every 5min, completion conditions (regex on state change, time elapsed, external event), notification + optional follow-up action on completion.
-- **Effort:** XL | **Impact:** HIGH | **Benchmark:** METR (96h tasks), TheAgentCompany
-- **Files:** `orchestrator.py`, `agent_loop.py`, new: `scheduler/tasks.py`
-- **Unlocks:** 25
+### Deliverables
 
-### 27. Cross-Session Memory with Forgetting ✅ (PR #246)
-27,509 signals never pruned. Implement: time-decay on memory relevance, conflict resolution (newer wins), memory consolidation (merge related signals into summary), `/forget` command, garbage collection of processed signals >30d.
-- **Effort:** L | **Impact:** MEDIUM | **Benchmark:** METR (long-term maintenance)
-- **Files:** `learning.py`, `knowledge/search.py`, `memory/session_continuity.py`
-- **Unlocks:** 18
+- Introduce `AgentRuntime.handle(MessageContext)` as the single request entry point.
+- Reduce channel implementations to authentication, message normalization, and response rendering adapters.
+- Consolidate heuristic intent classification, LLM detection, regex matching, shell shortcuts, and tool selection behind an explicit routing interface and precedence model.
+- Separate reusable capability functions from Telegram-specific command wrappers.
+- Move global runtime dependencies into an explicit application container that can be constructed in tests.
+- Use one context-assembly and task-state path for all channels.
 
-### 28. Implicit User Satisfaction Signal ✅ (PR #240)
-`/feedback` has 0 uses. Implement: (a) "task completion confirmation" — next message is correction or new topic; (b) session quality score = 1 - (negative_signals / total_turns); (c) engagement trend (declining usage = negative); (d) weekly "Satisfaction Index" in digest.
-- **Effort:** M | **Impact:** MEDIUM | **Benchmark:** ConvBench, UX research
-- **Files:** `learning.py`, `evolution.py` (post_interaction_check), `eval/metrics.py`, `scheduler/digests.py`
-- **Unlocks:** 18
+### Acceptance Gate
 
----
+- A shared request fixture selects the same action and returns the same structured result across channels.
+- Every capability implements one validated interface.
+- Channel adapters contain no capability or policy logic.
 
-## Execution Order
+## Phase 3: Consolidate Graph and Loop Execution
 
-### Phase 1 — Quick Wins (Week 1-2)
-2 -> 5 -> 8 -> 6 (all S effort, eliminate 250+ failures, unblock healing)
+**Objective:** Use one durable execution model for user tasks, workflows, schedules, proactive actions, and recovery.
 
-### Phase 2 — Core Reliability (Week 3-4)
-1 -> 3 -> 4 -> 7 (M effort, address top failure modes, fix P95 latency)
+### Deliverables
 
-### Phase 3 — Eval & Observability (Week 5-6)
-10 -> 15 -> 22 -> 23 -> 17 (anchor regressions, stabilize eval, CI gate)
+- Persist an execution graph with node state, dependencies, inputs, outputs, evidence, and timestamps.
+- Define node states such as `pending`, `ready`, `running`, `waiting_for_approval`, `succeeded`, `failed`, `compensated`, and `cancelled`.
+- Add retry policies, timeouts, idempotency keys, and compensation behavior for side-effecting nodes.
+- Add checkpoints so interrupted work resumes from the last verified node.
+- Introduce a loop controller with explicit limits for iterations, wall time, tokens, and cost.
+- Require each loop to declare a progress predicate and termination reason.
+- Have schedulers, proactive agents, healing, and user requests submit graph runs instead of invoking separate execution paths.
+- Record source, urgency, autonomy level, and user visibility as graph metadata.
 
-### Phase 4 — Intelligence & Safety (Week 7-10)
-12 -> 13 -> 11 -> 14 -> 19 -> 9 -> 16 (metrics, safety, closed-loop healing)
+### Acceptance Gate
 
-### Phase 5 — Strategic Bets (Week 11-16)
-18 -> 28 -> 21 -> 20 -> 24 -> 27 -> 25 -> 26 (differentiation, long-horizon)
+- A process restart can resume a multi-step task without repeating completed side effects.
+- Retrying a protected action cannot duplicate its externally visible result.
+- Every loop ends with a recorded success, failure, timeout, budget exhaustion, cancellation, or approval wait.
+- Graph state is sufficient to explain the final response without reconstructing events from logs.
 
----
+## Phase 4: Measure Verified Outcomes
 
-## Projected Impact
+**Objective:** Make reliability and product value visible before resuming broad capability development.
 
-| Metric | Current | After Phase 1-2 | After Phase 3-4 | After Phase 5 |
-|--------|---------|-----------------|-----------------|---------------|
-| Frozen eval pass rate | 83.9% | ~90% | ~93% | ~95% |
-| P95 latency | 54.57s | <15s | <10s | <8s |
-| Self-heal success | 25% | 60% | 80% | 85% |
-| Tool success rate | 84.4% | 88% | 92% | 95% |
-| Capability gap closure | 51.7% | 55% | 70% | 80% |
-| Hallucination rate | unmeasured | unmeasured | <5% | <3% |
-| Multi-turn coherence | unmeasured | unmeasured | measured | >90% |
+### Deliverables
 
-## Verification
+- Establish a full-suite CI baseline and classify existing failures as product defects, environment-dependent tests, or obsolete expectations.
+- Run generated capability contract tests and advertised examples in CI.
+- Derive metrics from typed execution and verification events.
+- Build a replay suite from real failures and corrections.
+- Define golden end-to-end cases for the ten priority workflows.
+- Track failures by capability, channel, selection path, and execution phase.
 
-After each phase:
-```bash
-python -m eval --cases eval/fixtures/cases.json --parallel  # Frozen eval
-python eval/tool_use_eval.py                                 # Tool regression
-python eval/scenario_runner.py                               # E2E scenarios
-python eval/metrics.py                                       # Production metrics
-```
+### Primary Metrics
 
-Compare against SCORECARD.md baselines. Only merge if pass rate improved and no regressions >1pp.
+| Metric | Definition | Initial target |
+|---|---|---|
+| Verified completion rate | Tasks whose requested outcome is confirmed by a verifier | At least 90% for the top ten workflows |
+| False-success rate | Responses claiming success without supporting evidence | Below 1% |
+| Approval correctness | Protected actions receiving the expected approval decision | 100% in policy fixtures |
+| Recovery success rate | Failed tasks completed through bounded retry or recovery | Establish baseline, then improve per workflow |
+| Duplicate side-effect rate | Repeated externally visible effects caused by retry or resume | 0 for protected actions |
+| P50/P95 task duration | End-to-end wall time by workflow | Set targets after trustworthy instrumentation |
+| P50/P95 task cost | Model and external-service cost by workflow | Set targets after trustworthy instrumentation |
+
+### Acceptance Gate
+
+- CI cannot pass a capability whose advertised entry point fails.
+- A weekly scorecard reports verified outcomes rather than only calls and handler returns.
+- The top ten workflows have reproducible end-to-end fixtures and explicit verification rules.
+
+## Phase 5: Resume Selective Capability Development
+
+**Objective:** Expand only where outcome data demonstrates product value or a missing reusable primitive.
+
+### Deliverables
+
+- Rank workflows using frequency, user value, failure cost, and current reliability.
+- Improve the ten selected workflows to the Phase 4 completion target.
+- Treat repeated action co-occurrence as a workflow-composition proposal.
+- Generate new Python capability code only when an underlying primitive is absent.
+- Review the capability catalog periodically and remove or consolidate unused combination modules.
+
+### Acceptance Gate
+
+- Each new capability proposal names the unmet primitive, target workflow, verifier, and expected usage.
+- Existing primitives cannot express the requested behavior through graph composition.
+- Adding the capability does not reduce completion or safety metrics for priority workflows.
+
+## Proposed Pull Request Sequence
+
+Each item should be a separately reviewable PR with a behavioral proof and rollback path.
+
+1. **Generated branch isolation** — explicit base SHA, clean worktree validation, and changed-file allowlist.
+2. **Generated capability contract validation** — manifest, signatures, examples, and required tests.
+3. **Typed action results** — introduce contracts and adapters without changing routing behavior.
+4. **Mandatory execution bus** — migrate direct tool and built-in execution behind policy.
+5. **Unified runtime shell** — establish `AgentRuntime` and migrate one channel at a time.
+6. **Durable graph state** — persistence, node lifecycle, checkpointing, and idempotency.
+7. **Bounded loop controller** — budgets, progress predicates, and termination reasons.
+8. **Outcome telemetry** — execution events, verification metrics, and weekly scorecard.
+9. **Full CI baseline** — classify existing failures and expand behavioral coverage.
+10. **Top-ten workflow program** — select workflows and improve them sequentially.
+
+Phases should not be implemented as one large refactor. Compatibility adapters should keep Khalil usable while execution paths move behind the new boundaries.
+
+## Deferred Capability Concepts
+
+The April 2026 generated PR review closed five PRs without merging them. Two concepts remain useful after the platform work:
+
+### Browser and Readwise workflow from PR #295
+
+Revisit as graph composition using:
+
+- A browser-tab enumeration primitive.
+- A Readwise search primitive with explicit authentication, network, and rate-limit failures.
+- Bounded concurrency and query deduplication.
+- A verifier that distinguishes zero matches from incomplete search coverage.
+
+### Shared browser session from PR #299
+
+Revisit as a browser primitive that opens a page once and derives title, text, metadata, and screenshot from the same page state. The browser session should be passed through typed execution context and closed deterministically.
+
+The combinations in PRs #296 and #298 should remain declarative workflows unless usage evidence demonstrates a missing primitive. PR #297 should be replaced by input-normalization and replay-test work rather than retained as a capability.
+
+## Non-Goals
+
+- Splitting Khalil into microservices.
+- Replacing SQLite solely for scale.
+- Adding more channels before runtime convergence.
+- Increasing autonomy levels before approval enforcement is universal.
+- Auto-merging generated or healed code.
+- Optimizing latency or model cost before outcome instrumentation is trustworthy.
+
+## Next Decision
+
+Begin with Phase 0 and approve PR 1 only after its tests demonstrate that Khalil cannot recreate the branch contamination and handler-contract failures identified in PRs #295 through #299.
