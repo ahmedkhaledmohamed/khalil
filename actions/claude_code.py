@@ -1,22 +1,99 @@
-"""Claude Code CLI wrapper for complex code generation.
+"""Coding-agent runtime and isolated worktree utilities.
 
-Spawns Claude Code in a git worktree for isolated, multi-file code generation.
-Used by the self-extension engine for capabilities that need external APIs,
-multi-step flows, or complex integrations.
+Codex is the default executor. Claude Code remains available as an explicit
+compatibility backend for existing installations.
 """
 
 import asyncio
+import importlib.util
 import logging
 import subprocess
 from pathlib import Path
 
-from config import CLAUDE_CODE_BIN, KHALIL_DIR, WORKTREES_DIR
+from config import (
+    CLAUDE_CODE_BIN,
+    CODEX_MODEL,
+    CODEX_REASONING_EFFORT,
+    CODING_AGENT_BACKEND,
+    KHALIL_DIR,
+    WORKTREES_DIR,
+)
 
 log = logging.getLogger("khalil.actions.claude_code")
 
 
 class WorktreeValidationError(RuntimeError):
     """Raised when generated work escapes its expected file boundary."""
+
+
+def coding_agent_available(backend: str | None = None) -> bool:
+    """Return whether the configured coding-agent runtime is installed."""
+    selected = (backend or CODING_AGENT_BACKEND).lower()
+    if selected == "codex":
+        return importlib.util.find_spec("openai_codex") is not None
+    if selected == "claude":
+        return Path(CLAUDE_CODE_BIN).exists()
+    return False
+
+
+async def run_codex(
+    prompt: str,
+    worktree_path: Path,
+    timeout: int = 300,
+) -> tuple[bool, str]:
+    """Run one Codex SDK turn inside an isolated worktree."""
+    worktree_path = Path(worktree_path).resolve()
+    if not worktree_path.is_dir():
+        return False, f"Codex worktree not found: {worktree_path}"
+
+    try:
+        from openai_codex import ApprovalMode, AsyncCodex, Sandbox
+    except ImportError:
+        return False, "Codex SDK is not installed. Install requirements.txt first."
+
+    async def _run() -> tuple[bool, str]:
+        async with AsyncCodex() as codex:
+            thread_options = {
+                "cwd": str(worktree_path),
+                "sandbox": Sandbox.workspace_write,
+                "approval_mode": ApprovalMode.auto_review,
+            }
+            if CODEX_MODEL:
+                thread_options["model"] = CODEX_MODEL
+
+            thread = await codex.thread_start(**thread_options)
+            run_options = {
+                "cwd": str(worktree_path),
+                "sandbox": Sandbox.workspace_write,
+            }
+            if CODEX_REASONING_EFFORT:
+                run_options["effort"] = CODEX_REASONING_EFFORT
+
+            result = await thread.run(prompt, **run_options)
+            if result.error:
+                return False, str(result.error)
+            return True, result.final_response or "Codex completed without a final response."
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return False, f"Codex timed out after {timeout}s"
+    except Exception as exc:
+        log.exception("Codex coding task failed")
+        return False, str(exc)
+
+
+async def run_coding_agent(
+    prompt: str,
+    worktree_path: Path,
+    timeout: int = 300,
+) -> tuple[bool, str]:
+    """Run the explicitly configured coding-agent backend."""
+    if CODING_AGENT_BACKEND == "codex":
+        return await run_codex(prompt, worktree_path, timeout)
+    if CODING_AGENT_BACKEND == "claude":
+        return await run_claude_code(prompt, worktree_path, timeout)
+    return False, f"Unsupported coding-agent backend: {CODING_AGENT_BACKEND}"
 
 
 def _run_git(repo_dir: Path, *args: str) -> subprocess.CompletedProcess:

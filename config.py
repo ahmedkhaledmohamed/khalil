@@ -203,8 +203,13 @@ HEALING_FAILURE_THRESHOLD = 3    # failures before triggering self-heal
 WORKFLOW_ENGINE_ENABLED = True
 WORKFLOW_MAX_RUNS_PER_HOUR = 10
 
-# Claude Code CLI (for complex code generation)
-CLAUDE_CODE_BIN = "/opt/homebrew/bin/claude"
+# Coding agent (for repository-changing work and complex code generation)
+CODING_AGENT_BACKEND = os.getenv("KHALIL_CODING_AGENT", "codex").lower()
+CODEX_MODEL = os.getenv("KHALIL_CODEX_MODEL", "")
+CODEX_REASONING_EFFORT = os.getenv("KHALIL_CODEX_REASONING_EFFORT", "high")
+
+# Explicit legacy backend. Khalil does not fall back to it automatically.
+CLAUDE_CODE_BIN = os.getenv("KHALIL_CLAUDE_CODE_BIN", "/opt/homebrew/bin/claude")
 WORKTREES_DIR = KHALIL_DIR / ".worktrees"
 
 # Container sandbox

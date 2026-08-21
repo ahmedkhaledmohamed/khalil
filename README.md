@@ -254,7 +254,7 @@ Machine-state queries (window counts, battery, IP, uptime, running processes) ar
 | `guardian.py` | Secondary LLM review of risky actions |
 | `backup.py` | State export/import |
 | `jobs.py` | Job scraper bridge |
-| `claude_code.py` | Claude Code CLI integration |
+| `claude_code.py` | Codex coding-agent runtime and worktree isolation |
 
 ## Autonomy Model
 

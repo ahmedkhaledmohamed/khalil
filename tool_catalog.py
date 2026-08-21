@@ -332,8 +332,8 @@ _TOOL_DESCRIPTIONS = {
         "Requires target TTY path or tmux session name."
     ),
     "claude_code_status": (
-        "Show all running Claude Code processes with CWD, TTY, and state. "
-        'Example: "What Claude sessions are running?" → claude_code_status()'
+        "Show all running Codex and Claude Code processes with CWD, TTY, and state. "
+        'Example: "What coding agent sessions are running?" → claude_code_status()'
     ),
     "system_info": (
         "Get system info: battery, storage, CPU, running apps. "
