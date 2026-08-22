@@ -289,7 +289,7 @@ class TestTypedExecutionOutcomes:
             await ctx.reply("done")
 
         async def without_output(action, intent, ctx):
-            return None
+            return True
 
         output_result = asyncio.run(
             self._bus(with_output).execute("demo", {}, self._context())
@@ -302,6 +302,85 @@ class TestTypedExecutionOutcomes:
         assert empty_result.status == ActionStatus.EMPTY
         assert output_result.success is True
         assert empty_result.success is True
+
+    def test_explicit_decline_is_not_handled(self):
+        from execution import ActionStatus
+
+        async def decline(action, intent, ctx):
+            return False
+
+        result = asyncio.run(
+            self._bus(decline).execute("demo", {}, self._context())
+        )
+
+        assert result.status == ActionStatus.NOT_HANDLED
+        assert result.success is False
+
+    def test_response_context_forwards_reply_and_preserves_output(self):
+        from execution import ActionStatus
+
+        class ResponseContext:
+            def __init__(self):
+                self.chat_id = "channel-123"
+                self.replies = []
+
+            async def reply(self, text, **kwargs):
+                self.replies.append((text, kwargs))
+
+        async def handler(action, intent, ctx):
+            assert ctx.chat_id == "channel-123"
+            await ctx.reply("done", parse_mode="Markdown")
+            return True
+
+        response_context = ResponseContext()
+        result = asyncio.run(
+            self._bus(handler).execute(
+                "demo", {}, self._context(), response_context=response_context,
+            )
+        )
+
+        assert result.status == ActionStatus.SUCCEEDED
+        assert result.output == "done"
+        assert response_context.replies == [("done", {"parse_mode": "Markdown"})]
+
+    def test_reply_from_falsy_handler_still_counts_as_handled(self):
+        from execution import ActionStatus
+
+        async def handler(action, intent, ctx):
+            await ctx.reply("already answered")
+            return False
+
+        result = asyncio.run(
+            self._bus(handler).execute("demo", {}, self._context())
+        )
+
+        assert result.status == ActionStatus.SUCCEEDED
+        assert result.output == "already answered"
+
+    def test_media_reply_is_forwarded_and_recorded_as_side_effect(self):
+        from execution import ActionStatus
+
+        class ResponseContext:
+            def __init__(self):
+                self.photos = []
+
+            async def reply_photo(self, photo_path, caption=""):
+                self.photos.append((photo_path, caption))
+
+        async def handler(action, intent, ctx):
+            await ctx.reply_photo("chart.png", caption="Status")
+            return True
+
+        response_context = ResponseContext()
+        result = asyncio.run(
+            self._bus(handler).execute(
+                "demo", {}, self._context(), response_context=response_context,
+            )
+        )
+
+        assert result.status == ActionStatus.SUCCEEDED
+        assert result.side_effects == ["reply_photo"]
+        assert response_context.photos == [("chart.png", "Status")]
 
     def test_operational_failure_is_structured(self):
         from execution import ActionErrorKind, ActionStatus
@@ -374,13 +453,69 @@ class TestTypedExecutionOutcomes:
             await ctx.reply(intent["value"])
 
         bus = self._bus(handler)
+        class ResponseContext:
+            def __init__(self):
+                self.replies = []
+
+            async def reply(self, text, **kwargs):
+                self.replies.append(text)
+
+        response_context = ResponseContext()
         request = ActionRequest(
             action="demo",
             params={"value": "typed"},
             context=self._context(),
+            response_context=response_context,
         )
 
         result = asyncio.run(bus.execute_request(request))
 
         assert result.status == ActionStatus.SUCCEEDED
         assert result.output == "typed"
+        assert response_context.replies == ["typed"]
+
+
+class TestDirectSkillExecutionBoundary:
+    class _Context:
+        chat_id = "channel-123"
+
+        def __init__(self):
+            self.replies = []
+
+        async def reply(self, text, **kwargs):
+            self.replies.append(text)
+
+    def test_registered_action_routes_through_execution_bus(self):
+        from execution import ActionResult
+        from server import handle_action_intent
+
+        bus = type("Bus", (), {})()
+        bus.execute = AsyncMock(return_value=ActionResult.succeeded(output="done"))
+        registry = _Registry(handler=lambda *args: True)
+        ctx = self._Context()
+
+        with patch("skills.get_registry", return_value=registry), \
+             patch("execution.get_execution_bus", return_value=bus):
+            handled = asyncio.run(handle_action_intent({"action": "demo"}, ctx))
+
+        assert handled is True
+        call = bus.execute.await_args
+        assert call.args[0] == "demo"
+        assert call.args[2].chat_id == "channel-123"
+        assert call.kwargs["response_context"] is ctx
+
+    def test_not_handled_result_preserves_legacy_fallback(self):
+        from execution import ActionResult
+        from server import handle_action_intent
+
+        bus = type("Bus", (), {})()
+        bus.execute = AsyncMock(return_value=ActionResult.not_handled())
+        registry = _Registry(handler=lambda *args: False)
+        ctx = self._Context()
+
+        with patch("skills.get_registry", return_value=registry), \
+             patch("execution.get_execution_bus", return_value=bus):
+            handled = asyncio.run(handle_action_intent({"action": "demo"}, ctx))
+
+        assert handled is False
+        assert ctx.replies == []

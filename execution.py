@@ -43,6 +43,7 @@ class ActionStatus(str, Enum):
     FAILED = "failed"
     REJECTED = "rejected"
     WAITING_FOR_APPROVAL = "waiting_for_approval"
+    NOT_HANDLED = "not_handled"
 
 
 class ActionErrorKind(str, Enum):
@@ -108,6 +109,7 @@ class ActionRequest:
     action: str
     params: dict[str, Any]
     context: ExecutionContext
+    response_context: Any = None
 
 
 @dataclass
@@ -206,6 +208,10 @@ class ActionResult:
             **kwargs,
         )
 
+    @classmethod
+    def not_handled(cls, **kwargs) -> ActionResult:
+        return cls(status=ActionStatus.NOT_HANDLED, **kwargs)
+
 
 # Compatibility name for existing extension imports during the migration.
 ExecutionResult = ActionResult
@@ -243,6 +249,8 @@ class ExecutionBus:
         action: str,
         params: dict,
         context: ExecutionContext,
+        *,
+        response_context: Any = None,
     ) -> ActionResult:
         """Execute an action through the bus.
 
@@ -321,20 +329,26 @@ class ExecutionBus:
         intent = {"action": action, **params}
 
         # Create a capture context for the handler
-        capture_ctx = _BusCaptureContext()
+        capture_ctx = _BusCaptureContext(response_context)
 
         try:
-            await asyncio.wait_for(
+            handled = await asyncio.wait_for(
                 handler(action, intent, capture_ctx),
                 timeout=60,
             )
             elapsed = (time.monotonic() - t0) * 1000
             output = capture_ctx.get_result()
-            result = ActionResult.succeeded(
-                output=output,
-                side_effects=capture_ctx.side_effects,
-                latency_ms=elapsed, action=action, source=context.source.value,
-            )
+            result_kwargs = {
+                "output": output,
+                "side_effects": capture_ctx.side_effects,
+                "latency_ms": elapsed,
+                "action": action,
+                "source": context.source.value,
+            }
+            if not handled and not capture_ctx.replied and not capture_ctx.side_effects:
+                result = ActionResult.not_handled(**result_kwargs)
+            else:
+                result = ActionResult.succeeded(**result_kwargs)
         except asyncio.TimeoutError:
             elapsed = (time.monotonic() - t0) * 1000
             result = ActionResult.failed(
@@ -356,7 +370,12 @@ class ExecutionBus:
 
     async def execute_request(self, request: ActionRequest) -> ActionResult:
         """Typed adapter for callers migrating to request objects."""
-        return await self.execute(request.action, request.params, request.context)
+        return await self.execute(
+            request.action,
+            request.params,
+            request.context,
+            response_context=request.response_context,
+        )
 
     def _audit(self, action: str, params: dict, context: ExecutionContext, result: ActionResult):
         """Write execution to audit log with source attribution."""
@@ -373,7 +392,11 @@ class ExecutionBus:
                     "parent_plan_id": context.parent_plan_id,
                     "trigger_id": context.trigger_id,
                 },
-                result="ok" if result.success else f"error: {result.error}",
+                result=(
+                    "ok" if result.success
+                    else "not_handled" if result.status == ActionStatus.NOT_HANDLED
+                    else f"error: {result.error}"
+                ),
             )
         except Exception as e:
             log.warning("Execution bus audit failed: %s", e)
@@ -397,19 +420,67 @@ class ExecutionBus:
 
 
 class _BusCaptureContext:
-    """Minimal context that captures handler output (mirrors _ToolCaptureContext in server.py)."""
+    """Capture handler output and optionally forward it to a real channel context."""
 
-    def __init__(self):
+    def __init__(self, target: Any = None):
+        self._target = target
         self._replies: list[str] = []
         self.side_effects: list[str] = []
-        # Stub attributes that handlers may access
-        self._raw_update = None
+        self.replied = False
 
     async def reply(self, text: str, **kwargs):
-        self._replies.append(text)
+        if text:
+            self._replies.append(text)
+        self.replied = True
+        if self._target is not None:
+            return await self._target.reply(text, **kwargs)
+        return None
 
     async def send_message(self, chat_id: int, text: str, **kwargs):
-        self._replies.append(text)
+        if text:
+            self._replies.append(text)
+        self.replied = True
+        if self._target is not None:
+            if hasattr(self._target, "send_message"):
+                return await self._target.send_message(chat_id, text, **kwargs)
+            return await self._target.reply(text, **kwargs)
+        return None
+
+    async def reply_photo(self, *args, **kwargs):
+        self.side_effects.append("reply_photo")
+        if self._target is not None and hasattr(self._target, "reply_photo"):
+            return await self._target.reply_photo(*args, **kwargs)
+        return None
+
+    async def reply_voice(self, *args, **kwargs):
+        self.side_effects.append("reply_voice")
+        if self._target is not None and hasattr(self._target, "reply_voice"):
+            return await self._target.reply_voice(*args, **kwargs)
+        return None
+
+    async def reply_video(self, *args, **kwargs):
+        self.side_effects.append("reply_video")
+        if self._target is not None and hasattr(self._target, "reply_video"):
+            return await self._target.reply_video(*args, **kwargs)
+        return None
+
+    async def reply_document(self, *args, **kwargs):
+        self.side_effects.append("reply_document")
+        if self._target is not None and hasattr(self._target, "reply_document"):
+            return await self._target.reply_document(*args, **kwargs)
+        return None
+
+    async def typing(self):
+        if self._target is not None and hasattr(self._target, "typing"):
+            return await self._target.typing()
+        return None
+
+    def __getattr__(self, name: str):
+        if self._target is not None:
+            return getattr(self._target, name)
+        if name == "_raw_update":
+            return None
+        raise AttributeError(name)
 
     def get_result(self) -> str:
         return "\n".join(self._replies) if self._replies else ""
