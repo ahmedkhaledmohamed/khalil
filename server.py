@@ -3880,32 +3880,69 @@ async def handle_action_intent(intent: dict, ctx: MessageContext) -> bool:
                 "approve_deny_keyboard": approve_deny_keyboard,
             }
             from skills import get_registry
-            handler = get_registry().get_handler(action)
+            registry = get_registry()
+            handler = registry.get_handler(action)
             if handler is not None:
-                # Track reply state before handler runs
-                _had_reply_before = getattr(ctx, '_replied', False)
-                try:
-                    result = await asyncio.wait_for(
-                        handler(action, intent, ctx),
-                        timeout=30,
+                from execution import (
+                    ActionStatus,
+                    ExecutionContext,
+                    ExecutionSource,
+                    get_execution_bus,
+                )
+                bus = get_execution_bus()
+                if bus is not None:
+                    params = {key: value for key, value in intent.items() if key != "action"}
+                    result = await bus.execute(
+                        action,
+                        params,
+                        ExecutionContext(
+                            source=ExecutionSource.USER,
+                            chat_id=ctx.chat_id,
+                        ),
+                        response_context=ctx,
                     )
-                except asyncio.TimeoutError:
-                    log.error("Skill handler timed out for %s (30s)", action)
-                    await ctx.reply(f"⚠️ {action} timed out after 30s. Try again or check /health.")
-                    return True
-                except Exception as handler_err:
-                    log.error("Skill handler raised for %s: %s", action, handler_err)
-                    await ctx.reply(f"⚠️ {action} encountered an error: {handler_err}")
-                    return True
-                if result:
-                    # Handler claimed success — ensure user got a response
-                    if not getattr(ctx, '_replied', False) and not _had_reply_before:
-                        log.warning("Handler %s returned True but never called ctx.reply()", action)
-                        await ctx.reply(f"✅ {action} completed.")
-                    return True
-                # Handler returned falsy — if it did reply, treat as handled
-                if getattr(ctx, '_replied', False) and not _had_reply_before:
-                    return True
+                    if result.status == ActionStatus.NOT_HANDLED:
+                        pass  # Preserve legacy fallback for explicit handler declines.
+                    elif result.success:
+                        if result.status == ActionStatus.EMPTY:
+                            log.warning("Handler %s completed without a response", action)
+                            await ctx.reply(f"✅ {action} completed.")
+                        return True
+                    else:
+                        log.error(
+                            "Execution bus rejected or failed %s: %s",
+                            action,
+                            result.error or result.status.value,
+                        )
+                        await ctx.reply(
+                            f"⚠️ {action} failed: {result.error or result.status.value}"
+                        )
+                        return True
+                else:
+                    # Startup/tests may invoke dispatch before the bus is initialized.
+                    _had_reply_before = getattr(ctx, '_replied', False)
+                    try:
+                        result = await asyncio.wait_for(
+                            handler(action, intent, ctx),
+                            timeout=30,
+                        )
+                    except asyncio.TimeoutError:
+                        log.error("Skill handler timed out for %s (30s)", action)
+                        await ctx.reply(f"⚠️ {action} timed out after 30s. Try again or check /health.")
+                        return True
+                    except Exception as handler_err:
+                        log.error("Skill handler raised for %s: %s", action, handler_err)
+                        await ctx.reply(f"⚠️ {action} encountered an error: {handler_err}")
+                        return True
+                    if result:
+                        # Handler claimed success — ensure user got a response
+                        if not getattr(ctx, '_replied', False) and not _had_reply_before:
+                            log.warning("Handler %s returned True but never called ctx.reply()", action)
+                            await ctx.reply(f"✅ {action} completed.")
+                        return True
+                    # Handler returned falsy — if it did reply, treat as handled
+                    if getattr(ctx, '_replied', False) and not _had_reply_before:
+                        return True
         except Exception as e:
             log.error("Skill dispatch failed for %s: %s", action, e)
             await ctx.reply(f"⚠️ {action} failed: {e}")
