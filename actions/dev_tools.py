@@ -6,10 +6,37 @@ Answers questions like "is Codex working?" by inspecting running processes.
 """
 
 import asyncio
+import hashlib
+import json
 import logging
 import re
+import sqlite3
+from datetime import datetime, timezone
+
+from config import DB_PATH
 
 log = logging.getLogger("khalil.actions.dev_tools")
+
+_SESSION_STATE_KEY = "coding_session_bridge"
+_PROMPT_STABILITY_POLLS = 2
+_BRIDGE_STATE_LOCK = asyncio.Lock()
+_ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_APPROVAL_PATTERNS = (
+    re.compile(r"\bdo you want to (?:proceed|continue|allow|run|execute)\b", re.I),
+    re.compile(r"\b(?:allow|approve|permit|authorize)\b.{0,100}\?", re.I | re.S),
+    re.compile(r"\bpermission (?:required|request(?:ed)?)\b", re.I),
+    re.compile(r"\byes,? allow\b", re.I),
+    re.compile(r"\bpress (?:enter|return) to (?:confirm|approve|continue)\b", re.I),
+)
+_INPUT_PATTERNS = (
+    re.compile(r"\b(?:needs?|requires?) (?:your )?input\b", re.I),
+    re.compile(r"\b(?:please )?(?:choose|select) (?:an? )?(?:option|answer)\b", re.I),
+    re.compile(
+        r"(?:^|\n)\s*(?:what|which|how|where|when|why|would|should|do you|are you|"
+        r"can you|could you)[^\n?]{3,240}\?\s*(?:[>❯›]\s*)?$",
+        re.I,
+    ),
+)
 
 SKILL = {
     "name": "dev_tools",
@@ -54,12 +81,6 @@ async def _get_coding_agent_processes() -> list[dict]:
         line_lower = line.lower()
         if "claude" not in line_lower and "codex" not in line_lower:
             continue
-        # Skip desktop apps, helpers, grep, and this ps call.
-        if any(skip in line for skip in [
-            "Claude.app", "Claude Helper", "Codex.app", "crashpad", "ShipIt", "grep", "ps aux",
-        ]):
-            continue
-
         parts = line.split(None, 10)
         if len(parts) < 11:
             continue
@@ -69,12 +90,24 @@ async def _get_coding_agent_processes() -> list[dict]:
         tty = parts[6]   # e.g. s057, s131, ??
         started = parts[8]
         command = parts[10]
+        command_lower = command.lower()
+        # Only interactive CLIs are controllable. Desktop helpers, app servers,
+        # sandboxes and code-mode hosts may share a TTY but do not accept input.
+        if tty == "??" or any(skip in command_lower for skip in (
+            "claude.app", "claude helper", "codex.app", "crashpad", "shipit",
+            "grep", "ps aux", "app-server", "code-mode-host", "codex sandbox",
+            "features.code_mode_host",
+        )):
+            continue
+        executable = command.split(None, 1)[0].rsplit("/", 1)[-1].lower()
+        if executable not in ("codex", "claude"):
+            continue
         agent = "Codex" if "codex" in command.lower() else "Claude Code"
 
-        # Determine status
-        if "S+" in stat and cpu < 1.0:
-            status = "waiting for input"
-        elif cpu > 5.0:
+        # CPU can distinguish activity from idleness, but cannot prove that an
+        # agent needs input. The reconciler below makes that determination from
+        # a stable explicit terminal prompt.
+        if cpu > 5.0:
             status = "actively working"
         elif "S+" in stat:
             status = "idle (foreground)"
@@ -92,11 +125,414 @@ async def _get_coding_agent_processes() -> list[dict]:
             "command": command[:60],
         })
 
-    # Resolve CWD for each process via lsof
-    for p in processes:
-        p["cwd"] = await _resolve_cwd(p["pid"])
+    # Resolve process metadata concurrently; lsof and ps can each take seconds
+    # when many sessions are open.
+    metadata = await asyncio.gather(*(
+        asyncio.gather(_resolve_cwd(p["pid"]), _resolve_parent_pid(p["pid"]))
+        for p in processes
+    ))
+    for process, (cwd, ppid) in zip(processes, metadata):
+        process["cwd"] = cwd
+        process["ppid"] = ppid
+
+    bridge_sessions = _load_bridge_state().get("sessions", {})
+    for process in processes:
+        if bridge_sessions.get(_session_key(process), {}).get("status") == "needs_input":
+            process["status"] = "waiting for input"
 
     return processes
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _normalise_tty(tty: str) -> str:
+    if tty.startswith("/dev/"):
+        return tty
+    if tty.startswith("s") and tty[1:].isdigit():
+        return f"/dev/tty{tty}"
+    return tty
+
+
+def _session_key(process: dict) -> str:
+    identity = ":".join((
+        process["agent"], str(process["pid"]), process.get("started", ""),
+        _normalise_tty(process.get("tty", "")),
+    ))
+    return hashlib.sha256(identity.encode()).hexdigest()[:16]
+
+
+def _load_bridge_state() -> dict:
+    empty = {"sessions": {}, "message_index": {}}
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        row = conn.execute("SELECT value FROM settings WHERE key = ?", (_SESSION_STATE_KEY,)).fetchone()
+        conn.close()
+        if not row:
+            return empty
+        state = json.loads(row[0])
+        if not isinstance(state.get("sessions"), dict) or not isinstance(state.get("message_index"), dict):
+            return empty
+        return state
+    except Exception as exc:
+        log.debug("Failed to load coding-session bridge state: %s", exc)
+        return empty
+
+
+def _save_bridge_state(state: dict) -> None:
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (_SESSION_STATE_KEY, json.dumps(state)),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        log.warning("Failed to save coding-session bridge state: %s", exc)
+
+
+async def _get_tmux_panes() -> list[dict]:
+    """Return addressable tmux panes without depending on formatted user output."""
+    from actions.tmux_control import _run_tmux
+
+    output, rc = await _run_tmux(
+        "list-panes", "-a", "-F",
+        "#{session_name}|#{window_index}.#{pane_index}|#{pane_tty}|#{pane_pid}",
+    )
+    if rc != 0:
+        return []
+    panes = []
+    for line in output.splitlines():
+        parts = line.split("|", 3)
+        if len(parts) != 4:
+            continue
+        session, pane, tty, pid = parts
+        panes.append({
+            "session": session,
+            "target": f"{session}:{pane}",
+            "tty": tty,
+            "pid": int(pid) if pid.isdigit() else None,
+        })
+    return panes
+
+
+async def _resolve_parent_pid(pid: int) -> int | None:
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ps", "-o", "ppid=", "-p", str(pid),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        value = stdout.decode().strip()
+        return int(value) if value.isdigit() else None
+    except Exception:
+        return None
+
+
+async def _resolve_control_targets(processes: list[dict]) -> dict[str, dict]:
+    """Map process keys to exact iTerm or tmux input targets."""
+    from actions.terminal import bridge_list_instances, get_iterm_sessions
+
+    iterm_ttys = {session["tty"] for session in await get_iterm_sessions() if session.get("tty")}
+    tmux_by_tty = {pane["tty"]: pane for pane in await _get_tmux_panes() if pane.get("tty")}
+    cursor_terminals = []
+    for instance in await bridge_list_instances():
+        for terminal in instance["terminals"]:
+            cursor_terminals.append({**terminal, "bridge_url": instance["base_url"]})
+    cursor_by_pid = {terminal.get("pid"): terminal for terminal in cursor_terminals if terminal.get("pid")}
+    cursor_name_counts = {}
+    for terminal in cursor_terminals:
+        name = terminal.get("name")
+        cursor_name_counts[name] = cursor_name_counts.get(name, 0) + 1
+    targets = {}
+    for process in processes:
+        key = _session_key(process)
+        tty = _normalise_tty(process["tty"])
+        if tty in tmux_by_tty:
+            pane = tmux_by_tty[tty]
+            targets[key] = {
+                "kind": "tmux", "target": pane["target"],
+                "identity": f"tmux:{pane['target']}", "tty": tty,
+            }
+        elif tty in iterm_ttys:
+            targets[key] = {
+                "kind": "iterm", "target": tty, "identity": f"iterm:{tty}", "tty": tty,
+            }
+        elif process.get("ppid") in cursor_by_pid:
+            terminal = cursor_by_pid[process["ppid"]]
+            name = terminal.get("name", "terminal")
+            targets[key] = {
+                "kind": "cursor",
+                "target": str(terminal["id"]),
+                "identity": f"cursor:{terminal['pid']}",
+                "name": name,
+                "bridge_url": terminal["bridge_url"],
+                # The installed bridge indexes captured output by name. Never
+                # read it when duplicate names could mix separate terminals.
+                "read_target": name if cursor_name_counts.get(name) == 1 else None,
+                "tty": tty,
+            }
+    return targets
+
+
+async def _read_target(target: dict, lines: int = 50) -> str | None:
+    if target["kind"] == "iterm":
+        from actions.terminal import read_iterm_session
+        result = await read_iterm_session(target["target"], lines=lines)
+        return result.get("content") if result.get("success") else None
+
+    if target["kind"] == "tmux":
+        from actions.tmux_control import _run_tmux
+        output, rc = await _run_tmux(
+            "capture-pane", "-t", target["target"], "-p", "-S", f"-{lines}",
+        )
+        return output if rc == 0 else None
+
+    read_target = target.get("read_target")
+    if not read_target:
+        return None
+    from actions.terminal import bridge_get_output
+    result = await bridge_get_output(read_target, lines=lines, base_url=target["bridge_url"])
+    output = result.get("output")
+    return "\n".join(output) if isinstance(output, list) else output
+
+
+def _extract_input_prompt(output: str | None) -> tuple[str | None, bool]:
+    """Extract an explicit input request from the terminal tail.
+
+    A sleeping foreground process alone is not evidence of an input request.
+    The terminal must contain an explicit question, choice, or approval prompt.
+    """
+    if not output:
+        return None, False
+    cleaned = _ANSI_ESCAPE.sub("", output).replace("\r", "")
+    lines = [line.rstrip() for line in cleaned.splitlines()]
+    tail = "\n".join(lines[-18:]).strip()
+    if not tail:
+        return None, False
+    approval = any(pattern.search(tail) for pattern in _APPROVAL_PATTERNS)
+    if not approval and not any(pattern.search(tail) for pattern in _INPUT_PATTERNS):
+        return None, False
+    return tail[-1800:], approval
+
+
+def _redact_prompt(prompt: str) -> str:
+    """Redact Khalil's known sensitive patterns before external notification."""
+    from config import SENSITIVE_PATTERNS
+
+    redacted = prompt
+    for pattern in SENSITIVE_PATTERNS:
+        redacted = re.sub(pattern, "[REDACTED]", redacted, flags=re.IGNORECASE)
+    return redacted
+
+
+def _format_session_notification(session: dict) -> str:
+    project = session.get("cwd") or "Unknown project"
+    interaction_id = session["interaction_id"]
+    kind = "approval" if session.get("approval") else "input"
+    instructions = (
+        f"Reply with `approve <exact choice>` or `deny <exact choice>` (ID {interaction_id})."
+        if session.get("approval") else
+        f"Reply directly to this message with your answer (ID {interaction_id})."
+    )
+    return (
+        f"Coding session needs {kind}\n\n"
+        f"Agent: {session['agent']}\n"
+        f"Project: {project}\n"
+        f"Terminal: {session['target_kind']} {session.get('target_name') or session['target']}\n\n"
+        f"{session['prompt']}\n\n{instructions}"
+    )
+
+
+async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
+    """Reconcile controllable coding sessions and send idempotent input alerts."""
+    processes = await _get_coding_agent_processes()
+    targets = await _resolve_control_targets(processes)
+    state = _load_bridge_state()
+    old_sessions = state["sessions"]
+    active_sessions = {}
+    notifications = 0
+
+    for process in processes:
+        key = _session_key(process)
+        target = targets.get(key)
+        # Only an explicit prompt in a foreground interactive CLI is eligible.
+        if not target or "+" not in process.get("stat", ""):
+            continue
+        previous = old_sessions.get(key, {})
+        output = await _read_target(target)
+        prompt, approval = _extract_input_prompt(output)
+        prompt_hash = hashlib.sha256((prompt or "").encode()).hexdigest()[:16] if prompt else None
+        same_candidate = prompt_hash and prompt_hash == previous.get("candidate_hash")
+        candidate_polls = previous.get("candidate_polls", 0) + 1 if same_candidate else (1 if prompt else 0)
+        answered_same_prompt = (
+            previous.get("status") == "responded"
+            and previous.get("candidate_hash") == prompt_hash
+        )
+        if answered_same_prompt:
+            status = "responded"
+        else:
+            status = "needs_input" if prompt and candidate_polls >= _PROMPT_STABILITY_POLLS else "running"
+        session = {
+            "key": key,
+            "interaction_id": key[:8],
+            "agent": process["agent"],
+            "pid": process["pid"],
+            "started": process.get("started"),
+            "tty": _normalise_tty(process["tty"]),
+            "cwd": process.get("cwd"),
+            "target_kind": target["kind"],
+            "target": target["target"],
+            "target_identity": target["identity"],
+            "target_name": target.get("name"),
+            "bridge_url": target.get("bridge_url"),
+            "status": status,
+            "approval": approval,
+            "candidate_hash": prompt_hash,
+            "candidate_polls": candidate_polls,
+            "notification_message_id": previous.get("notification_message_id"),
+            "updated_at": _utc_now(),
+        }
+
+        already_notified = (
+            previous.get("status") == "needs_input"
+            and previous.get("candidate_hash") == prompt_hash
+            and previous.get("notification_message_id") is not None
+        )
+        if status == "needs_input" and not already_notified:
+            sent = await channel.send_message(
+                chat_id, _format_session_notification({**session, "prompt": _redact_prompt(prompt)}),
+            )
+            session["notification_message_id"] = str(sent.message_id)
+            state["message_index"][str(sent.message_id)] = key
+            notifications += 1
+        active_sessions[key] = session
+
+    active_keys = set(active_sessions)
+    state["message_index"] = {
+        message_id: key for message_id, key in state["message_index"].items()
+        if key in active_keys and active_sessions[key].get("status") == "needs_input"
+    }
+    state["sessions"] = active_sessions
+    _save_bridge_state(state)
+    return notifications
+
+
+async def poll_coding_sessions(channel, chat_id: int | str) -> int:
+    """Serialize reconciliation with Telegram reply handling."""
+    async with _BRIDGE_STATE_LOCK:
+        return await _poll_coding_sessions(channel, chat_id)
+
+
+async def _send_to_target(session: dict, text: str) -> tuple[bool, str | None]:
+    # The agent could terminate in the narrow interval after live-process
+    # validation, leaving a shell at the same TTY. Never relay a response that
+    # would be classified as a blocked shell command in that race.
+    from actions.shell import classify_command
+    from config import ActionType
+    if len(text) > 2000:
+        return False, "Response is too long (maximum 2,000 characters)"
+    if classify_command(text) == ActionType.DANGEROUS:
+        return False, "Response resembles a blocked shell command"
+
+    if session["target_kind"] == "iterm":
+        from actions.terminal import send_input_to_iterm
+        result = await send_input_to_iterm(text, session["target"])
+        return result.get("success", False), result.get("error")
+
+    if session["target_kind"] == "cursor":
+        from actions.terminal import bridge_send_command
+        result = await bridge_send_command(
+            session["target"], text, show=False, base_url=session["bridge_url"],
+        )
+        return not result.get("error") and bool(result.get("sent")), result.get("error")
+
+    from actions.tmux_control import send_input
+    result = await send_input(session["target"], text)
+    return result.get("success", False), result.get("error")
+
+
+async def _handle_session_reply(ctx, query: str) -> bool:
+    """Route a reply-to-message response to its exact pending coding session."""
+    incoming = getattr(ctx, "incoming", None)
+    reply_to = str(incoming.reply_to_msg_id) if incoming and incoming.reply_to_msg_id is not None else None
+    if not reply_to:
+        return False
+
+    state = _load_bridge_state()
+    key = state["message_index"].get(reply_to)
+    if not key:
+        return False
+    session = state["sessions"].get(key)
+    if not session or session.get("status") != "needs_input":
+        await ctx.reply("That coding-session request is no longer active.")
+        return True
+
+    response = query.strip()
+    if session.get("approval"):
+        lowered = response.lower()
+        if lowered.startswith("approve ") and response[8:].strip():
+            response = response[8:].strip()
+        elif lowered.startswith("deny ") and response[5:].strip():
+            response = response[5:].strip()
+        else:
+            await ctx.reply(
+                "This is an approval request. Reply with `approve <exact terminal choice>` "
+                "or `deny <exact terminal choice>`; I won't infer a choice from ordinary text."
+            )
+            return True
+
+    # Re-resolve live processes and exact targets to reject PID reuse, closed
+    # terminals, and moved sessions before writing anything.
+    processes = await _get_coding_agent_processes()
+    live = next((process for process in processes if _session_key(process) == key), None)
+    targets = await _resolve_control_targets([live] if live else [])
+    live_target = targets.get(key)
+    if (
+        not live or not live_target
+        or live_target["kind"] != session["target_kind"]
+        or live_target["identity"] != session.get("target_identity")
+    ):
+        state["message_index"].pop(reply_to, None)
+        session["status"] = "stale"
+        _save_bridge_state(state)
+        await ctx.reply("I didn't send that response because the original coding session is no longer controllable.")
+        return True
+
+    before = await _read_target(live_target, lines=20)
+    delivery_session = {
+        **session,
+        "target": live_target["target"],
+        "bridge_url": live_target.get("bridge_url"),
+    }
+    success, error = await _send_to_target(delivery_session, response)
+    if not success:
+        await ctx.reply(f"I couldn't deliver the response to {session['agent']}: {error or 'unknown error'}")
+        return True
+
+    await asyncio.sleep(0.5)
+    after = await _read_target(live_target, lines=20)
+    state["message_index"].pop(reply_to, None)
+    session["status"] = "responded"
+    session["responded_at"] = _utc_now()
+    session["notification_message_id"] = None
+    _save_bridge_state(state)
+    if before != after:
+        await ctx.reply(f"Response delivered to {session['agent']} in {session.get('cwd') or session['target']}.")
+    else:
+        await ctx.reply(
+            f"Response was written to {session['agent']}, but its terminal output has not changed yet."
+        )
+    return True
+
+
+async def handle_session_reply(ctx, query: str) -> bool:
+    """Serialize reply delivery with session-state reconciliation."""
+    async with _BRIDGE_STATE_LOCK:
+        return await _handle_session_reply(ctx, query)
 
 
 async def _get_claude_processes() -> list[dict]:
@@ -111,7 +547,7 @@ async def _resolve_cwd(pid: int) -> str | None:
     """Resolve the current working directory of a process via lsof."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "lsof", "-d", "cwd", "-p", str(pid), "-Fn",
+            "lsof", "-a", "-d", "cwd", "-p", str(pid), "-Fn",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
