@@ -671,6 +671,42 @@ async def send_to_iterm(command: str, session_tty: str = "current") -> dict:
         return {"success": False, "error": str(e)}
 
 
+async def send_input_to_iterm(text: str, session_tty: str) -> dict:
+    """Write literal interactive input to an exact iTerm session.
+
+    Unlike ``send_to_iterm``, this does not classify the text as a shell
+    command: the recipient is an already-running interactive coding agent.
+    AppleScript escaping still prevents the response from altering the script.
+    """
+    if not text or "\x00" in text or "\n" in text or "\r" in text:
+        return {"success": False, "error": "Response must be one non-empty line"}
+    if session_tty == "current" or not session_tty.startswith("/dev/tty"):
+        return {"success": False, "error": "An exact iTerm TTY is required"}
+    if not await _is_iterm_running():
+        return {"success": False, "error": "iTerm2 is not running"}
+
+    script = _ITERM_WRITE_TO_SESSION_SCRIPT.format(
+        command=_escape_applescript(text),
+        tty=_escape_applescript(session_tty),
+    )
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
+        if proc.returncode != 0:
+            return {"success": False, "error": stderr.decode()[:200]}
+        if stdout.decode().strip() == "session_not_found":
+            return {"success": False, "error": f"Session with tty {session_tty} not found"}
+        return {"success": True, "error": None}
+    except asyncio.TimeoutError:
+        return {"success": False, "error": "Timed out sending input to iTerm"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 async def create_iterm_tab(command: str = None) -> dict:
     """Create a new iTerm2 tab, optionally run a command.
 
@@ -754,11 +790,18 @@ async def cursor_diff(file1: str, file2: str) -> dict:
 # --- Cursor Terminal Bridge Client ---
 
 BRIDGE_URL = "http://127.0.0.1:8034"
+BRIDGE_PORT_RANGE = range(8034, 8044)
 
 
-async def _bridge_request(method: str, path: str, body: dict = None, timeout: int = 10) -> dict:
+async def _bridge_request(
+    method: str,
+    path: str,
+    body: dict = None,
+    timeout: int = 10,
+    base_url: str = BRIDGE_URL,
+) -> dict:
     """Make a request to the Khalil Terminal Bridge extension."""
-    url = f"{BRIDGE_URL}{path}"
+    url = f"{base_url}{path}"
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.request(method, url, json=body)
@@ -785,6 +828,24 @@ async def bridge_list_terminals() -> list[dict]:
     return result.get("terminals", [])
 
 
+async def bridge_list_instances() -> list[dict]:
+    """Discover Terminal Bridge instances from every open Cursor window."""
+    async def inspect(port: int) -> dict | None:
+        base_url = f"http://127.0.0.1:{port}"
+        status = await _bridge_request("GET", "/status", timeout=1, base_url=base_url)
+        if status.get("error"):
+            return None
+        terminals = await _bridge_request("GET", "/terminals", timeout=1, base_url=base_url)
+        return {
+            "base_url": base_url,
+            "workspace": status.get("workspace"),
+            "terminals": terminals.get("terminals", []),
+        }
+
+    results = await asyncio.gather(*(inspect(port) for port in BRIDGE_PORT_RANGE))
+    return [result for result in results if result]
+
+
 async def bridge_create_terminal(name: str = "Khalil", cwd: str = None, command: str = None) -> dict:
     """Create a new terminal in Cursor."""
     body = {"name": name}
@@ -795,7 +856,12 @@ async def bridge_create_terminal(name: str = "Khalil", cwd: str = None, command:
     return await _bridge_request("POST", "/terminals", body)
 
 
-async def bridge_send_command(target: str | int, command: str, show: bool = True) -> dict:
+async def bridge_send_command(
+    target: str | int,
+    command: str,
+    show: bool = True,
+    base_url: str = BRIDGE_URL,
+) -> dict:
     """Send a command to a Cursor terminal.
 
     Args:
@@ -807,7 +873,7 @@ async def bridge_send_command(target: str | int, command: str, show: bool = True
     return await _bridge_request("POST", f"/terminals/{encoded}/send", {
         "command": command,
         "show": show,
-    })
+    }, base_url=base_url)
 
 
 async def bridge_close_terminal(target: str | int) -> dict:
@@ -816,10 +882,10 @@ async def bridge_close_terminal(target: str | int) -> dict:
     return await _bridge_request("DELETE", f"/terminals/{encoded}")
 
 
-async def bridge_get_output(target: str, lines: int = 50) -> dict:
+async def bridge_get_output(target: str, lines: int = 50, base_url: str = BRIDGE_URL) -> dict:
     """Get buffered output from a Cursor terminal."""
     encoded = quote(str(target), safe="")
-    return await _bridge_request("GET", f"/output/{encoded}?lines={lines}")
+    return await _bridge_request("GET", f"/output/{encoded}?lines={lines}", base_url=base_url)
 
 
 async def bridge_workspace() -> dict:

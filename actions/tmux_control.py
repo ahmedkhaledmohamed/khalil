@@ -87,6 +87,21 @@ async def send_command(session: str, command: str) -> str:
     return f"Sent `{command}` to session **{session}**"
 
 
+async def send_input(target: str, text: str) -> dict:
+    """Write one literal line to an exact tmux pane target."""
+    if not text or "\x00" in text or "\n" in text or "\r" in text:
+        return {"success": False, "error": "Response must be one non-empty line"}
+    output, rc = await _run_tmux("display-message", "-p", "-t", target, "#{pane_id}")
+    if rc != 0:
+        return {"success": False, "error": output or f"tmux target '{target}' not found"}
+    _, rc = await _run_tmux("send-keys", "-t", target, "-l", "--", text)
+    if rc == 0:
+        _, rc = await _run_tmux("send-keys", "-t", target, "Enter")
+    if rc != 0:
+        return {"success": False, "error": f"Failed to send input to tmux target '{target}'"}
+    return {"success": True, "error": None}
+
+
 async def read_output(session: str, lines: int = 50) -> str:
     """Capture recent output from a tmux pane."""
     output, rc = await _run_tmux("capture-pane", "-t", session, "-p", "-S", f"-{lines}")

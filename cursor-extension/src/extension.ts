@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as http from "http";
 
 let server: http.Server | null = null;
+let boundPort: number | null = null;
 // Terminal output buffer: terminal name -> last N lines
 const terminalOutput: Map<string, string[]> = new Map();
 const OUTPUT_BUFFER_LINES = 200;
@@ -109,6 +110,8 @@ async function handleRequest(
     if (path === "/status" && req.method === "GET") {
       return jsonResponse(res, 200, {
         ok: true,
+        port: boundPort,
+        extensionHostPid: process.pid,
         terminals: vscode.window.terminals.length,
         workspace: vscode.workspace.workspaceFolders?.[0]?.name || null,
       });
@@ -244,26 +247,37 @@ function startServer(ctx: vscode.ExtensionContext) {
   }
 
   const { port } = getConfig();
+  let candidatePort = port;
+  const maxPort = port + 9;
 
-  server = http.createServer(handleRequest);
-  server.listen(port, "127.0.0.1", () => {
-    vscode.window.showInformationMessage(
-      `Khalil Terminal Bridge listening on http://127.0.0.1:${port}`
-    );
-  });
-
-  server.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      vscode.window.showErrorMessage(
-        `Khalil Terminal Bridge: port ${port} already in use`
+  const tryListen = () => {
+    const candidate = http.createServer(handleRequest);
+    server = candidate;
+    candidate.once("listening", () => {
+      boundPort = candidatePort;
+      vscode.window.showInformationMessage(
+        `Khalil Terminal Bridge listening on http://127.0.0.1:${candidatePort}`
       );
-    } else {
-      vscode.window.showErrorMessage(
-        `Khalil Terminal Bridge error: ${err.message}`
-      );
-    }
-    server = null;
-  });
+    });
+    candidate.once("error", (err: NodeJS.ErrnoException) => {
+      if (err.code === "EADDRINUSE" && candidatePort < maxPort) {
+        candidatePort += 1;
+        tryListen();
+      } else if (err.code === "EADDRINUSE") {
+        vscode.window.showErrorMessage(
+          `Khalil Terminal Bridge: ports ${port}-${maxPort} are already in use`
+        );
+        server = null;
+      } else {
+        vscode.window.showErrorMessage(
+          `Khalil Terminal Bridge error: ${err.message}`
+        );
+        server = null;
+      }
+    });
+    candidate.listen(candidatePort, "127.0.0.1");
+  };
+  tryListen();
 
   // Capture terminal output via onDidWriteTerminalData (proposed API)
   // Falls back gracefully if not available
@@ -295,6 +309,7 @@ function stopServer() {
   if (server) {
     server.close();
     server = null;
+    boundPort = null;
     vscode.window.showInformationMessage("Khalil Terminal Bridge stopped");
   }
 }

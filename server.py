@@ -6030,14 +6030,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
         return
     query = query.strip()
-    if len(query) < 2:
-        await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
-        return
 
     # Rate limiting
     chat_id = update.effective_chat.id
     if not _check_rate_limit(chat_id):
         await update.message.reply_text("⏱️ Too many messages — please wait a moment.")
+        return
+
+    # A direct reply to a coding-session alert bypasses conversational intent
+    # routing and is delivered only to the correlated live terminal session.
+    from actions.dev_tools import handle_session_reply
+    if await handle_session_reply(ctx, query):
+        return
+
+    if len(query) < 2:
+        await update.message.reply_text("I didn't catch that \u2014 what can I help you with?")
         return
 
     # Check for pending voice confirmation
@@ -6264,7 +6271,7 @@ async def handle_message_generic(ctx: MessageContext):
 
     global OWNER_CHAT_ID
     query = (ctx.incoming.text if ctx.incoming else "").strip()
-    if not query or len(query) < 2:
+    if not query:
         await ctx.reply("I didn't catch that — what can I help you with?")
         return
 
@@ -6273,6 +6280,14 @@ async def handle_message_generic(ctx: MessageContext):
     # Rate limiting
     if not _check_rate_limit(chat_id):
         await ctx.reply("⏱️ Too many messages — please wait a moment.")
+        return
+
+    from actions.dev_tools import handle_session_reply
+    if await handle_session_reply(ctx, query):
+        return
+
+    if len(query) < 2:
+        await ctx.reply("I didn't catch that — what can I help you with?")
         return
 
     # Enable auto-save so action handler replies are recorded in conversation history

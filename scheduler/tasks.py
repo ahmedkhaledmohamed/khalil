@@ -224,7 +224,7 @@ async def send_synthesis_nudge(channel: "Channel", chat_id: int):
 
 
 async def poll_dev_state(channel: "Channel", chat_id: int):
-    """Poll dev environment state (silent — tracks state for context, no notifications)."""
+    """Poll dev state and notify only for stable coding-agent input requests."""
     try:
         from actions.terminal import poll_and_diff
         changes = await poll_and_diff()
@@ -233,6 +233,15 @@ async def poll_dev_state(channel: "Channel", chat_id: int):
     except Exception as e:
         log.debug("Dev state poll failed: %s", e)
         _record_scheduler_failure("dev_state_poll", e)
+
+    try:
+        from actions.dev_tools import poll_coding_sessions
+        notifications = await poll_coding_sessions(channel, chat_id)
+        if notifications:
+            log.info("Sent %d coding-session input notification(s)", notifications)
+    except Exception as e:
+        log.warning("Coding-session poll failed: %s", e)
+        _record_scheduler_failure("coding_session_poll", e)
 
 
 async def send_quarterly_planning(channel: "Channel", chat_id: int, ask_claude_fn):
