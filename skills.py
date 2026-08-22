@@ -208,7 +208,7 @@ class SkillRegistry:
         """Suggest relevant skills the user might not know about.
 
         Returns a list of short suggestion strings like:
-        "Set a reminder: 'remind me to ...'", "Check weather: 'Toronto weather'"
+        "Set a reminder: 'remind me to ...'", "Check weather: 'New York weather'"
         """
         text_lower = text.lower()
         scored: list[tuple[int, Skill]] = []

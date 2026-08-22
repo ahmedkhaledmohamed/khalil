@@ -157,8 +157,11 @@ async def get_recruiter_messages(limit: int = 5) -> list[dict]:
         raise
 
 
-async def search_jobs(query: str, location: str = "Toronto") -> list[dict]:
+async def search_jobs(query: str, location: str | None = None) -> list[dict]:
     """Search LinkedIn jobs. Returns list of job dicts."""
+    if not location:
+        from config import LOCATION_NAME
+        location = LOCATION_NAME
     try:
         data = await _voyager_get(
             "/search/hits",
@@ -206,7 +209,8 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     elif action == "linkedin_jobs":
         try:
             query = intent.get("query", intent.get("text", "product manager"))
-            location = intent.get("location", "Toronto")
+            from config import LOCATION_NAME
+            location = intent.get("location", LOCATION_NAME)
             jobs = await search_jobs(query, location)
             if not jobs:
                 await ctx.reply(f'No LinkedIn jobs found for "{query}" in {location}.')

@@ -107,7 +107,7 @@ EXISTING_CAPABILITIES = [
     "finance — financial dashboard, deadlines, portfolio, RSU",
     "work — sprint dashboard, P0 epics, themes, owners",
     "goals — quarterly goal tracking",
-    "project — project status tracking (zia, tiny-grounds, bezier, khalil)",
+    "project — configurable project status tracking",
     "jobs — job scraper matches",
     "nudge — proactive checks for overdue items",
     "learn — self-improvement insights and preferences",
@@ -684,7 +684,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
     Returns:
         (module_source_code, manifest_json)
     """
-    # Get LLM client via shared factory (respects Taskforce proxy)
+    # Get the LLM client via the shared factory (respects gateway configuration).
     from llm_client import get_async_llm_client, call_llm_async
     try:
         client, client_type = get_async_llm_client()
@@ -1555,7 +1555,7 @@ async def create_extension_pr(
 async def generate_and_pr(payload: dict) -> str:
     """Full pipeline: generate code, validate, create PR.
 
-    Routes to simple (Taskforce LLM) or complex (coding agent) path
+    Routes to a simple LLM or complex coding-agent path.
     based on capability complexity.
 
     Called directly from server.py background task or via autonomy.

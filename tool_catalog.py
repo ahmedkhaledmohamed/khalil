@@ -85,7 +85,7 @@ _GENERATE_FILE_SCHEMA = {
                 },
                 "target_path": {
                     "type": "string",
-                    "description": "Where to save the file (e.g., ~/Developer/Personal/presentations/deck.html)",
+                    "description": "Where to save the file (e.g., ~/.khalil/workspace/presentations/deck.html)",
                 },
                 "file_type": {
                     "type": "string",
@@ -243,7 +243,7 @@ _TOOL_DESCRIPTIONS = {
         "Requires recipient and subject."
     ),
     "email_work": (
-        "Search work email (Spotify Gmail). "
+        "Search a separately configured work email account. "
         'Example: "Check my work inbox" → email_work() '
         "For personal email use email_personal."
     ),
@@ -262,7 +262,7 @@ _TOOL_DESCRIPTIONS = {
         'Example: "What are my reminders?" → reminder_list()'
     ),
     "weather": (
-        "Get current weather conditions (Toronto default). "
+        "Get current weather conditions for the configured location. "
         'Example: "What\'s the weather?" → weather()'
     ),
     "weather_forecast": (

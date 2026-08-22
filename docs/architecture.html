@@ -847,7 +847,7 @@ footer {
     <div>
       <div class="layer-label" style="color: var(--purple)">Layer 5</div>
       <div class="layer-title">LLM Layer</div>
-      <div class="layer-desc">Model router classifies complexity, Taskforce proxy routes to providers with circuit-breaker failover</div>
+      <div class="layer-desc">Model router classifies complexity; an optional compatible gateway routes to providers with circuit-breaker failover</div>
     </div>
   </div>
   <div class="split">
@@ -872,13 +872,13 @@ footer {
         <div class="provider">
           <span style="font-size: 1.25rem;">&#9679;</span>
           <span class="name">GPT-5.2</span>
-          <span class="detail">via Taskforce</span>
+          <span class="detail">via gateway</span>
           <span class="badge badge--fallback">fallback</span>
         </div>
         <div class="provider">
           <span style="font-size: 1.25rem;">&#10022;</span>
           <span class="name">Gemini 2.5</span>
-          <span class="detail">via Taskforce</span>
+          <span class="detail">via gateway</span>
           <span class="badge badge--fallback">fallback</span>
         </div>
         <div class="provider">
@@ -888,7 +888,7 @@ footer {
           <span class="badge badge--local">local</span>
         </div>
       </div>
-      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem;">Taskforce Proxy (hendrix-genai.spotify.net) routes all cloud calls. Circuit breaker auto-failover between providers. Sensitive queries forced to local Ollama.</p>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem;">An optional OpenAI-compatible gateway can route cloud calls. Circuit-breaker failover is supported, while sensitive queries can be forced to local Ollama.</p>
     </div>
   </div>
 </section>
@@ -1037,8 +1037,8 @@ footer {
       <div class="node node--teal" data-tooltip="Personal tools — the-hub MCP server">
         <span class="icon">🏠</span> the-hub <span class="tag">personal</span>
       </div>
-      <div class="node node--teal" data-tooltip="Spotify work tools — ClientMessaging hub">
-        <span class="icon">🏢</span> work-hub <span class="tag">spotify</span>
+      <div class="node node--teal" data-tooltip="Optional tools from a configured work MCP server">
+        <span class="icon">🏢</span> work tools <span class="tag">optional</span>
       </div>
     </div>
   </div>
@@ -1223,8 +1223,8 @@ footer {
     </div>
     <div class="source">
       <div class="icon">&#127925;</div>
-      <h4>Spotify Work Repos</h4>
-      <p>ClientMessaging platform, product specs, backend, orchestration.</p>
+      <h4>Configured Work Sources</h4>
+      <p>User-selected project documentation and repositories.</p>
     </div>
     <div class="source">
       <div class="icon">&#128214;</div>
@@ -1244,7 +1244,7 @@ footer {
     <div class="source">
       <div class="icon">&#128218;</div>
       <h4>Side Projects</h4>
-      <p>Zia, Tiny Grounds, Bezier READMEs and documentation.</p>
+      <p>User-configured side-project READMEs and documentation.</p>
     </div>
     <div class="source">
       <div class="icon">&#128336;</div>
@@ -1261,7 +1261,7 @@ footer {
     <div>
       <div class="layer-label" style="color: var(--pink)">Export</div>
       <div class="layer-title">Portable Knowledge</div>
-      <div class="layer-desc">Daily export of 8 key tables to khalil-knowledge repo (git-synced JSON). Full DB backup to GitHub Releases.</div>
+      <div class="layer-desc">Optional export of portable tables to a private directory, with full DB backups to a configured GitHub repository.</div>
     </div>
   </div>
   <div class="nodes">
@@ -1271,8 +1271,8 @@ footer {
     <div class="node node--pink" data-tooltip="Daily 3:15 AM — gzipped SQLite (~150 MB) uploaded to GitHub Releases">
       <span class="icon">💾</span> Full DB Backup <span class="tag">daily 3:15am &rarr; release</span>
     </div>
-    <div class="node node--pink" data-tooltip="github.com/ahmedkhaledmohamed/khalil-knowledge — git-synced portable state">
-      <span class="icon">🔗</span> khalil-knowledge repo
+    <div class="node node--pink" data-tooltip="User-configured private repository for portable state">
+      <span class="icon">🔗</span> private knowledge repository
     </div>
   </div>
 </section>

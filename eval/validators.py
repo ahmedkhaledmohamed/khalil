@@ -207,7 +207,7 @@ def _validate_readwise(query: str, response: str) -> list[tuple[str, bool, str]]
 def _validate_appstore(query: str, response: str) -> list[tuple[str, bool, str]]:
     """App Store responses should contain ratings, downloads, or review info."""
     lower = response.lower()
-    has_terms = any(t in lower for t in ("rating", "download", "review", "star", "app store", "version", "zia"))
+    has_terms = any(t in lower for t in ("rating", "download", "review", "star", "app store", "version"))
 
     return [("appstore_content", has_terms, "" if has_terms else "No App Store metrics in response")]
 

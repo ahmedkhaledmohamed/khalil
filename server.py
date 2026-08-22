@@ -36,6 +36,7 @@ from channels.telegram import TelegramChannel
 
 from config import (
     ActionType,
+    ARTIFACTS_DIR,
     AutonomyLevel,
     CLAUDE_MODEL,
     CLAUDE_MODEL_FAST,
@@ -44,12 +45,16 @@ from config import (
     GOOGLE_BASE_URL,
     GOOGLE_MODEL,
     KEYRING_SERVICE,
+    KHALIL_DIR,
     LLM_BACKEND,
+    LOCATION_NAME,
     MAX_CONTEXT_TOKENS,
     OLLAMA_LLM_MODEL,
     OLLAMA_URL,
     OPENAI_BASE_URL,
     OPENAI_MODEL,
+    OWNER_NAME,
+    OWNER_PROFILE,
     SENSITIVE_PATTERNS,
     SWARM_ENABLED,
     TIMEZONE,
@@ -106,7 +111,7 @@ async def _generate_artifact(query: str, context: str, chat_id, progress_msg, ch
     if not target_path:
         # Generate default path from query
         slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
-        target_path = os.path.expanduser(f"~/Developer/Personal/presentations/{slug}/index.html")
+        target_path = str(ARTIFACTS_DIR / slug / "index.html")
 
     # Determine file type for system prompt
     ext = os.path.splitext(target_path)[1].lstrip('.')
@@ -141,8 +146,8 @@ async def _generate_artifact(query: str, context: str, chat_id, progress_msg, ch
     user_message = f"Context:\n\n{context}\n\n---\n\nGenerate the complete {file_type} file now."
 
     try:
-        if _taskforce_client:
-            response = await _taskforce_client.chat.completions.create(
+        if _gateway_client:
+            response = await _gateway_client.chat.completions.create(
                 model=CLAUDE_MODEL,
                 max_tokens=16000,
                 messages=[
@@ -332,10 +337,10 @@ scheduler = AsyncIOScheduler()
 db_conn = None
 autonomy: AutonomyController = None
 claude: anthropic.AsyncAnthropic = None
-_taskforce_client = None  # OpenAI-compatible client for Taskforce proxy (Anthropic)
-_taskforce_client_long = None  # Separate pool for long-running generation (generate_file)
-_openai_client = None     # OpenAI-compatible client for Taskforce proxy (OpenAI)
-_google_client = None     # OpenAI-compatible client for Taskforce proxy (Google)
+_gateway_client = None  # Optional OpenAI-compatible client for Claude requests
+_gateway_client_long = None  # Separate pool for long-running generation
+_openai_client = None  # Optional compatible client for OpenAI requests
+_google_client = None  # Optional compatible client for Google requests
 telegram_app: Application | None = None
 channel: Channel | None = None  # Primary channel instance (set during bot startup)
 OWNER_CHAT_ID: int | None = None  # Loaded from DB on startup, updated on first message
@@ -444,13 +449,10 @@ def _check_rate_limit(chat_id: int) -> bool:
 
 # --- Khalil identity block (shared across all system prompts) ---
 KHALIL_IDENTITY = (
-    "You are Khalil — Ahmed Khaled's autonomous AI assistant.\n\n"
-    "WHO AHMED IS: Senior PM at Spotify (Client Messaging, Toronto). "
-    "Deep engineering background (10+ years), ships end-to-end. "
-    "Side projects: Bézier (AI design), Zia (shipped iOS app), Tiny Grounds. "
-    "Values rigor, structure, measurable impact, critical thinking.\n\n"
+    f"You are Khalil — {OWNER_NAME}'s autonomous AI assistant.\n\n"
+    f"OWNER CONTEXT: {OWNER_PROFILE}\n\n"
     "HOW YOU THINK:\n"
-    "1. UNDERSTAND: What is Ahmed actually asking for? What's the end goal?\n"
+    f"1. UNDERSTAND: What is {OWNER_NAME} actually asking for? What's the end goal?\n"
     "2. PLAN: What steps? What info do I need? Which tools help?\n"
     "3. EXECUTE: Do the work. Use the right tools. Don't plan endlessly.\n"
     "4. VERIFY: Did I deliver what was asked? Is it complete?\n"
@@ -466,7 +468,7 @@ KHALIL_IDENTITY = (
     "- Parallel agents: delegate_tasks — runs subtasks simultaneously\n"
     "- Background monitor: spawn_watcher — long-running task tracking\n"
     "- APIs: Gmail, Calendar, Drive, GitHub, Spotify, Slack (via MCP)\n"
-    "- Self-modification: your code is at ~/Developer/Personal/scripts/khalil/\n\n"
+    f"- Self-modification: your code is at {KHALIL_DIR}\n\n"
     "PRINCIPLES:\n"
     "- Execute, don't plan. Show results, not status updates or checklists.\n"
     "- Never give a status update. If a task fails, explain what failed and try a different approach.\n"
@@ -878,7 +880,7 @@ def _get_mcp_tools_text() -> str:
 
 
 LLM_TIMEOUT = 20.0  # seconds — Ollama local (fast when running)
-CLAUDE_TIMEOUT = 15.0  # per-model timeout — 8s was too aggressive for Taskforce proxy
+CLAUDE_TIMEOUT = 15.0  # per-model timeout for direct or gateway requests
 FALLBACK_BUDGET = 15.0  # total seconds for the entire fallback chain
 _ollama_recovery_attempted = False
 
@@ -977,9 +979,9 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
         if kimi_result:
             return kimi_result
 
-    # Use Taskforce client if available, else native Anthropic
-    _use_taskforce = _taskforce_client is not None
-    client = _taskforce_client or claude
+    # Use the configured compatible gateway if available, else native Anthropic.
+    _use_gateway = _gateway_client is not None
+    client = _gateway_client or claude
     if not client:
         api_key = get_secret("anthropic-api-key")
         if not api_key:
@@ -991,7 +993,7 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
                     api_key=api_key, base_url=CLAUDE_BASE_URL,
                     default_headers={CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {},
                 )
-                _use_taskforce = True
+                _use_gateway = True
             else:
                 client = anthropic.AsyncAnthropic(api_key=api_key)
         except Exception:
@@ -1006,7 +1008,7 @@ async def _fallback_to_claude(query: str, context: str, system: str, user_messag
             break
         _timeout = min(CLAUDE_TIMEOUT, _remaining)
         try:
-            if _use_taskforce:
+            if _use_gateway:
                 response = await client.chat.completions.create(
                     model=model, max_tokens=1500, messages=_msgs, timeout=_timeout,
                 )
@@ -1115,11 +1117,11 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
     system = (
         f"{_temporal}"
         f"{KHALIL_IDENTITY}"
-        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
+        f"CAPABILITIES: You run on {OWNER_NAME}'s Mac and can execute macOS shell commands "
         "and access many services through your action system.\n"
         f"{_skill_context}\n\n"
-        "If Ahmed asks about his machine state, DO NOT suggest he run a command "
-        "— just tell him you'll check. Actions execute automatically.\n\n"
+        f"If {OWNER_NAME} asks about their machine state, DO NOT suggest they run a command "
+        "— just tell them you'll check. Actions execute automatically.\n\n"
         "HONESTY RULE: NEVER pretend to execute tools or create files. "
         "Do NOT output '[Called tool: X]' or fake tool results in text. "
         "If you cannot execute an action, say so honestly.\n\n"
@@ -1153,7 +1155,7 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         log.info("Privacy routing: sensitive query forced to local Ollama")
         # Fall through to Ollama path below instead of Claude
 
-    if LLM_BACKEND == "claude" and (claude or _taskforce_client) and not _force_local:
+    if LLM_BACKEND == "claude" and (claude or _gateway_client) and not _force_local:
         # Circuit breaker: skip Claude if it's been failing repeatedly
         # Use background CB for background tasks so their failures don't kill user requests
         _cb = _cb_claude_bg if _background else _cb_claude_fg
@@ -1182,10 +1184,10 @@ async def ask_llm(query: str, context: str, system_extra: str = "", model: str |
         _max_retries = 2  # only retry for rate limits; timeouts fail fast
         for _attempt in range(1, _max_retries + 1):
             try:
-                if _taskforce_client:
-                    # Taskforce proxy: OpenAI-compatible API
+                if _gateway_client:
+                    # OpenAI-compatible gateway API
                     _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
-                    response = await _taskforce_client.chat.completions.create(
+                    response = await _gateway_client.chat.completions.create(
                         model=_selected_model,
                         max_tokens=1500,
                         messages=_msgs,
@@ -1395,11 +1397,11 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
     system = (
         f"{_temporal}"
         f"{KHALIL_IDENTITY}"
-        "CAPABILITIES: You run on Ahmed's Mac and can execute macOS shell commands "
+        f"CAPABILITIES: You run on {OWNER_NAME}'s Mac and can execute macOS shell commands "
         "and access many services through your action system.\n"
         f"{_skill_context}\n\n"
-        "If Ahmed asks about his machine state, DO NOT suggest he run a command "
-        "— just tell him you'll check. Actions execute automatically.\n\n"
+        f"If {OWNER_NAME} asks about their machine state, DO NOT suggest they run a command "
+        "— just tell them you'll check. Actions execute automatically.\n\n"
         "HONESTY RULE: NEVER pretend to execute tools or create files. "
         "Do NOT output '[Called tool: X]' or fake tool results in text. "
         "If you cannot execute an action, say so honestly.\n\n"
@@ -1424,7 +1426,7 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
     import re as _re
     _force_local = any(_re.search(p, query, _re.IGNORECASE) for p in SENSITIVE_PATTERNS)
 
-    if LLM_BACKEND == "claude" and (_taskforce_client or claude) and not _force_local:
+    if LLM_BACKEND == "claude" and (_gateway_client or claude) and not _force_local:
         if _cb_claude_fg.is_open():
             # Circuit breaker open — fall back to non-streaming
             result = await ask_llm(query, context, system_extra, model)
@@ -1432,10 +1434,10 @@ async def ask_llm_stream(query: str, context: str, system_extra: str = "", model
             return
 
         try:
-            if _taskforce_client:
-                # Taskforce proxy — non-streaming (streaming returns empty SSE)
+            if _gateway_client:
+                # Compatible gateway — non-streaming fallback
                 _msgs = [{"role": "system", "content": system}, {"role": "user", "content": user_message}]
-                response = await _taskforce_client.chat.completions.create(
+                response = await _gateway_client.chat.completions.create(
                     model=_selected_model,
                     max_tokens=1500,
                     messages=_msgs,
@@ -1714,7 +1716,7 @@ def _check_result_needs_reflection(tool_name: str, result_text: str, query: str)
         return None
 
     source_path = _get_tool_source_path(tool_name)
-    khalil_dir = "~/Developer/Personal/scripts/khalil"
+    khalil_dir = str(KHALIL_DIR)
     log.info("Tool result reflection injected for '%s': %s", tool_name, detail)
 
     return (
@@ -1725,7 +1727,7 @@ def _check_result_needs_reflection(tool_name: str, result_text: str, query: str)
         f"1. READ the tool's source code:\n"
         f"   shell(command=\"cat {khalil_dir}/{source_path}\")\n"
         f"\n"
-        f"2. DIAGNOSE: Explain to Ahmed WHY results were poor. "
+        f"2. DIAGNOSE: Explain to {OWNER_NAME} WHY results were poor. "
         f"Look at the matching logic, rules, default parameters, and what's missing.\n"
         f"\n"
         f"3. PROPOSE: List specific changes to {source_path} that would fix this. "
@@ -1733,7 +1735,7 @@ def _check_result_needs_reflection(tool_name: str, result_text: str, query: str)
         f"   Also check: does this tool support what the user actually asked for? "
         f"(e.g., does it archive emails, or only label them?)\n"
         f"\n"
-        f"4. ASK Ahmed: \"Want me to implement these changes and open a PR?\"\n"
+        f"4. ASK {OWNER_NAME}: \"Want me to implement these changes and open a PR?\"\n"
         f"\n"
         f"RULES:\n"
         f"- Do NOT create new scripts, files, or workarounds.\n"
@@ -1880,7 +1882,7 @@ async def _execute_tool_call(tool_call) -> str:
             return json.dumps({"error": True, "message": "Missing description parameter"})
         if not target_path:
             slug = re.sub(r'[^\w\s-]', '', description.lower())[:40].strip().replace(' ', '-')
-            target_path = f"~/Developer/Personal/presentations/{slug}/index.html"
+            target_path = str(ARTIFACTS_DIR / slug / "index.html")
 
         try:
             # Build context from conversation + KB search
@@ -1943,9 +1945,9 @@ async def _execute_tool_call(tool_call) -> str:
                             )
                             _resp.raise_for_status()
                             content = _resp.json()["message"]["content"]
-                    elif _taskforce_client_long or _taskforce_client:
+                    elif _gateway_client_long or _gateway_client:
                         # Use separate long-running client to avoid holding main pool connections
-                        _gen_client = _taskforce_client_long or _taskforce_client
+                        _gen_client = _gateway_client_long or _gateway_client
                         resp = await asyncio.wait_for(
                             _gen_client.chat.completions.create(
                                 model=_model, max_tokens=16000,
@@ -2325,7 +2327,7 @@ async def call_llm_with_tools(
 
     # Privacy routing — force Ollama for sensitive queries
     _force_local = any(re.search(p, query, re.IGNORECASE) for p in SENSITIVE_PATTERNS)
-    if _force_local or not _taskforce_client:
+    if _force_local or not _gateway_client:
         # Fall back to non-tool streaming for local/Ollama
         stream_gen = ask_llm_stream(query, context, system_extra)
         return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
@@ -2372,7 +2374,7 @@ async def call_llm_with_tools(
         response = None
         for _tool_attempt in range(2):
             try:
-                response = await _taskforce_client.chat.completions.create(
+                response = await _gateway_client.chat.completions.create(
                     model=_routed_model,
                     max_tokens=4000,
                     messages=messages,
@@ -2534,7 +2536,7 @@ async def call_llm_with_tools(
                 ),
             })
             try:
-                _synth_resp = await _taskforce_client.chat.completions.create(
+                _synth_resp = await _gateway_client.chat.completions.create(
                     model=_routed_model,
                     max_tokens=4000,
                     messages=messages,
@@ -2561,7 +2563,7 @@ async def call_llm_with_tools(
             if not _artifact_path:
                 slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
                 _artifact_path = os.path.expanduser(
-                    f"~/Developer/Personal/presentations/{slug}/index.html"
+                    str(ARTIFACTS_DIR / slug / "index.html")
                 )
 
             class _SynthToolCall:
@@ -2604,7 +2606,7 @@ async def call_llm_with_tools(
                     ),
                 })
                 try:
-                    _synth_resp = await _taskforce_client.chat.completions.create(
+                    _synth_resp = await _gateway_client.chat.completions.create(
                         model=_routed_model,
                         max_tokens=4000,
                         messages=messages,
@@ -2675,7 +2677,7 @@ async def call_llm_with_tools(
         ),
      })
      try:
-        _final_resp = await _taskforce_client.chat.completions.create(
+        _final_resp = await _gateway_client.chat.completions.create(
             model=_routed_model,
             max_tokens=4000,
             messages=messages,
@@ -2719,7 +2721,7 @@ async def call_llm_with_tools(
             if not _artifact_path:
                 slug = re.sub(r'[^\w\s-]', '', query.lower())[:50].strip().replace(' ', '-')
                 _artifact_path = os.path.expanduser(
-                    f"~/Developer/Personal/presentations/{slug}/index.html"
+                    str(ARTIFACTS_DIR / slug / "index.html")
                 )
             class _ExhSynth:
                 class function:
@@ -2941,10 +2943,10 @@ _ACTION_PATTERNS = [
     (r"\bprofile\s+views?\b", "linkedin_profile"),
     # App Store
     (r"\bapp\s+store\s+(?:rating|reviews?)\b", "appstore_ratings"),
-    (r"\bzia\s+(?:rating|reviews?)\b", "appstore_ratings"),
+    (r"\bmy\s+app\s+(?:rating|reviews?)\b", "appstore_ratings"),
     (r"\bapp\s+(?:downloads?|stats?)\b", "appstore_downloads"),
-    (r"\bzia\s+(?:downloads?|stats?)\b", "appstore_downloads"),
-    (r"\bhow\s+is\s+zia\b", "appstore_ratings"),
+    (r"\bmy\s+app\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+    (r"\bhow\s+is\s+my\s+app\b", "appstore_ratings"),
     # DigitalOcean
     (r"\b(?:server|droplet)\s+(?:status|health)\b", "digitalocean_status"),
     (r"\bdigitalocean\b", "digitalocean_status"),
@@ -3058,7 +3060,7 @@ ACTION_REGISTRY = {
     "github_notifications": "github notifications unread alerts",
     "github_prs": "github pull requests prs open review",
     "github_create_issue": "github create new issue file open bug",
-    "weather": "weather temperature outside today toronto",
+    "weather": f"weather temperature outside today {LOCATION_NAME.lower()}",
     "weather_forecast": "weather forecast days week ahead",
     "spotify_now": "playing listening song track music spotify",
     "spotify_recent": "recently played listening history spotify",
@@ -3066,8 +3068,8 @@ ACTION_REGISTRY = {
     "linkedin_messages": "linkedin messages recruiter inmail",
     "linkedin_jobs": "linkedin jobs search openings",
     "linkedin_profile": "linkedin profile views",
-    "appstore_ratings": "app store rating reviews zia",
-    "appstore_downloads": "app store downloads stats zia",
+    "appstore_ratings": "app store rating reviews my app",
+    "appstore_downloads": "app store downloads stats my app",
     "digitalocean_status": "server droplet status health digitalocean",
     "digitalocean_spend": "server cost bill spend digitalocean",
     "notion_search": "notion search find pages notes",
@@ -7645,12 +7647,12 @@ async def startup():
                 "  Or switch to Ollama: set LLM_BACKEND = 'ollama' in config.py"
             )
             return
-        global _taskforce_client, _taskforce_client_long
+        global _gateway_client, _gateway_client_long
         if CLAUDE_BASE_URL:
-            # Taskforce proxy uses OpenAI-compatible API
+            # Optional gateway uses the OpenAI-compatible API.
             from openai import AsyncOpenAI
             _headers = {CLAUDE_API_KEY_HEADER: api_key} if CLAUDE_API_KEY_HEADER else {}
-            _taskforce_client = AsyncOpenAI(
+            _gateway_client = AsyncOpenAI(
                 api_key=api_key,
                 base_url=CLAUDE_BASE_URL,
                 default_headers=_headers,
@@ -7658,14 +7660,14 @@ async def startup():
             )
             # Separate client for long-running generation (generate_file) —
             # won't hold connections from the main pool during 5-minute calls
-            _taskforce_client_long = AsyncOpenAI(
+            _gateway_client_long = AsyncOpenAI(
                 api_key=api_key,
                 base_url=CLAUDE_BASE_URL,
                 default_headers=_headers,
                 max_retries=0,  # generate_file has its own model cascade
             )
-            log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via Taskforce {CLAUDE_BASE_URL}")
-            # Initialize backup provider clients (OpenAI, Google) via Taskforce
+            log.info(f"LLM backend: Claude ({CLAUDE_MODEL}) via compatible gateway {CLAUDE_BASE_URL}")
+            # Initialize optional backup provider clients through the gateway.
             global _openai_client, _google_client
             if OPENAI_BASE_URL:
                 _openai_client = AsyncOpenAI(

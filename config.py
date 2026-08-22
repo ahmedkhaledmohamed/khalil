@@ -10,12 +10,15 @@ DATA_DIR = KHALIL_DIR / "data"
 DB_PATH = DATA_DIR / "khalil.db"
 EXTENSIONS_DIR = KHALIL_DIR / "extensions"
 
-# External: Personal repo (configurable via env var)
+# External workspace and credential directories (configurable via env vars)
 PERSONAL_REPO_PATH = Path(os.environ.get(
     "KHALIL_PERSONAL_REPO",
-    str(Path.home() / "Developer" / "Personal"),
-))
-SCRIPTS_DIR = PERSONAL_REPO_PATH / "scripts"
+    str(Path.home() / ".khalil" / "workspace"),
+)).expanduser()
+SCRIPTS_DIR = Path(os.environ.get(
+    "KHALIL_CREDENTIALS_DIR",
+    str(Path.home() / ".khalil" / "credentials"),
+)).expanduser()
 
 # Archives (in Personal repo)
 ARCHIVES_DIR = PERSONAL_REPO_PATH / "archives" / "google"
@@ -23,6 +26,10 @@ GMAIL_DIR = ARCHIVES_DIR / "gmail"
 DRIVE_DIR = ARCHIVES_DIR / "drive"
 TIMELINE_FILE = ARCHIVES_DIR / "timeline.md"
 CONTEXT_FILE = PERSONAL_REPO_PATH / "CONTEXT.md"
+ARTIFACTS_DIR = Path(os.environ.get(
+    "KHALIL_ARTIFACTS_DIR",
+    str(PERSONAL_REPO_PATH / "artifacts"),
+)).expanduser()
 
 # Cursor conversation transcripts
 CURSOR_TRANSCRIPTS_DIR = Path.home() / ".cursor" / "projects"
@@ -36,52 +43,39 @@ PROJECTS_DIR = PERSONAL_REPO_PATH / "projects"
 GOALS_DIR = PERSONAL_REPO_PATH / "goals"
 LEARNING_DIR = PERSONAL_REPO_PATH / "learning"
 
-# Side project repos with useful READMEs
-SIDE_PROJECT_DIRS = [
-    Path.home() / "Developer" / "PM-AI-Partner-Framework",
-    Path.home() / "Developer" / "llm-toolkit",
-    Path.home() / "Developer" / "ParentingAssistantBackend",
-    Path.home() / "Developer" / "compass-AI",
-    Path.home() / "Developer" / "Personal" / "the-hub",
-    Path.home() / "Developer" / "Personal" / "me",
-    Path.home() / "Developer" / "Personal" / "sdm-interview-prep",
-    Path.home() / "Developer" / "Personal" / "llm-dissection",
-]
+# Optional work-planning CSV schema. Keep employer-specific column names out of
+# the public repository and configure them locally when needed.
+WORK_DESCRIPTION_COLUMN = os.getenv("KHALIL_WORK_DESCRIPTION_COLUMN", "Description")
+WORK_OWNER_COLUMN = os.getenv("KHALIL_WORK_OWNER_COLUMN", "Owner")
+WORK_SECONDARY_OWNER_COLUMN = os.getenv("KHALIL_WORK_SECONDARY_OWNER_COLUMN", "")
+WORK_ITEM_ID_COLUMN = os.getenv("KHALIL_WORK_ITEM_ID_COLUMN", "Item ID")
 
-# Work project documentation directories (Spotify repos with docs worth indexing)
-WORK_PROJECT_DOCS = [
-    # ClientMessaging platform documentation
-    (Path.home() / "Developer" / "ClientMessaging" / "documentation", "work:cm-platform"),
-    # CM Backend microservice docs (only */docs/ will be indexed)
-    (Path.home() / "Developer" / "CM_Backend", "work:cm-backend"),
-    # Orchestration Dashboard
-    (Path.home() / "Developer" / "ClientMessaging" / "orchestration-dashboard", "work:orchestration"),
-    # Product catalog (roadmap, strategy, channels, discovery docs)
-    (Path.home() / "Developer" / "ClientMessaging" / "product-catalog", "work:product-catalog"),
-    # PM operating system workspace (vendors, OKRs, org areas, domains)
-    (Path.home() / "Developer" / "ClientMessaging" / "pm-os-workspace", "work:pm-os"),
-    # Ahmed's work sandbox (context docs, planning, strategy)
-    (Path.home() / "Developer" / "ahmed-sandbox", "work:sandbox"),
-    # Experience mission (PRDs, planning, DevTalk, capability audits, career docs)
-    (Path.home() / "Developer" / "ahmed-experience-mission", "work:experience-mission"),
-    # Product specs (inbox architecture, push taxonomy, opt-in API)
-    (Path.home() / "Developer" / "Client-Messaging-Product-Specs", "work:product-specs"),
-    # Bézier (full repo, not just monorepo subdir)
-    (Path.home() / "Developer" / "Bézier", "projects:bezier"),
-    # Aika pipeline
-    (Path.home() / "Developer" / "aika-knowledge-ingestion-pipeline", "projects:aika"),
-    # The Hub — active project
-    (Path.home() / "Developer" / "the-hub", "projects:the-hub"),
-    # Moments catalog — messaging moments reference
-    (Path.home() / "Developer" / "moments-catalog", "work:moments-catalog"),
-    # ECM GHE — enterprise client messaging
-    (Path.home() / "Developer" / "ecm-ghe", "work:ecm-ghe"),
-]
+def _configured_paths(env_name: str) -> list[Path]:
+    """Read an OS-path-separated list of user-configured directories."""
+    return [
+        Path(value).expanduser()
+        for value in os.environ.get(env_name, "").split(os.pathsep)
+        if value.strip()
+    ]
 
-# Standalone files worth indexing from work repos
-WORK_PROJECT_FILES = [
-    (Path.home() / "Developer" / "ClientMessaging" / "CLAUDE.md", "work:cm-repo-guide"),
-]
+
+def _configured_labeled_paths(env_name: str) -> list[tuple[Path, str]]:
+    """Read semicolon-separated ``label=path`` entries from an env var."""
+    configured: list[tuple[Path, str]] = []
+    for entry in os.environ.get(env_name, "").split(";"):
+        if "=" not in entry:
+            continue
+        label, raw_path = entry.split("=", 1)
+        if label.strip() and raw_path.strip():
+            configured.append((Path(raw_path.strip()).expanduser(), label.strip()))
+    return configured
+
+
+# Optional repositories and document sources. Keep machine-specific paths in the
+# environment instead of committing them to the public repository.
+SIDE_PROJECT_DIRS = _configured_paths("KHALIL_SIDE_PROJECT_DIRS")
+WORK_PROJECT_DOCS = _configured_labeled_paths("KHALIL_DOCUMENT_SOURCES")
+WORK_PROJECT_FILES = _configured_labeled_paths("KHALIL_DOCUMENT_FILES")
 
 # ── Knowledge Freshness (Tiered Re-indexing) ──
 # Watched directories for Tier 2 polling (scanned every 5 min for changed files)
@@ -124,8 +118,9 @@ TOKEN_FILE_YOUTUBE = SCRIPTS_DIR / "token_youtube.json"  # youtube.readonly for 
 TOKEN_FILE_PERSONAL2 = SCRIPTS_DIR / "token_personal2.json"  # gmail.readonly for second personal email
 CREDENTIALS_FILE_PERSONAL = SCRIPTS_DIR / "credentials_personal.json"  # OAuth client for personal2 (different GCP project)
 
-# App Store Connect (Zia app ID — set after configuring ASC API key)
-ZIA_APP_ID = ""
+# App Store Connect (optional; set after configuring ASC API credentials)
+APPSTORE_APP_ID = os.getenv("KHALIL_APPSTORE_APP_ID", "")
+APPSTORE_APP_NAME = os.getenv("KHALIL_APPSTORE_APP_NAME", "App")
 
 # Embedding config
 OLLAMA_URL = "http://localhost:11434"
@@ -134,32 +129,34 @@ EMBED_DIM = 768  # nomic-embed-text dimension
 EMBED_PROVIDER = "ollama"  # #68: "ollama" (default) — abstraction for future providers
 
 # LLM config — "ollama" (free, local) or "claude" (paid, cloud)
-LLM_BACKEND = "claude"  # "ollama" for local, "claude" for Taskforce proxy
+LLM_BACKEND = os.getenv("KHALIL_LLM_BACKEND", "claude")
 OLLAMA_LLM_MODEL = "qwen3:14b"
 
 # Claude API (used when LLM_BACKEND = "claude")
-# Taskforce aliases are intentionally undated so the gateway can keep them current.
 CLAUDE_MODEL = os.getenv("KHALIL_CLAUDE_MODEL", "claude-sonnet-4-5")
 CLAUDE_MODEL_COMPLEX = os.getenv("KHALIL_CLAUDE_MODEL_COMPLEX", "claude-opus-4-6")
 CLAUDE_MODEL_FAST = os.getenv("KHALIL_CLAUDE_MODEL_FAST", "claude-haiku-4-5")
 MAX_CONTEXT_TOKENS = 8000
-# Taskforce proxy — set KHALIL_CLAUDE_BASE_URL to override the Anthropic API endpoint
-# e.g. "https://hendrix-genai.spotify.net/taskforce/anthropic"
-CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/anthropic/v1")
-# Taskforce uses "apikey" header instead of "x-api-key". Set to override.
-CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER", "apikey")
+# Optional OpenAI-compatible gateway. Leave blank to use the provider directly.
+CLAUDE_BASE_URL = os.getenv("KHALIL_CLAUDE_BASE_URL", "")
+CLAUDE_API_KEY_HEADER = os.getenv("KHALIL_CLAUDE_API_KEY_HEADER", "")
 
-# Backup LLM providers via Taskforce (fallback: Claude → OpenAI → Google)
-OPENAI_BASE_URL = os.getenv("KHALIL_OPENAI_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/openai/v1")
-OPENAI_MODEL = "gpt-5.2"
-GOOGLE_BASE_URL = os.getenv("KHALIL_GOOGLE_BASE_URL", "https://hendrix-genai.spotify.net/taskforce/google/v1")
-GOOGLE_MODEL = "gemini-2.5-pro"
+# Optional backup providers exposed through the same compatible gateway.
+OPENAI_BASE_URL = os.getenv("KHALIL_OPENAI_BASE_URL", "")
+OPENAI_MODEL = os.getenv("KHALIL_OPENAI_MODEL", "gpt-5.2")
+GOOGLE_BASE_URL = os.getenv("KHALIL_GOOGLE_BASE_URL", "")
+GOOGLE_MODEL = os.getenv("KHALIL_GOOGLE_MODEL", "gemini-2.5-pro")
 
 # Owner identity (for personalized prompts)
 OWNER_NAME = os.getenv("KHALIL_OWNER_NAME", "User")
+OWNER_PROFILE = os.getenv(
+    "KHALIL_OWNER_PROFILE",
+    "Use indexed context and learned preferences instead of assuming personal details.",
+)
+LOCATION_NAME = os.getenv("KHALIL_LOCATION_NAME", "New York")
 
 # Timezone
-TIMEZONE = os.getenv("KHALIL_TIMEZONE", "America/Toronto")
+TIMEZONE = os.getenv("KHALIL_TIMEZONE", "America/New_York")
 
 # Conversation tuning
 CONVERSATION_CONTEXT_WINDOW = int(os.getenv("KHALIL_CONTEXT_WINDOW", "30"))
@@ -174,9 +171,9 @@ TASK_STALE_HOURS = int(os.getenv("KHALIL_TASK_STALE_HOURS", "24"))
 FAMILY_CALENDAR_ID = os.getenv("KHALIL_FAMILY_CALENDAR_ID", "")
 
 # Weather (Open-Meteo, free, no API key)
-# Defaults to Toronto. Override with KHALIL_WEATHER_LAT / KHALIL_WEATHER_LON.
-WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT", "43.6629"))
-WEATHER_LON = float(os.getenv("KHALIL_WEATHER_LON", "-79.3957"))
+# Defaults to New York. Override with KHALIL_WEATHER_LAT / KHALIL_WEATHER_LON.
+WEATHER_LAT = float(os.getenv("KHALIL_WEATHER_LAT", "40.7128"))
+WEATHER_LON = float(os.getenv("KHALIL_WEATHER_LON", "-74.0060"))
 
 # Web search
 SEARCH_PROVIDER = "duckduckgo"  # no API key needed
@@ -231,8 +228,9 @@ APPLE_REMINDERS_SYNC = True
 # Knowledge export — portable knowledge synced to git
 KNOWLEDGE_EXPORT_DIR = Path(os.getenv(
     "KHALIL_KNOWLEDGE_EXPORT_DIR",
-    str(Path.home() / "Developer" / "Personal" / "khalil-knowledge"),
+    str(Path.home() / ".khalil" / "knowledge-export"),
 ))
+KNOWLEDGE_REPO = os.getenv("KHALIL_KNOWLEDGE_REPO", "")
 
 # AI media generation
 MEDIA_PROVIDER = "local"  # "local" (free, Apple Silicon) or "replicate" (paid cloud)
@@ -286,7 +284,7 @@ DATA_CLASSIFICATIONS = {
     "HEALTH": {"patterns": [r"\bhealth\b", r"\bsteps\b", r"\bsleep\b", r"\bheart\s*rate\b", r"\bworkout\b"],
                "routing": "local_preferred",
                "sources": ["apple_health", "fitness"]},
-    "WORK": {"patterns": [r"\bspotify\b.*\binternal\b", r"\bconfidential\b"],
+    "WORK": {"patterns": [r"\bcompany\s+internal\b", r"\bconfidential\b"],
              "routing": "local_preferred",
              "sources": ["work"]},
 }

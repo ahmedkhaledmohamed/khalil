@@ -11,7 +11,7 @@ from config import (
     DB_PATH, DATA_DIR, GMAIL_DIR, DRIVE_DIR, TIMELINE_FILE, CONTEXT_FILE, EMBED_DIM,
     WORK_DIR, CAREER_DIR, FINANCE_DIR, PROJECTS_DIR, GOALS_DIR, LEARNING_DIR,
     SIDE_PROJECT_DIRS, KHALIL_DIR, WORK_PROJECT_DOCS, WORK_PROJECT_FILES,
-    CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE,
+    CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE, WORK_DESCRIPTION_COLUMN,
 )
 from knowledge.embedder import embed_batch
 
@@ -380,8 +380,8 @@ def parse_csv_file(filepath: Path) -> list[dict]:
 
             # Use Description column as title
             title = (
-                row.get("Description of Work (Squad Internal)", "").strip()
-                or row.get("Groove Title", "").strip()
+                row.get(WORK_DESCRIPTION_COLUMN, "").strip()
+                or row.get("Title", "").strip()
             )
             if not title:
                 continue
@@ -445,12 +445,6 @@ def _categorize_repo_file(filepath: Path) -> tuple[str, str]:
             return "finance", "finance:rsu"
         return "finance", "finance:general"
     elif dirname == "projects":
-        if "zia" in name:
-            return "projects", "projects:zia"
-        elif "bezier" in name:
-            return "projects", "projects:bezier"
-        elif "tiny" in name or "tiny-grounds" in str(filepath):
-            return "projects", "projects:tiny-grounds"
         return "projects", f"projects:{name}"
     elif dirname == "goals":
         return "goals", "goals:annual"
@@ -778,9 +772,6 @@ async def index_all(force: bool = False):
         for md_file in sorted(project_dir.rglob("*.md")):
             if any(part in _SKIP_PARTS or part.startswith('.') for part in md_file.parts):
                 continue
-            # For CM_Backend, only index files under */docs/
-            if "CM_Backend" in str(project_dir) and "/docs/" not in str(md_file):
-                continue
             rel = md_file.relative_to(project_dir)
             subcategory = f"{category_prefix}:{rel.parent}" if rel.parent != Path('.') else category_prefix
             entries = parse_markdown_file(md_file)
@@ -919,8 +910,6 @@ async def index_incremental():
             if not _should_index(md_file):
                 continue
             if any(part in _SKIP_PARTS or part.startswith('.') for part in md_file.parts):
-                continue
-            if "CM_Backend" in str(project_dir) and "/docs/" not in str(md_file):
                 continue
             rel = md_file.relative_to(project_dir)
             subcategory = f"{category_prefix}:{rel.parent}" if rel.parent != Path('.') else category_prefix

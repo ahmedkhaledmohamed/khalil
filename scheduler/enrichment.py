@@ -153,7 +153,7 @@ def _categorize_query(query: str) -> str:
     q = query.lower()
     if any(w in q for w in ("python", "code", "programming", "api", "react", "javascript", "swift")):
         return "technology"
-    if any(w in q for w in ("spotify", "product", "pm", "roadmap", "okr")):
+    if any(w in q for w in ("product", "pm", "roadmap", "okr")):
         return "work"
     if any(w in q for w in ("finance", "invest", "stock", "tax", "rsu")):
         return "finance"

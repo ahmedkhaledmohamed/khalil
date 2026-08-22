@@ -32,20 +32,20 @@ SKILL = {
     "risk": "read",
     "patterns": [
         (r"\bapp\s+store\s+(?:rating|reviews?)\b", "appstore_ratings"),
-        (r"\bzia\s+(?:rating|reviews?)\b", "appstore_ratings"),
+        (r"\bmy\s+app\s+(?:rating|reviews?)\b", "appstore_ratings"),
         (r"\bapp\s+(?:downloads?|stats?)\b", "appstore_downloads"),
-        (r"\bzia\s+(?:downloads?|stats?)\b", "appstore_downloads"),
-        (r"\bhow\s+is\s+zia\b", "appstore_ratings"),
+        (r"\bmy\s+app\s+(?:downloads?|stats?)\b", "appstore_downloads"),
+        (r"\bhow\s+is\s+my\s+app\b", "appstore_ratings"),
         (r"\b(?:check|show)\s+(?:my\s+)?app\s+store\b", "appstore_ratings"),
         (r"\bapp\s+store\s+(?:downloads?|stats?|numbers?)\b", "appstore_downloads"),
-        (r"\b(?:new|any|latest)\s+reviews?\s+(?:for\s+)?zia\b", "appstore_ratings"),
-        (r"\bzia\s+(?:download\s+)?stats?\b", "appstore_downloads"),
+        (r"\b(?:new|any|latest)\s+reviews?\s+(?:for\s+)?my\s+app\b", "appstore_ratings"),
+        (r"\bmy\s+app\s+(?:download\s+)?stats?\b", "appstore_downloads"),
     ],
     "actions": [
-        {"type": "appstore_ratings", "handler": "handle_intent", "keywords": "app store rating reviews zia", "description": "App ratings and reviews"},
-        {"type": "appstore_downloads", "handler": "handle_intent", "keywords": "app store downloads stats zia", "description": "Download stats"},
+        {"type": "appstore_ratings", "handler": "handle_intent", "keywords": "app store rating reviews my app", "description": "App ratings and reviews"},
+        {"type": "appstore_downloads", "handler": "handle_intent", "keywords": "app store downloads stats my app", "description": "Download stats"},
     ],
-    "examples": ["Zia App Store ratings", "App download stats"],
+    "examples": ["My app's App Store ratings", "App download stats"],
 }
 
 
@@ -198,10 +198,10 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
     """Handle a natural language intent. Returns True if handled."""
     if action == "appstore_ratings":
         try:
-            from config import ZIA_APP_ID
-            app_id = intent.get("app_id", ZIA_APP_ID)
+            from config import APPSTORE_APP_ID
+            app_id = intent.get("app_id", APPSTORE_APP_ID)
             if not app_id:
-                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                await ctx.reply("No app ID configured. Set KHALIL_APPSTORE_APP_ID.")
                 return True
             ratings = await get_app_ratings(app_id)
             avg = ratings.get("rating", "?")
@@ -212,10 +212,10 @@ async def handle_intent(action: str, intent: dict, ctx) -> bool:
         return True
     elif action == "appstore_downloads":
         try:
-            from config import ZIA_APP_ID
-            app_id = intent.get("app_id", ZIA_APP_ID)
+            from config import APPSTORE_APP_ID
+            app_id = intent.get("app_id", APPSTORE_APP_ID)
             if not app_id:
-                await ctx.reply("No app ID configured. Set ZIA_APP_ID in config.py.")
+                await ctx.reply("No app ID configured. Set KHALIL_APPSTORE_APP_ID.")
                 return True
             downloads = await get_app_downloads(app_id)
             await ctx.reply(f"\U0001f4ca Downloads (7d): {downloads.get('total', '?')}\n"

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -47,8 +48,12 @@ SKILL = {
 # Known project repos
 _PROJECTS = {
     "khalil": Path(__file__).parent.parent,
-    "personal": Path.home() / "Developer" / "Personal",
 }
+for _entry in os.getenv("KHALIL_CODING_PROJECTS", "").split(";"):
+    if "=" in _entry:
+        _name, _path = (part.strip() for part in _entry.split("=", 1))
+        if _name and _path:
+            _PROJECTS[_name.lower()] = Path(_path).expanduser()
 
 
 @dataclass

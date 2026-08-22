@@ -27,7 +27,7 @@ SKILL = {
     "actions": [
         {"type": "web_search", "handler": "handle_intent", "keywords": "search web internet google look up find", "description": "Search the web"},
     ],
-    "examples": ["Search the web for Python best practices", "Look up Toronto weather"],
+    "examples": ["Search the web for Python best practices", "Look up local weather"],
 }
 
 # Try importing duckduckgo-search; gracefully degrade if missing

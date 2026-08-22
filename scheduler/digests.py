@@ -5,7 +5,7 @@ import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from config import TIMEZONE
+from config import LOCATION_NAME, TIMEZONE
 
 log = logging.getLogger("khalil.scheduler")
 
@@ -90,12 +90,12 @@ async def generate_morning_brief(ask_claude_fn) -> str:
     async def _fetch_appstore_summary():
         try:
             from actions.appstore import get_app_ratings, get_app_downloads
-            from config import ZIA_APP_ID
-            if not ZIA_APP_ID:
+            from config import APPSTORE_APP_ID, APPSTORE_APP_NAME
+            if not APPSTORE_APP_ID:
                 return ""
             ratings, downloads = await asyncio.gather(
-                get_app_ratings(ZIA_APP_ID),
-                get_app_downloads(ZIA_APP_ID, days=7),
+                get_app_ratings(APPSTORE_APP_ID),
+                get_app_downloads(APPSTORE_APP_ID, days=7),
             )
             parts = []
             if ratings:
@@ -103,7 +103,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
             if downloads:
                 parts.append(f"{downloads.get('total', '?')} downloads (7d)")
             if parts:
-                return f"\n\nZia (App Store): {', '.join(parts)}"
+                return f"\n\n{APPSTORE_APP_NAME} (App Store): {', '.join(parts)}"
         except Exception as e:
             log.warning("App Store fetch for brief failed: %s", e)
             _failed_sources.append("App Store")
@@ -193,7 +193,7 @@ async def generate_morning_brief(ask_claude_fn) -> str:
         if parts:
             reminder_text = "\n\nReminders:\n" + "\n".join(parts)
 
-    weather_text = f"\n\nToronto weather: {weather}" if weather else ""
+    weather_text = f"\n\n{LOCATION_NAME} weather: {weather}" if weather else ""
 
     # Work priorities (sync, non-blocking)
     work_text = ""

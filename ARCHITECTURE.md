@@ -269,7 +269,7 @@ graph LR
     end
 
     subgraph Providers["Provider Stack"]
-        TF["Taskforce Proxy<br/>hendrix-genai.spotify.net"]
+        TF["Optional AI Gateway<br/>OpenAI-compatible"]
         Claude["Claude Opus/Sonnet"]
         GPT["GPT-5.2 (fallback)"]
         Gemini["Gemini 2.5 Pro (fallback)"]

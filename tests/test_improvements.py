@@ -12,9 +12,9 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-# --- Taskforce model configuration ---
+# --- Gateway model configuration ---
 
-class TestTaskforceModelConfiguration:
+class TestGatewayModelConfiguration:
     def test_supported_model_aliases_are_the_defaults(self):
         from config import CLAUDE_MODEL, CLAUDE_MODEL_COMPLEX, CLAUDE_MODEL_FAST
 
@@ -3260,7 +3260,7 @@ class TestGoalProgress:
         learning._db_conn = tmp_db
         goals_dir = tmp_path / "goals"
         goals_dir.mkdir()
-        (goals_dir / "2026.md").write_text("- Learn Rust programming\n- Ship Bezier MVP\n")
+        (goals_dir / "2026.md").write_text("- Learn Rust programming\n- Ship Example Project MVP\n")
         monkeypatch.setattr("learning.GOALS_DIR", goals_dir)
         try:
             result = learning.check_goal_progress(days=7)
@@ -4087,7 +4087,7 @@ class TestEmailCategorization:
         from actions.gmail_sync import categorize_email
         email = {
             "subject": "Sprint Planning Meeting",
-            "from": "manager@spotify.com",
+            "from": "manager@example.com",
             "snippet": "Let's review the backlog and set our sprint goals",
             "body": "",
         }

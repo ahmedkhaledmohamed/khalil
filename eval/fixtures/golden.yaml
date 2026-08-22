@@ -259,7 +259,7 @@ gmail:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Any Spotify work emails?"
+  - query: "Any work emails from Example Corp?"
     expected_action: email_work
     expected_contains: []
     expected_path: direct_action
@@ -1417,7 +1417,7 @@ appstore:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Show Zia's App Store reviews"
+  - query: "Show Example App's App Store reviews"
     expected_action: appstore_ratings
     expected_contains: []
     expected_path: direct_action
@@ -1443,7 +1443,7 @@ appstore:
     expected_contains: []
     expected_path: direct_action
     complexity: moderate
-  - query: "Zia download stats"
+  - query: "Example App download stats"
     expected_action: appstore_downloads
     expected_contains: []
     expected_path: direct_action
@@ -1459,7 +1459,7 @@ appstore:
     expected_contains: []
     expected_path: direct_action
     complexity: moderate
-  - query: "Any new reviews for Zia?"
+  - query: "Any new reviews for Example App?"
     expected_action: appstore_ratings
     expected_contains: []
     expected_path: direct_action
@@ -2244,7 +2244,7 @@ voice:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Say good morning Ahmed"
+  - query: "Say good morning Alex"
     expected_action: voice_tts
     expected_contains: []
     expected_path: direct_action
@@ -2656,7 +2656,7 @@ fitness:
     complexity: trivial
 
 projects:
-  - query: "What's the status of Tiny Grounds?"
+  - query: "What's the status of Example Project?"
     expected_action: project_status
     expected_contains: []
     expected_path: direct_action
@@ -2666,7 +2666,7 @@ projects:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Update Zia project with new milestone"
+  - query: "Update Example App project with new milestone"
     expected_action: project_update
     expected_contains: []
     expected_path: direct_action
@@ -2746,7 +2746,7 @@ goals:
     expected_contains: []
     expected_path: direct_action
     complexity: trivial
-  - query: "Add a new goal: ship Bezier MVP"
+  - query: "Add a new goal: ship Example Project MVP"
     expected_action: goals_add
     expected_contains: []
     expected_path: direct_action

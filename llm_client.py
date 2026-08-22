@@ -1,7 +1,7 @@
-"""Shared LLM client factory — routes through Taskforce proxy when configured.
+"""Shared LLM client factory — routes through a compatible gateway when configured.
 
 All subsystems (extend, guardian, healing) should use these factories instead
-of creating raw anthropic.Anthropic() clients, which bypass the Taskforce proxy.
+of creating raw provider clients, which bypass shared routing configuration.
 """
 
 import logging
@@ -29,7 +29,7 @@ def _get_api_key() -> str | None:
 def get_llm_client():
     """Get a sync LLM client (for guardian, healing).
 
-    Returns an OpenAI client if Taskforce is configured, else Anthropic.
+    Returns an OpenAI client if a compatible gateway is configured, else Anthropic.
     """
     api_key = _get_api_key()
     if not api_key:
@@ -50,7 +50,7 @@ def get_llm_client():
 def get_async_llm_client():
     """Get an async LLM client (for extend, test generation).
 
-    Returns an AsyncOpenAI client if Taskforce is configured, else AsyncAnthropic.
+    Returns an AsyncOpenAI client if a compatible gateway is configured, else AsyncAnthropic.
     """
     api_key = _get_api_key()
     if not api_key:

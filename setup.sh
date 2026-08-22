@@ -81,7 +81,7 @@ echo "   python3 server.py"
 
 # 8. launchd (always-on) — generate plist from template with real paths
 KHALIL_DIR="$(cd "$(dirname "$0")" && pwd)"
-PERSONAL_REPO="$(dirname "$(dirname "$KHALIL_DIR")")"
+PERSONAL_REPO="${KHALIL_PERSONAL_REPO:-${HOME}/.khalil/workspace}"
 sed -e "s|__KHALIL_DIR__|${KHALIL_DIR}|g" \
     -e "s|__PERSONAL_REPO__|${PERSONAL_REPO}|g" \
     com.khalil.daemon.plist > /tmp/com.khalil.daemon.plist

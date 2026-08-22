@@ -35,8 +35,8 @@ CURATED_RUNS = [
     (4, "20260329_200302.json", "Eval infra", "Latency threshold, runner timeout, screenshot fix"),
     (5, "20260329_202327.json", "Param extraction", "Search term extraction, weather exclusion"),
     (6, "20260405_030054.json", "Production validation", "Full-scope 2,458 cases"),
-    (7, "20260408_162754.json", "Direct-action + generated", "Full generated suite via Taskforce"),
-    (8, "20260408_181456.json", "Frozen baseline (Taskforce)", "851 frozen cases, apples-to-apples"),
+    (7, "20260408_162754.json", "Direct-action + generated", "Full generated suite via configured gateway"),
+    (8, "20260408_181456.json", "Frozen gateway baseline", "851 frozen cases, apples-to-apples"),
 ]
 
 

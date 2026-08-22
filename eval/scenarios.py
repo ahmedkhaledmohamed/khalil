@@ -135,7 +135,7 @@ SCENARIOS: list[Scenario] = [
                 user="What repo am I in?",
                 expect_tools=["shell"],
                 expect_result="response matches actual repo name from tool output",
-                expect_not_contains=["khalil-knowledge", "the-hub"],
+                expect_not_contains=["private-state-repo", "workspace-hub"],
             ),
         ],
         tags=["git", "context-awareness"],
@@ -495,7 +495,7 @@ SCENARIOS: list[Scenario] = [
         description="Search knowledge base, then ask follow-up about results",
         turns=[
             ScenarioTurn(
-                user="What did I write about Bézier in my notes?",
+                user="What did I write about Example Project in my notes?",
                 expect_result="returns content from knowledge base",
             ),
             ScenarioTurn(
