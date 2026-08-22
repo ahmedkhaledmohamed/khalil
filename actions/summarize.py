@@ -17,6 +17,7 @@ SKILL = {
     "name": "summarize",
     "description": "Summarize web pages, PDFs, and YouTube videos into key points",
     "category": "information",
+    "risk": "read",
     "patterns": [
         # YouTube-specific patterns first (more specific than generic URL)
         (r"\bsummar(?:ize|y)\s+(?:this\s+|of\s+(?:this\s+)?)?(?:youtube|video)\b", "summarize_youtube"),
@@ -33,7 +34,7 @@ SKILL = {
     ],
     "actions": [
         {"type": "summarize_url", "handler": "handle_intent", "keywords": "summarize summary tldr key points article page link url", "description": "Summarize a web page"},
-        {"type": "summarize_pdf", "handler": "handle_intent", "keywords": "summarize summary pdf document file", "description": "Summarize a PDF document"},
+        {"type": "summarize_pdf", "handler": "handle_intent", "keywords": "summarize summary pdf document file", "description": "Summarize a PDF document", "risk": "dangerous"},
         {"type": "summarize_youtube", "handler": "handle_intent", "keywords": "summarize summary youtube video tldr", "description": "Summarize a YouTube video"},
     ],
     "examples": [

@@ -248,11 +248,15 @@ class TestFallback:
 # ---------------------------------------------------------------------------
 
 class _Registry:
-    def __init__(self, handler=None):
+    def __init__(self, handler=None, action_type=None):
         self.handler = handler
+        self.action_type = action_type
 
     def get_handler(self, action):
         return self.handler
+
+    def get_action_type(self, action):
+        return self.action_type
 
 
 class _Autonomy:
@@ -262,7 +266,8 @@ class _Autonomy:
         self._needs_approval = needs_approval
         self._rate_limit = rate_limit
 
-    def needs_approval(self, action):
+    def needs_approval(self, action, payload=None, declared_type=None):
+        self.last_approval_check = (action, payload, declared_type)
         return self._needs_approval
 
     def check_rate_limit(self, action):
@@ -427,6 +432,23 @@ class TestTypedExecutionOutcomes:
         assert result.status == ActionStatus.WAITING_FOR_APPROVAL
         assert result.approval == ApprovalDecision.REQUIRED
         assert result.success is False
+
+    def test_registry_classification_reaches_approval_policy(self):
+        from config import ActionType
+
+        async def handler(action, intent, ctx):
+            return True
+
+        autonomy = _Autonomy()
+        registry = _Registry(handler, action_type=ActionType.READ)
+        from execution import ExecutionBus
+        bus = ExecutionBus(lambda: registry, autonomy)
+
+        asyncio.run(bus.execute("demo", {"value": 1}, self._context()))
+
+        assert autonomy.last_approval_check == (
+            "demo", {"value": 1}, ActionType.READ,
+        )
 
     def test_rate_limit_rejection_and_missing_handler_have_distinct_kinds(self):
         from execution import ActionErrorKind, ActionStatus

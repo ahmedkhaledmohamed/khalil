@@ -17,6 +17,7 @@ SKILL = {
     "name": "calorie_tracker",
     "description": "Track daily calories, protein, and meals",
     "category": "health",
+    "risk": "dangerous",
     "patterns": [
         (r"\blog\s+(?:a\s+)?(?:meal|food|snack|breakfast|lunch|dinner)\b", "calorie_log"),
         (r"\bate\s+", "calorie_log"),
@@ -31,9 +32,9 @@ SKILL = {
         (r"\bwhat\s+did\s+I\s+eat\b", "calorie_history"),
     ],
     "actions": [
-        {"type": "calorie_log", "handler": "handle_intent", "keywords": "calorie log meal food eat ate snack breakfast lunch dinner", "description": "Log a meal or food item"},
+        {"type": "calorie_log", "handler": "handle_intent", "keywords": "calorie log meal food eat ate snack breakfast lunch dinner", "description": "Log a meal or food item", "risk": "write"},
         {"type": "calorie_summary", "handler": "handle_intent", "keywords": "calorie summary today total intake nutrition daily", "description": "Daily calorie summary"},
-        {"type": "calorie_goal", "handler": "handle_intent", "keywords": "calorie protein goal set daily target", "description": "Set calorie/protein goals"},
+        {"type": "calorie_goal", "handler": "handle_intent", "keywords": "calorie protein goal set daily target", "description": "Set calorie/protein goals", "risk": "write"},
         {"type": "calorie_history", "handler": "handle_intent", "keywords": "calorie meal history what eat ate food log", "description": "View meal history"},
     ],
     "examples": [

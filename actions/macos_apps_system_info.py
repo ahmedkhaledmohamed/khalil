@@ -20,6 +20,7 @@ SKILL = {
     "name": "macos_apps_system_info",
     "description": "Combined macOS dashboard — running apps and system info in one view",
     "category": "system",
+    "risk": "read",
     "patterns": [
         (r"\b(?:system|mac)\s+(?:dashboard|overview|summary)\b", "macos_apps_system_info"),
         (r"\bhow'?s?\s+my\s+(?:mac|machine|computer)\b", "macos_apps_system_info"),

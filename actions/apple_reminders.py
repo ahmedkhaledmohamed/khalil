@@ -14,6 +14,7 @@ SKILL = {
     "name": "apple_reminders",
     "description": "Read and sync reminders with Apple Reminders.app",
     "category": "productivity",
+    "risk": "write",
     "patterns": [
         (r"\badd\s+(?:to\s+)?(?:apple|icloud)\s+reminder", "icloud_reminder"),
         (r"\b(?:apple|icloud)\s+reminder", "icloud_reminder"),

@@ -17,6 +17,7 @@ SKILL = {
     "name": "macos",
     "description": "macOS system awareness — running apps, system info, screenshots, Spotlight search, browser tabs",
     "category": "system",
+    "risk": "read",
     "patterns": [
         (r"\b(?:what|which)\s+(?:apps?|processes?|programs?)\s+(?:are\s+)?(?:running|open)\b", "macos_apps"),
         (r"\b(?:running|open)\b.*\b(?:on\s+my\s+(?:mac|machine|computer)|right\s+now)\b", "macos_apps"),
@@ -38,12 +39,13 @@ SKILL = {
     ],
     "actions": [
         {"type": "macos_apps", "handler": "handle_intent", "keywords": "running apps processes programs open mac", "description": "List running applications"},
-        {"type": "macos_frontmost", "handler": "handle_intent", "keywords": "frontmost active focused app window", "description": "Get frontmost app and window"},
+        {"type": "macos_frontmost", "handler": "handle_intent", "keywords": "frontmost active focused app window", "description": "Get frontmost app and window", "risk": "dangerous"},
         {"type": "macos_system_info", "handler": "handle_intent", "keywords": "battery cpu memory ram storage system info status", "description": "System info (battery, storage, CPU)"},
-        {"type": "screenshot", "handler": "handle_intent", "keywords": "screenshot capture screen window", "description": "Take a screenshot"},
+        {"type": "screenshot", "handler": "handle_intent", "keywords": "screenshot capture screen window", "description": "Take a screenshot", "risk": "dangerous"},
         {"type": "spotlight", "handler": "handle_intent", "keywords": "find search locate file spotlight", "description": "Search files via Spotlight",
          "parameters": {"query": {"type": "string", "description": "File name or content to search for"}}},
         {"type": "macos_browser_tabs", "handler": "handle_intent", "keywords": "browser tabs safari chrome open list", "description": "List browser tabs",
+         "risk": "dangerous",
          "parameters": {"browser": {"type": "string", "description": "Browser name", "enum": ["Safari", "Google Chrome"]}}},
     ],
     "examples": ["What apps are running?", "Take a screenshot", "Find my resume file"],

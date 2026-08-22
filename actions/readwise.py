@@ -22,6 +22,7 @@ SKILL = {
     "name": "readwise",
     "description": "Readwise — highlights, books, and daily review",
     "category": "reading",
+    "risk": "dangerous",
     "patterns": [
         (r"\breadwise\b", "readwise_highlights"),
         (r"\bbook\s+highlights?\b", "readwise_highlights"),

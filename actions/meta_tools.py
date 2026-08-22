@@ -12,6 +12,7 @@ SKILL = {
     "name": "meta_tools",
     "description": "Meta-tools for the tool-use loop (clarification, search)",
     "category": "system",
+    "risk": "read",
     "patterns": [],  # No regex patterns — these are LLM-only tools
     "actions": [
         {

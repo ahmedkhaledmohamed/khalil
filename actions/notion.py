@@ -24,6 +24,7 @@ SKILL = {
     "name": "notion",
     "description": "Notion — search pages, create pages, query databases",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bsearch\s+(?:my\s+)?notion\b", "notion_search"),
         (r"\bfind\s+in\s+notion\b", "notion_search"),
@@ -35,7 +36,7 @@ SKILL = {
     ],
     "actions": [
         {"type": "notion_search", "handler": "handle_intent", "keywords": "notion search find pages notes", "description": "Search Notion pages"},
-        {"type": "notion_create", "handler": "handle_intent", "keywords": "notion create page new", "description": "Create a Notion page"},
+        {"type": "notion_create", "handler": "handle_intent", "keywords": "notion create page new", "description": "Create a Notion page", "risk": "write"},
     ],
     "examples": ["Search my Notion for project ideas", "Create a Notion page"],
 }

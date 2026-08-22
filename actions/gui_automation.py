@@ -17,6 +17,7 @@ SKILL = {
     "name": "gui_automation",
     "description": "macOS GUI automation — click, type, window tiling, region screenshots",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\bclick\s+(?:at|on)\s+\d+", "gui_click"),
         (r"\bclick\s+(?:the\s+)?\w+\s+button\b", "gui_click"),
@@ -33,7 +34,7 @@ SKILL = {
         {"type": "gui_click", "handler": "handle_intent", "keywords": "click mouse tap press button coordinates", "description": "Click at coordinates or on element"},
         {"type": "gui_type", "handler": "handle_intent", "keywords": "type text keyboard input write field", "description": "Type text via keyboard"},
         {"type": "gui_window", "handler": "handle_intent", "keywords": "tile window move resize left right side fullscreen arrange", "description": "Window management and tiling"},
-        {"type": "gui_screenshot_region", "handler": "handle_intent", "keywords": "screenshot capture region area portion screen", "description": "Screenshot a specific screen region"},
+        {"type": "gui_screenshot_region", "handler": "handle_intent", "keywords": "screenshot capture region area portion screen", "description": "Screenshot a specific screen region", "risk": "dangerous"},
     ],
     "examples": [
         "Click at 500, 300",

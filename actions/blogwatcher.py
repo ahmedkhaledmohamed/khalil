@@ -18,6 +18,7 @@ SKILL = {
     "name": "blogwatcher",
     "description": "Subscribe to RSS/blog feeds, check for new posts, and get digests",
     "category": "information",
+    "risk": "write",
     "patterns": [
         (r"\badd\s+(?:this\s+)?(?:rss|feed|blog)\b", "blog_add"),
         (r"\bsubscribe\s+(?:to\s+)?(?:this\s+)?(?:rss|feed|blog)\b", "blog_add"),
@@ -31,8 +32,8 @@ SKILL = {
     ],
     "actions": [
         {"type": "blog_add", "handler": "handle_intent", "keywords": "add subscribe follow rss feed blog", "description": "Subscribe to an RSS feed"},
-        {"type": "blog_check", "handler": "handle_intent", "keywords": "check new posts articles feeds blog", "description": "Check feeds for new posts"},
-        {"type": "blog_list", "handler": "handle_intent", "keywords": "list feeds subscriptions blogs rss", "description": "List feed subscriptions"},
+        {"type": "blog_check", "handler": "handle_intent", "keywords": "check new posts articles feeds blog", "description": "Check feeds for new posts", "risk": "read"},
+        {"type": "blog_list", "handler": "handle_intent", "keywords": "list feeds subscriptions blogs rss", "description": "List feed subscriptions", "risk": "read"},
         {"type": "blog_remove", "handler": "handle_intent", "keywords": "remove unsubscribe delete feed blog", "description": "Unsubscribe from a feed"},
     ],
     "examples": [

@@ -27,6 +27,7 @@ SKILL = {
     "name": "fitness_sync",
     "description": "Sync Fitbit or Garmin health data",
     "category": "health",
+    "risk": "dangerous",
     "patterns": [
         (r"\bsync\s+(?:my\s+)?(?:fitbit|garmin)\b", "fitness_sync"),
         (r"\bfitbit\s+(?:data|sync|steps|sleep|heart)\b", "fitness_sync_fitbit"),

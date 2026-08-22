@@ -21,6 +21,7 @@ SKILL = {
     "name": "home_assistant",
     "description": "Control smart home devices via Home Assistant",
     "category": "home",
+    "risk": "write",
     "patterns": [
         (r"\bhome\s+assistant\b", "ha_status"),
         (r"\bha\s+(?:status|devices?|entities)\b", "ha_status"),
@@ -33,7 +34,7 @@ SKILL = {
         (r"\bha\s+automations?\b", "ha_automations"),
     ],
     "actions": [
-        {"type": "ha_status", "handler": "handle_intent", "keywords": "home assistant status devices entities states", "description": "Show HA device status"},
+        {"type": "ha_status", "handler": "handle_intent", "keywords": "home assistant status devices entities states", "description": "Show HA device status", "risk": "read"},
         {"type": "ha_toggle", "handler": "handle_intent", "keywords": "home assistant turn on off toggle switch device", "description": "Toggle a device"},
         {"type": "ha_service", "handler": "handle_intent", "keywords": "home assistant call service action", "description": "Call an HA service"},
         {"type": "ha_scenes", "handler": "handle_intent", "keywords": "home assistant scene activate", "description": "Activate an HA scene"},

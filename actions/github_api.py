@@ -20,6 +20,7 @@ SKILL = {
     "name": "github_api",
     "description": "GitHub notifications, pull requests, and issue management",
     "category": "development",
+    "risk": "read",
     "patterns": [
         (r"\bcreate\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
         (r"\bopen\s+(?:a\s+)?(?:github\s+)?issue\b", "github_create_issue"),
@@ -42,9 +43,10 @@ SKILL = {
     "actions": [
         {"type": "github_notifications", "handler": "handle_intent", "keywords": "github notifications unread alerts", "description": "Check unread GitHub notifications"},
         {"type": "github_prs", "handler": "handle_intent", "keywords": "github pull requests prs open review", "description": "List open pull requests"},
-        {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue"},
+        {"type": "github_create_issue", "handler": "handle_intent", "keywords": "github create new issue file open bug", "description": "Create a new GitHub issue", "risk": "write"},
         {
             "type": "github_merge_pr", "handler": "handle_intent",
+            "risk": "dangerous",
             "keywords": "github merge pr pull request squash",
             "description": "Merge a pull request (squash merge)",
             "parameters": {
@@ -54,6 +56,7 @@ SKILL = {
         },
         {
             "type": "github_create_pr", "handler": "handle_intent",
+            "risk": "write",
             "keywords": "github create open pr pull request branch",
             "description": "Create a new pull request",
             "parameters": {

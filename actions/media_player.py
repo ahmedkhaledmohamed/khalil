@@ -15,6 +15,7 @@ SKILL = {
     "name": "media_player",
     "description": "Play local audio and video files",
     "category": "media",
+    "risk": "write",
     "patterns": [
         (r"\bplay\s+(?:the\s+)?(?:file|audio|video|mp3|wav|mp4|m4a)\b", "media_play"),
         (r"\bplay\s+(?:the\s+)?(?:song|track|music)\s+(?:file|from)\b", "media_play"),
@@ -27,7 +28,7 @@ SKILL = {
     "actions": [
         {"type": "media_play", "handler": "handle_intent", "keywords": "play audio video file mp3 wav mp4 song music media", "description": "Play a media file"},
         {"type": "media_stop", "handler": "handle_intent", "keywords": "stop audio playback media", "description": "Stop playback"},
-        {"type": "media_list", "handler": "handle_intent", "keywords": "list audio music media files", "description": "List media files"},
+        {"type": "media_list", "handler": "handle_intent", "keywords": "list audio music media files", "description": "List media files", "risk": "read"},
     ],
     "examples": [
         "Play the file music.mp3",

@@ -22,6 +22,7 @@ SKILL = {
     "name": "ai_media",
     "description": "AI media generation — create images, videos, and audio using open-source models",
     "category": "creative",
+    "risk": "write",
     "patterns": [
         (r"\b(?:generate|create|make|draw|paint|render)\b.*\b(?:image|photo|picture|illustration|artwork)\b", "generate_image"),
         (r"\b(?:generate|create|make|render)\b.*\b(?:video|clip|animation)\b", "generate_video"),

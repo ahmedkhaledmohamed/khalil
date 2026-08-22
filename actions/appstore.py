@@ -29,6 +29,7 @@ SKILL = {
     "name": "appstore",
     "description": "App Store Connect — ratings, reviews, and download stats",
     "category": "apps",
+    "risk": "read",
     "patterns": [
         (r"\bapp\s+store\s+(?:rating|reviews?)\b", "appstore_ratings"),
         (r"\bzia\s+(?:rating|reviews?)\b", "appstore_ratings"),

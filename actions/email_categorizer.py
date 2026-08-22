@@ -37,6 +37,7 @@ SKILL = {
     "name": "email_categorizer",
     "description": "Categorize and label Gmail inbox emails using AI classification",
     "category": "productivity",
+    "risk": "write",
     "patterns": [
         (r"\b(?:categoriz|label|organiz|sort)\w*\s+(?:my\s+)?(?:email|inbox|mail)\b", "label"),
         (r"\b(?:email|inbox|mail)\w*\s+.*\b(?:categoriz|label|organiz|sort)\b", "label"),

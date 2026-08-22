@@ -22,6 +22,7 @@ SKILL = {
     "name": "spotify",
     "description": "Spotify playback — now playing, recently played, top tracks and artists",
     "category": "media",
+    "risk": "read",
     "patterns": [
         (r"\b(?:what'?s\s+playing|now\s+playing|current\s+(?:song|track))\b", "spotify_now"),
         (r"\b(?:what\s+am\s+i|what'?s)\s+(?:listening|playing)\b", "spotify_now"),

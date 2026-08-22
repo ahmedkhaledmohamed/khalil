@@ -27,6 +27,7 @@ SKILL = {
     "name": "slack_read_slack_send",
     "description": "Read Slack channels and send messages — combined read+send workflow",
     "category": "communication",
+    "risk": "dangerous",
     "patterns": [
         (r"\bread\b.*\bslack\b.*\b(?:and|then)\b.*\b(?:send|reply|respond)\b", "slack_read_send"),
         (r"\bslack\b.*\bread\b.*\b(?:send|reply)\b", "slack_read_send"),

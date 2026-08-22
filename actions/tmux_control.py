@@ -15,6 +15,7 @@ SKILL = {
     "name": "tmux_control",
     "description": "Manage tmux sessions — list, create, kill, send commands, read output",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\btmux\s+(?:session|list|ls)\b", "tmux_list"),
         (r"\blist\s+(?:my\s+)?(?:tmux\s+)?sessions?\b", "tmux_list"),
@@ -30,11 +31,11 @@ SKILL = {
         (r"\bkill\s+(?:the\s+)?\w+\s+(?:tmux\s+)?session\b", "tmux_kill"),
     ],
     "actions": [
-        {"type": "tmux_list", "handler": "handle_intent", "keywords": "tmux session list sessions running", "description": "List tmux sessions"},
+        {"type": "tmux_list", "handler": "handle_intent", "keywords": "tmux session list sessions running", "description": "List tmux sessions", "risk": "read"},
         {"type": "tmux_send", "handler": "handle_intent", "keywords": "tmux send run command session execute", "description": "Send command to a tmux session"},
-        {"type": "tmux_read", "handler": "handle_intent", "keywords": "tmux read output capture screen show", "description": "Read tmux pane output"},
+        {"type": "tmux_read", "handler": "handle_intent", "keywords": "tmux read output capture screen show", "description": "Read tmux pane output", "risk": "dangerous"},
         {"type": "tmux_create", "handler": "handle_intent", "keywords": "tmux create new start session", "description": "Create a new tmux session"},
-        {"type": "tmux_kill", "handler": "handle_intent", "keywords": "tmux kill close stop destroy session", "description": "Kill a tmux session"},
+        {"type": "tmux_kill", "handler": "handle_intent", "keywords": "tmux kill close stop destroy session", "description": "Kill a tmux session", "risk": "dangerous"},
     ],
     "examples": [
         "List my tmux sessions",

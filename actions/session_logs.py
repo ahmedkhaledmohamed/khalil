@@ -16,6 +16,7 @@ SKILL = {
     "name": "session_logs",
     "description": "Search conversation history, recall past interactions, and view usage stats",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bwhat\s+did\s+I\s+(?:ask|say|tell)\b", "session_recall"),
         (r"\bsearch\s+(?:my\s+)?(?:history|conversations?|chat)\b", "session_search"),

@@ -317,6 +317,7 @@ SKILL = {{
     "name": "{name}",
     "description": "{description}",
     "category": "extension",
+    "risk": "write",
     "patterns": [
         (r"\\b(?:add|create|new)\\s+{name}", "{name}_add"),
         (r"\\b(?:list|show|all)\\s+{name}", "{name}_list"),
@@ -324,8 +325,8 @@ SKILL = {{
     ],
     "actions": [
         {{"type": "{name}_add", "handler": "cmd_{command}", "description": "Add a {name} entry", "keywords": "add create new {name}"}},
-        {{"type": "{name}_list", "handler": "cmd_{command}", "description": "List {name} entries", "keywords": "list show all {name}"}},
-        {{"type": "{name}_remove", "handler": "cmd_{command}", "description": "Remove a {name} entry", "keywords": "remove delete {name}"}},
+        {{"type": "{name}_list", "handler": "cmd_{command}", "description": "List {name} entries", "keywords": "list show all {name}", "risk": "read"}},
+        {{"type": "{name}_remove", "handler": "cmd_{command}", "description": "Remove a {name} entry", "keywords": "remove delete {name}", "risk": "dangerous"}},
     ],
     "examples": ["Add a new {name}", "Show all {name}s", "Remove {name}"],
 }}
@@ -398,6 +399,7 @@ SKILL = {{
     "name": "{name}",
     "description": "{description}",
     "category": "extension",
+    "risk": "dangerous",
     "patterns": [
         (r"\\b{name}\\b", "{name}"),
     ],
@@ -440,12 +442,13 @@ SKILL = {{
     "name": "{name}",
     "description": "{description}",
     "category": "extension",
+    "risk": "write",
     "patterns": [
         (r"\\b{name}\\s+(?:status|check)", "{name}_status"),
         (r"\\b(?:poll|refresh)\\s+{name}", "{name}_poll"),
     ],
     "actions": [
-        {{"type": "{name}_status", "handler": "cmd_{command}", "description": "Check {name} status", "keywords": "status check {name}"}},
+        {{"type": "{name}_status", "handler": "cmd_{command}", "description": "Check {name} status", "keywords": "status check {name}", "risk": "read"}},
         {{"type": "{name}_poll", "handler": "cmd_{command}", "description": "Run {name} poll", "keywords": "poll refresh {name}"}},
     ],
     "examples": ["Check {name} status", "Poll {name}"],
@@ -626,6 +629,7 @@ SKILL = {
     "name": "MODULE_NAME",
     "description": "ACTION_DESCRIPTION",
     "category": "extension",
+    "risk": "dangerous",
     "patterns": [
         # Add regex patterns that match user intent to action types
         # (r"pattern here", "action_type"),
@@ -723,6 +727,7 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         '    "name": "module_name",\n'
         '    "description": "One-line description of what this does",\n'
         '    "category": "extension",\n'
+        '    "risk": "read|write|dangerous",\n'
         '    "patterns": [\n'
         '        (r"regex pattern matching user intent", "action_type"),\n'
         "    ],\n"
@@ -737,6 +742,10 @@ async def generate_action_module(spec: dict, ask_llm_fn) -> tuple[str, str]:
         '    "examples": ["Example user query 1", "Example user query 2"],\n'
         "}\n"
         "```\n"
+        "Set the top-level risk to read, write, or dangerous. Sensitive reads "
+        "(credentials, messages, private documents, screenshots) and destructive "
+        "or external actions are dangerous. Override risk on individual actions "
+        "when they differ from the skill default.\n"
         "Include 3-5 regex patterns covering common ways users would ask for this capability.\n\n"
         "**REUSE EXISTING CODE**:\n"
         "Import from existing actions/ modules when possible instead of reimplementing.\n"
@@ -827,6 +836,7 @@ def _build_coding_agent_prompt(spec: dict) -> str:
         f'    "name": "{name}",\n'
         f'    "description": "{spec["description"]}",\n'
         '    "category": "extension",\n'
+        '    "risk": "dangerous",  # change only after reviewing action effects\n'
         '    "patterns": [\n'
         '        # 3-5 regex patterns matching natural language intent\n'
         f'        (r"regex matching user query", "{name}"),\n'

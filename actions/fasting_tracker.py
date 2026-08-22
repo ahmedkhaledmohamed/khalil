@@ -17,6 +17,7 @@ SKILL = {
     "name": "fasting_tracker",
     "description": "Track intermittent fasting windows and streaks",
     "category": "health",
+    "risk": "dangerous",
     "patterns": [
         (r"\bstart\s+(?:a\s+)?fast(?:ing)?\b", "fasting_start"),
         (r"\bbegin\s+fast(?:ing)?\b", "fasting_start"),
@@ -30,8 +31,8 @@ SKILL = {
         (r"\bfasting\s+streak\b", "fasting_history"),
     ],
     "actions": [
-        {"type": "fasting_start", "handler": "handle_intent", "keywords": "fasting start begin intermittent fast", "description": "Start a fast"},
-        {"type": "fasting_stop", "handler": "handle_intent", "keywords": "fasting stop end break fast eating", "description": "End a fast"},
+        {"type": "fasting_start", "handler": "handle_intent", "keywords": "fasting start begin intermittent fast", "description": "Start a fast", "risk": "write"},
+        {"type": "fasting_stop", "handler": "handle_intent", "keywords": "fasting stop end break fast eating", "description": "End a fast", "risk": "write"},
         {"type": "fasting_status", "handler": "handle_intent", "keywords": "fasting status how long current timer", "description": "Check fasting status"},
         {"type": "fasting_history", "handler": "handle_intent", "keywords": "fasting history streak record past", "description": "View fasting history"},
     ],

@@ -12,6 +12,7 @@ SKILL = {
     "name": "sync",
     "description": "Sync and index knowledge sources — email, Notion, documents, work repos",
     "category": "knowledge",
+    "risk": "write",
     "patterns": [
         (r"\b(?:sync|ingest|index|reindex)\s+(?:all|knowledge|sources?|documents?|everything)\b", "sync_all"),
         (r"\b(?:sync|ingest|index)\s+(?:my\s+)?(?:work|repos?|directories|docs)\b", "sync_all"),

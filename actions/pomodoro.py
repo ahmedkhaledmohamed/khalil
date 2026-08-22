@@ -17,6 +17,7 @@ SKILL = {
     "name": "pomodoro",
     "description": "Pomodoro focus timer with work/break cycles",
     "category": "productivity",
+    "risk": "write",
     "patterns": [
         # Specific patterns first — order matters
         (r"\bpomodoro\s+(?:status|timer)\b", "pomodoro_status"),
@@ -32,8 +33,8 @@ SKILL = {
     "actions": [
         {"type": "pomodoro_start", "handler": "handle_intent", "keywords": "pomodoro focus timer start session work concentrate", "description": "Start a focus session"},
         {"type": "pomodoro_stop", "handler": "handle_intent", "keywords": "pomodoro focus stop cancel end timer", "description": "Stop focus session"},
-        {"type": "pomodoro_status", "handler": "handle_intent", "keywords": "pomodoro focus status timer current remaining", "description": "Check focus timer status"},
-        {"type": "pomodoro_history", "handler": "handle_intent", "keywords": "pomodoro focus history stats today sessions count", "description": "View focus session history"},
+        {"type": "pomodoro_status", "handler": "handle_intent", "keywords": "pomodoro focus status timer current remaining", "description": "Check focus timer status", "risk": "read"},
+        {"type": "pomodoro_history", "handler": "handle_intent", "keywords": "pomodoro focus history stats today sessions count", "description": "View focus session history", "risk": "read"},
     ],
     "examples": [
         "Start a pomodoro",

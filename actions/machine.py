@@ -19,6 +19,7 @@ SKILL = {
     "name": "machine",
     "description": "Machine control — terminals, coding-agent processes, system info, GUI automation",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\b(?:list|show|what)\b.*\b(?:terminal|session)s?\b", "list_sessions"),
         (r"\bread\s+(?:the\s+)?(?:terminal|output|screen)\b", "read_terminal"),
@@ -39,12 +40,14 @@ SKILL = {
     "actions": [
         {
             "type": "list_sessions",
+            "risk": "read",
             "handler": "handle_intent",
             "keywords": "terminal sessions tabs list iterm tmux running",
             "description": "List all terminal sessions (iTerm2 + tmux) with running processes",
         },
         {
             "type": "read_terminal",
+            "risk": "dangerous",
             "handler": "handle_intent",
             "keywords": "read terminal output screen content tty session",
             "description": "Read recent output from a terminal session by TTY or tmux session name",
@@ -55,24 +58,28 @@ SKILL = {
         },
         {
             "type": "claude_code_status",
+            "risk": "read",
             "handler": "handle_intent",
             "keywords": "claude code session process running waiting active idle cwd",
             "description": "Show Codex and Claude Code processes with CWD, TTY, and state",
         },
         {
             "type": "system_info",
+            "risk": "read",
             "handler": "handle_intent",
             "keywords": "system info battery storage cpu memory apps running",
             "description": "System info: battery, storage, running apps",
         },
         {
             "type": "frontmost_app",
+            "risk": "dangerous",
             "handler": "handle_intent",
             "keywords": "frontmost active focused app window title",
             "description": "Currently focused app and window title",
         },
         {
             "type": "screenshot",
+            "risk": "dangerous",
             "handler": "handle_intent",
             "keywords": "screenshot capture screen",
             "description": "Capture a screenshot of the screen",

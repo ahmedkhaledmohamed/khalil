@@ -17,6 +17,7 @@ SKILL = {
     "name": "synthesis",
     "description": "Cross-source synthesis — meeting prep, daily focus, weekly review, topic briefs",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bprep\s+(?:me\s+)?(?:for|my)\b.*\b(?:meeting|1[:\-]1|one.on.one)\b", "meeting_prep"),
         (r"\b(?:daily\s+focus|what\s+should\s+i\s+focus)\b", "daily_focus"),

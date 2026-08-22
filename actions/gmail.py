@@ -26,6 +26,7 @@ SKILL = {
     "name": "gmail",
     "description": "Gmail integration — search, draft, and send emails",
     "category": "communication",
+    "risk": "dangerous",
     "patterns": [
         (r"\bemail\b.*\babout\b", "email"),
         (r"\bsend\s+(?:an?\s+)?email\b", "email"),

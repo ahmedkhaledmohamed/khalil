@@ -20,6 +20,7 @@ SKILL = {
     "name": "clipboard",
     "description": "Clipboard history — search and recall recent copies",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bclipboard\s+history\b", "clipboard_history"),
         (r"\brecent\s+(?:clipboard|copies|copied)\b", "clipboard_history"),

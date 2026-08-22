@@ -18,6 +18,7 @@ SKILL = {
     "name": "expense_tracker",
     "description": "Track expenses, set budgets, view spending reports",
     "category": "finance",
+    "risk": "dangerous",
     "patterns": [
         (r"\bspent\s+\$?\d+", "expense_log"),
         (r"\bbought\s+", "expense_log"),

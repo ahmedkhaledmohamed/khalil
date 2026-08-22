@@ -27,6 +27,7 @@ SKILL = {
     "name": "gap_github_auth_setup",
     "description": "GitHub authentication — store, verify, and manage Personal Access Tokens",
     "category": "extension",
+    "risk": "dangerous",
     "patterns": [
         (r"\b(?:set\s*up|setup|configure|add)\s+(?:github|gh)\s+(?:token|auth|pat)", "ghauth_setup"),
         (r"\bgithub\s+(?:auth|authentication|token)\s+(?:setup|configure|status)", "ghauth_status"),

@@ -32,6 +32,7 @@ SKILL = {
     "name": "linkedin",
     "description": "LinkedIn — recruiter messages, job search, profile views",
     "category": "career",
+    "risk": "dangerous",
     "patterns": [
         (r"\blinkedin\s+(?:messages?|inmail)\b", "linkedin_messages"),
         (r"\brecruiter\s+messages?\b", "linkedin_messages"),
@@ -44,7 +45,7 @@ SKILL = {
     ],
     "actions": [
         {"type": "linkedin_messages", "handler": "handle_intent", "keywords": "linkedin messages recruiter inmail", "description": "Recruiter messages"},
-        {"type": "linkedin_jobs", "handler": "handle_intent", "keywords": "linkedin jobs search openings", "description": "Job search"},
+        {"type": "linkedin_jobs", "handler": "handle_intent", "keywords": "linkedin jobs search openings", "description": "Job search", "risk": "read"},
         {"type": "linkedin_profile", "handler": "handle_intent", "keywords": "linkedin profile views", "description": "Profile views"},
     ],
     "examples": ["LinkedIn messages", "Search LinkedIn jobs", "Profile views"],

@@ -15,6 +15,7 @@ SKILL = {
     "name": "reminders",
     "description": "Local reminders stored in SQLite, delivered via Telegram push",
     "category": "productivity",
+    "risk": "write",
     "command": "remind",
     "patterns": [
         # List/show patterns first (more specific)
@@ -33,7 +34,7 @@ SKILL = {
     "actions": [
         {"type": "reminder", "handler": "handle_intent", "keywords": "remind reminder set forget", "description": "Create a reminder",
          "parameters": {"text": {"type": "string", "description": "What to be reminded about"}, "time": {"type": "string", "description": "When to remind (e.g., 'in 2 hours', 'tomorrow 9am')"}}},
-        {"type": "reminder_list", "handler": "handle_intent", "keywords": "show list reminders upcoming pending active what", "description": "List active reminders"},
+        {"type": "reminder_list", "handler": "handle_intent", "keywords": "show list reminders upcoming pending active what", "description": "List active reminders", "risk": "read"},
     ],
     "examples": ["Remind me to call Sarah in 2 hours", "What are my reminders?", "Show my reminders"],
     "sensor": {"function": "sense_reminders", "interval_min": 5, "identify_opportunities": "identify_reminder_opportunities"},

@@ -22,6 +22,7 @@ SKILL = {
     "name": "workflows",
     "description": "Cross-skill workflow orchestration — run multi-step routines",
     "category": "productivity",
+    "risk": "write",
     "patterns": [
         (r"\bstart\s+(?:my\s+)?focus\s+(?:routine|mode|session)\b", "workflow_run"),
         (r"\bfocus\s+routine\b", "workflow_run"),
@@ -34,8 +35,8 @@ SKILL = {
         (r"\bcreate\s+(?:a\s+)?(?:workflow|routine)\b", "workflow_create"),
     ],
     "actions": [
-        {"type": "workflow_run", "handler": "handle_intent", "keywords": "workflow routine start run focus morning wind down", "description": "Run a workflow/routine"},
-        {"type": "workflow_list", "handler": "handle_intent", "keywords": "workflow routine list show", "description": "List available workflows"},
+        {"type": "workflow_run", "handler": "handle_intent", "keywords": "workflow routine start run focus morning wind down", "description": "Run a workflow/routine", "risk": "dangerous"},
+        {"type": "workflow_list", "handler": "handle_intent", "keywords": "workflow routine list show", "description": "List available workflows", "risk": "read"},
         {"type": "workflow_create", "handler": "handle_intent", "keywords": "workflow routine create new add", "description": "Create a custom workflow"},
     ],
     "examples": [
