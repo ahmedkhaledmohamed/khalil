@@ -23,6 +23,7 @@ SKILL = {
     "name": "apple_music_play_item_media_play",
     "description": "Unified play command — searches Apple Music library first, falls back to local files",
     "category": "extension",
+    "risk": "write",
     "patterns": [
         (r"\bplay\s+(.+)", "play"),
         (r"\b(?:listen\s+to|put\s+on)\s+(.+)", "play"),
@@ -31,8 +32,8 @@ SKILL = {
     ],
     "actions": [
         {"type": "play", "handler": "handle_play", "description": "Play a song from Apple Music or local files", "keywords": "play music song listen track"},
-        {"type": "play_search", "handler": "handle_play", "description": "Search for music across sources", "keywords": "search music find song"},
-        {"type": "play_history", "handler": "handle_play", "description": "Show recent play history", "keywords": "play history recent songs"},
+        {"type": "play_search", "handler": "handle_play", "description": "Search for music across sources", "keywords": "search music find song", "risk": "read"},
+        {"type": "play_history", "handler": "handle_play", "description": "Show recent play history", "keywords": "play history recent songs", "risk": "read"},
     ],
     "examples": ["Play Bohemian Rhapsody", "Search for Beatles songs", "Play history"],
 }

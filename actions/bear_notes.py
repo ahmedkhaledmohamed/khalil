@@ -19,6 +19,7 @@ SKILL = {
     "name": "bear_notes",
     "description": "Search, read, and create Bear notes",
     "category": "knowledge",
+    "risk": "dangerous",
     "patterns": [
         (r"\bbear\s+note", "bear_search"),
         (r"\bsearch\s+bear\b", "bear_search"),
@@ -34,7 +35,7 @@ SKILL = {
     "actions": [
         {"type": "bear_search", "handler": "handle_intent", "keywords": "bear notes search find note", "description": "Search Bear notes"},
         {"type": "bear_list", "handler": "handle_intent", "keywords": "bear notes list recent", "description": "List recent Bear notes"},
-        {"type": "bear_create", "handler": "handle_intent", "keywords": "bear notes create new write", "description": "Create a Bear note"},
+        {"type": "bear_create", "handler": "handle_intent", "keywords": "bear notes create new write", "description": "Create a Bear note", "risk": "write"},
         {"type": "bear_read", "handler": "handle_intent", "keywords": "bear notes read show content", "description": "Read a Bear note"},
         {"type": "bear_tags", "handler": "handle_intent", "keywords": "bear notes tags categories", "description": "List Bear tags"},
     ],

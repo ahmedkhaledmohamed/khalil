@@ -14,6 +14,7 @@ SKILL = {
     "name": "apple_notes",
     "description": "Search, read, create, and append to Apple Notes",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bapple\s+notes?\b", "apple_notes_search"),
         (r"\bnotes?\s+app\b", "apple_notes_search"),
@@ -31,8 +32,8 @@ SKILL = {
     "actions": [
         {"type": "apple_notes_search", "handler": "handle_intent", "keywords": "apple notes search find note", "description": "Search Apple Notes"},
         {"type": "apple_notes_list", "handler": "handle_intent", "keywords": "apple notes list recent show", "description": "List recent Apple Notes"},
-        {"type": "apple_notes_create", "handler": "handle_intent", "keywords": "apple notes create new jot note write", "description": "Create a new Apple Note"},
-        {"type": "apple_notes_append", "handler": "handle_intent", "keywords": "apple notes append add update", "description": "Append to an existing Apple Note"},
+        {"type": "apple_notes_create", "handler": "handle_intent", "keywords": "apple notes create new jot note write", "description": "Create a new Apple Note", "risk": "write"},
+        {"type": "apple_notes_append", "handler": "handle_intent", "keywords": "apple notes append add update", "description": "Append to an existing Apple Note", "risk": "write"},
     ],
     "examples": [
         "Search my notes for meeting ideas",

@@ -188,21 +188,24 @@ class AutonomyController:
         log.info("Archived %d audit log entries to %s", count, archive_path.name)
         return count
 
-    def classify_action(self, action_name: str) -> ActionType:
-        """Classify an action into read/write/dangerous.
+    def classify_action(
+        self,
+        action_name: str,
+        payload: dict | None = None,
+        declared_type: ActionType | None = None,
+    ) -> ActionType:
+        """Return an action's intrinsic read/write/dangerous classification.
 
-        #21: If a WRITE action has been promoted via trust score (50+ consecutive
-        successes), treat it as READ (auto-execute without approval).
+        Registered skills provide ``declared_type`` from their manifests. Unknown
+        actions fail closed as dangerous. Trust affects approval policy, never the
+        intrinsic classification.
         """
-        base = ACTION_RULES.get(action_name, ActionType.WRITE)
-        # Never auto-promote DANGEROUS actions
-        if base == ActionType.DANGEROUS:
-            return base
-        # Check trust promotion: WRITE → READ after 50 successes
-        trust = self._trust_scores.get(action_name)
-        if trust and trust.get("promoted") and base == ActionType.WRITE:
-            return ActionType.READ
-        return base
+        if action_name == "shell" and payload and payload.get("command"):
+            from actions.shell import classify_command
+            return classify_command(payload["command"])
+        if declared_type is not None:
+            return declared_type
+        return ACTION_RULES.get(action_name, ActionType.DANGEROUS)
 
     # --- #21: Trust Score Tracking ---
 
@@ -275,9 +278,14 @@ class AutonomyController:
                 break
         return True, ""
 
-    def needs_approval(self, action_name: str, payload: dict | None = None) -> bool:
+    def needs_approval(
+        self,
+        action_name: str,
+        payload: dict | None = None,
+        declared_type: ActionType | None = None,
+    ) -> bool:
         """Check if an action needs user approval given current autonomy level."""
-        action_type = self.classify_action(action_name)
+        action_type = self.classify_action(action_name, payload, declared_type)
         effective_level = self._effective_level()
 
         # Hard guardrails always need approval
@@ -290,6 +298,9 @@ class AutonomyController:
         elif action_type == ActionType.READ:
             needs = False
             reason = "read_auto_approved"
+        elif self._trust_scores.get(action_name, {}).get("promoted"):
+            needs = False
+            reason = "trusted_write"
         elif effective_level == AutonomyLevel.SUPERVISED:
             needs = True
             reason = "supervised_mode"

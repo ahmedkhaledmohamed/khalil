@@ -13,6 +13,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from config import ActionType
+
 log = logging.getLogger("khalil.skills")
 
 _ACTIONS_DIR = Path(__file__).parent / "actions"
@@ -117,6 +119,13 @@ class SkillRegistry:
             return None
         action_info = skill.actions.get(action_type, {})
         return action_info.get("handler")
+
+    def get_action_type(self, action_type: str) -> ActionType | None:
+        """Return the declared intrinsic type for a registered action."""
+        skill = self._action_index.get(action_type)
+        if not skill:
+            return None
+        return skill.actions.get(action_type, {}).get("risk")
 
     def get_context_for_intent(self, text: str, max_skills: int = 5) -> str:
         """Build selective LLM context based on intent.
@@ -298,6 +307,15 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         return None
 
     name = raw.get("name", module_name)
+    default_risk = raw.get("risk")
+    if default_risk is None:
+        raise ValueError(f"Skill '{name}' must declare a default risk")
+    try:
+        ActionType(default_risk)
+    except ValueError as exc:
+        raise ValueError(
+            f"Skill '{name}' has invalid default risk '{default_risk}'"
+        ) from exc
     patterns = []
     for entry in raw.get("patterns", []):
         if isinstance(entry, (list, tuple)) and len(entry) == 2:
@@ -311,9 +329,17 @@ def _build_skill(module_name: str, mod) -> Skill | None:
         atype = action_def.get("type")
         handler_name = action_def.get("handler")
         handler = getattr(mod, handler_name, None) if handler_name else None
+        risk = action_def.get("risk", default_risk)
+        try:
+            action_risk = ActionType(risk)
+        except ValueError as exc:
+            raise ValueError(
+                f"Action '{atype}' in skill '{name}' has invalid risk '{risk}'"
+            ) from exc
         action_info = {
             "handler": handler,
             "description": action_def.get("description", ""),
+            "risk": action_risk,
         }
         if "parameters" in action_def:
             action_info["parameters"] = action_def["parameters"]

@@ -25,6 +25,7 @@ SKILL = {
     "name": "apple_health",
     "description": "Read Apple Health data — steps, sleep, heart rate, workouts",
     "category": "health",
+    "risk": "dangerous",
     "patterns": [
         (r"\bsteps?\b.*\btoday\b", "health_steps"),
         (r"\bhow\s+many\s+steps\b", "health_steps"),

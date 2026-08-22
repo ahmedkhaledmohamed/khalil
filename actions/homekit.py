@@ -19,6 +19,7 @@ SKILL = {
     "name": "homekit",
     "description": "Control smart home devices — lights, thermostat, scenes",
     "category": "home",
+    "risk": "write",
     "patterns": [
         # Lights
         (r"\bturn\s+(?:on|off)\s+(?:the\s+)?lights?\b", "homekit_lights"),
@@ -51,8 +52,8 @@ SKILL = {
         {"type": "homekit_lights", "handler": "handle_intent", "keywords": "home lights on off dim brightness smart", "description": "Control smart lights"},
         {"type": "homekit_thermostat", "handler": "handle_intent", "keywords": "home thermostat temperature heat cool set", "description": "Control thermostat"},
         {"type": "homekit_scene", "handler": "handle_intent", "keywords": "home scene activate run movie morning night", "description": "Activate a HomeKit scene"},
-        {"type": "homekit_status", "handler": "handle_intent", "keywords": "home status devices smart what running", "description": "Check device status"},
-        {"type": "homekit_lock", "handler": "handle_intent", "keywords": "home lock unlock door front", "description": "Control door locks"},
+        {"type": "homekit_status", "handler": "handle_intent", "keywords": "home status devices smart what running", "description": "Check device status", "risk": "read"},
+        {"type": "homekit_lock", "handler": "handle_intent", "keywords": "home lock unlock door front", "description": "Control door locks", "risk": "dangerous"},
     ],
     "examples": [
         "Turn on the lights",

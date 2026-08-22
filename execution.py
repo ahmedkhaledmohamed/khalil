@@ -288,11 +288,27 @@ class ExecutionBus:
                 self._record_signal(action, context, result)
                 return result
 
+        registry = self._get_registry()
+        declared_type = None
+        get_action_type = getattr(registry, "get_action_type", None)
+        if get_action_type is not None:
+            declared_type = get_action_type(action)
+        handler = registry.get_handler(action)
+        if handler is None:
+            return ActionResult.failed(
+                f"No handler found for '{action}'",
+                kind=ActionErrorKind.NOT_FOUND,
+                action=action, source=context.source.value,
+                latency_ms=(time.monotonic() - t0) * 1000,
+            )
+
         # Autonomy check
         effective_autonomy = context.autonomy_override or (
             self._autonomy.level if self._autonomy else AutonomyLevel.SUPERVISED
         )
-        if self._autonomy and self._autonomy.needs_approval(action):
+        if self._autonomy and self._autonomy.needs_approval(
+            action, params, declared_type=declared_type,
+        ):
             # For non-user sources, check if autonomy allows auto-execution
             if context.source != ExecutionSource.USER:
                 if effective_autonomy == AutonomyLevel.SUPERVISED:
@@ -313,17 +329,6 @@ class ExecutionBus:
                     action=action, source=context.source.value,
                     latency_ms=(time.monotonic() - t0) * 1000,
                 )
-
-        # Look up handler from skill registry
-        registry = self._get_registry()
-        handler = registry.get_handler(action)
-        if handler is None:
-            return ActionResult.failed(
-                f"No handler found for '{action}'",
-                kind=ActionErrorKind.NOT_FOUND,
-                action=action, source=context.source.value,
-                latency_ms=(time.monotonic() - t0) * 1000,
-            )
 
         # Build intent dict matching existing handler signature
         intent = {"action": action, **params}

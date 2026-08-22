@@ -17,6 +17,7 @@ SKILL = {
     "name": "onepassword",
     "description": "Look up credentials, OTPs, and secure notes via 1Password",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\b(?:1password|one\s*password)\b", "op_search"),
         (r"\bpassword\s+for\s+\w+\b", "op_get"),

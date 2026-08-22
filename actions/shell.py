@@ -93,6 +93,7 @@ SKILL = {
     "name": "shell",
     "description": "Execute shell commands with safety classification (safe/risky/blocked)",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\bopen\s+(?:the\s+)?(?:Safari|Chrome|Slack|Finder|Terminal|Music|Notes|Calendar|Spotify|Mail)\b", "shell"),
         (r"\bopen\s+https?://", "shell"),

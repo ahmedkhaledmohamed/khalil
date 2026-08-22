@@ -23,6 +23,7 @@ SKILL = {
     "name": "youtube",
     "description": "YouTube — search videos, liked videos, subscriptions",
     "category": "media",
+    "risk": "read",
     "patterns": [
         (r"\bsearch\s+(?:on\s+)?youtube\b", "youtube_search"),
         (r"\bfind\s+(?:a\s+)?video\b", "youtube_search"),
@@ -35,7 +36,7 @@ SKILL = {
     ],
     "actions": [
         {"type": "youtube_search", "handler": "handle_intent", "keywords": "youtube search video find", "description": "Search YouTube"},
-        {"type": "youtube_liked", "handler": "handle_intent", "keywords": "youtube liked videos history", "description": "Liked videos"},
+        {"type": "youtube_liked", "handler": "handle_intent", "keywords": "youtube liked videos history", "description": "Liked videos", "risk": "dangerous"},
     ],
     "examples": ["Search YouTube for Python tutorials", "My liked videos"],
 }

@@ -14,6 +14,7 @@ SKILL = {
     "name": "apple_music",
     "description": "Control Apple Music — play, pause, skip, now playing, queue",
     "category": "media",
+    "risk": "write",
     "patterns": [
         (r"\bnow\s+playing\b", "apple_music_now_playing"),
         (r"\bwhat(?:'s|\s+is)\s+playing\b", "apple_music_now_playing"),
@@ -35,14 +36,14 @@ SKILL = {
         (r"\brecent\s+(?:songs|tracks|music)\b", "apple_music_recent"),
     ],
     "actions": [
-        {"type": "apple_music_now_playing", "handler": "handle_intent", "keywords": "music now playing current song track", "description": "Show currently playing track"},
+        {"type": "apple_music_now_playing", "handler": "handle_intent", "keywords": "music now playing current song track", "description": "Show currently playing track", "risk": "read"},
         {"type": "apple_music_play", "handler": "handle_intent", "keywords": "music play resume unpause", "description": "Resume playback"},
         {"type": "apple_music_pause", "handler": "handle_intent", "keywords": "music pause stop", "description": "Pause playback"},
         {"type": "apple_music_skip", "handler": "handle_intent", "keywords": "music skip next song track", "description": "Skip to next track"},
         {"type": "apple_music_previous", "handler": "handle_intent", "keywords": "music previous back song track", "description": "Go to previous track"},
         {"type": "apple_music_play_item", "handler": "handle_intent", "keywords": "music play album playlist song artist", "description": "Play a specific album, playlist, or song"},
-        {"type": "apple_music_queue", "handler": "handle_intent", "keywords": "music queue up next", "description": "Show playback queue"},
-        {"type": "apple_music_recent", "handler": "handle_intent", "keywords": "music recently played recent songs tracks", "description": "Show recently played tracks"},
+        {"type": "apple_music_queue", "handler": "handle_intent", "keywords": "music queue up next", "description": "Show playback queue", "risk": "read"},
+        {"type": "apple_music_recent", "handler": "handle_intent", "keywords": "music recently played recent songs tracks", "description": "Show recently played tracks", "risk": "read"},
     ],
     "examples": [
         "What's playing?",

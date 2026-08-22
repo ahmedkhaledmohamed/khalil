@@ -15,6 +15,7 @@ SKILL = {
     "name": "dev_tools",
     "description": "Check developer tool status — Codex, Claude Code, git, terminals",
     "category": "development",
+    "risk": "read",
     "patterns": [
         (r"\bcodex\s+(?:status|session|instance|process)", "claude_code_status"),
         (r"\b(?:is|any)\s+codex\s+(?:waiting|running|active|idle|working)\b", "claude_code_status"),

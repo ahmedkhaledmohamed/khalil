@@ -29,6 +29,7 @@ SKILL = {
     "name": "calendar",
     "description": "Google Calendar — read events, check schedule, create events",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\bcalendar\b", "calendar"),
         (r"\bwhat'?s\s+on\s+(?:my\s+)?(?:schedule|calendar)\b", "calendar"),
@@ -44,6 +45,7 @@ SKILL = {
     "actions": [
         {"type": "calendar", "handler": "handle_intent", "keywords": "calendar schedule meetings events today", "description": "Check calendar and schedule"},
         {"type": "calendar_create", "handler": "handle_intent", "keywords": "schedule book block create event meeting",
+         "risk": "write",
          "description": "Create a calendar event",
          "parameters": {
              "summary": {"type": "string", "description": "Event title/summary"},

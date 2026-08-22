@@ -21,6 +21,7 @@ SKILL = {
     "name": "digitalocean",
     "description": "DigitalOcean — droplet status, health, and billing",
     "category": "infrastructure",
+    "risk": "read",
     "patterns": [
         (r"\b(?:server|droplet)\s+(?:status|health)\b", "digitalocean_status"),
         (r"\bdigitalocean\b", "digitalocean_status"),
@@ -30,7 +31,7 @@ SKILL = {
     ],
     "actions": [
         {"type": "digitalocean_status", "handler": "handle_intent", "keywords": "server droplet status health digitalocean", "description": "Droplet status"},
-        {"type": "digitalocean_spend", "handler": "handle_intent", "keywords": "server cost bill spend digitalocean", "description": "Monthly spend"},
+        {"type": "digitalocean_spend", "handler": "handle_intent", "keywords": "server cost bill spend digitalocean", "description": "Monthly spend", "risk": "dangerous"},
     ],
     "examples": ["Server status", "DigitalOcean spending"],
     "voice": {"confirm_before_execute": True, "response_style": "brief"},

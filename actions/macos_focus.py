@@ -14,6 +14,7 @@ SKILL = {
     "name": "macos_focus",
     "description": "Toggle macOS Focus modes and run Shortcuts",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\bfocus\s+mode\b", "macos_focus_status"),
         # Specific on/off patterns must come before generic dnd toggle
@@ -31,11 +32,11 @@ SKILL = {
         (r"\bshortcut\s+(?:called|named)\b", "macos_shortcuts_run"),
     ],
     "actions": [
-        {"type": "macos_focus_status", "handler": "handle_intent", "keywords": "focus mode status current", "description": "Check current Focus mode status"},
+        {"type": "macos_focus_status", "handler": "handle_intent", "keywords": "focus mode status current", "description": "Check current Focus mode status", "risk": "read"},
         {"type": "macos_focus_dnd", "handler": "handle_intent", "keywords": "do not disturb dnd focus toggle", "description": "Toggle Do Not Disturb"},
         {"type": "macos_focus_dnd_on", "handler": "handle_intent", "keywords": "do not disturb dnd focus enable turn on", "description": "Enable Do Not Disturb"},
         {"type": "macos_focus_dnd_off", "handler": "handle_intent", "keywords": "do not disturb dnd focus disable turn off", "description": "Disable Do Not Disturb"},
-        {"type": "macos_shortcuts_list", "handler": "handle_intent", "keywords": "shortcuts list show all", "description": "List available Shortcuts"},
+        {"type": "macos_shortcuts_list", "handler": "handle_intent", "keywords": "shortcuts list show all", "description": "List available Shortcuts", "risk": "read"},
         {"type": "macos_shortcuts_run", "handler": "handle_intent", "keywords": "shortcuts run execute trigger", "description": "Run a Shortcut by name"},
     ],
     "examples": [

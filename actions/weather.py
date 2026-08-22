@@ -18,6 +18,7 @@ SKILL = {
     "name": "weather",
     "description": "Current weather, forecasts, and alerts via Open-Meteo",
     "category": "information",
+    "risk": "read",
     "patterns": [
         (r"\b(?:what'?s\s+the\s+)?weather\b", "weather"),
         (r"\btemperature\b", "weather"),

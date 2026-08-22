@@ -20,6 +20,7 @@ SKILL = {
     "name": "doc_extract",
     "description": "Extract structured data from images — receipts, business cards, tables, OCR",
     "category": "productivity",
+    "risk": "dangerous",
     "patterns": [
         (r"\b(?:extract|scan|parse)\s+(?:this\s+)?receipt\b", "extract_receipt"),
         (r"\breceipt\s+(?:scan|extract|read)\b", "extract_receipt"),

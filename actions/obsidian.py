@@ -25,6 +25,7 @@ SKILL = {
     "name": "obsidian",
     "description": "Search, read, create, and manage Obsidian vault notes",
     "category": "knowledge",
+    "risk": "dangerous",
     "patterns": [
         # Specific actions before generic patterns
         (r"\bcreate\s+(?:an?\s+)?(?:obsidian\s+)?(?:vault\s+)?note\b", "obsidian_create"),
@@ -47,7 +48,7 @@ SKILL = {
         {"type": "obsidian_search", "handler": "handle_intent", "keywords": "obsidian vault search find notes markdown", "description": "Search Obsidian vault"},
         {"type": "obsidian_read", "handler": "handle_intent", "keywords": "obsidian vault read show note content", "description": "Read an Obsidian note"},
         {"type": "obsidian_list", "handler": "handle_intent", "keywords": "obsidian vault list recent notes", "description": "List recent vault notes"},
-        {"type": "obsidian_create", "handler": "handle_intent", "keywords": "obsidian vault create new note write", "description": "Create a new vault note"},
+        {"type": "obsidian_create", "handler": "handle_intent", "keywords": "obsidian vault create new note write", "description": "Create a new vault note", "risk": "write"},
         {"type": "obsidian_backlinks", "handler": "handle_intent", "keywords": "obsidian vault backlinks links references", "description": "Find backlinks to a note"},
     ],
     "examples": [

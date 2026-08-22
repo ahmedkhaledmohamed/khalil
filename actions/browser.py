@@ -15,6 +15,7 @@ SKILL = {
     "name": "browser",
     "description": "Browser automation — navigate pages, take screenshots, extract text",
     "category": "system",
+    "risk": "read",
     "patterns": [
         (r"\bnavigate\s+to\b", "browser_navigate"),
         (r"\bextract\s+(?:text|content)\s+from\b", "browser_extract"),
@@ -23,7 +24,7 @@ SKILL = {
     "actions": [
         {"type": "browser_navigate", "handler": "handle_intent", "keywords": "navigate browse open page website url", "description": "Navigate to a URL and screenshot"},
         {"type": "browser_extract", "handler": "handle_intent", "keywords": "extract text content page website scrape", "description": "Extract text from a page"},
-        {"type": "browser_screenshot", "handler": "handle_intent", "keywords": "screenshot page website url capture", "description": "Screenshot a webpage"},
+        {"type": "browser_screenshot", "handler": "handle_intent", "keywords": "screenshot page website url capture", "description": "Screenshot a webpage", "risk": "dangerous"},
     ],
     "examples": ["Navigate to example.com", "Extract text from this URL"],
 }

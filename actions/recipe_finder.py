@@ -18,6 +18,7 @@ SKILL = {
     "name": "recipe_finder",
     "description": "Find recipes by ingredient, cuisine, or name",
     "category": "lifestyle",
+    "risk": "read",
     "patterns": [
         (r"\brecipe\s+(?:for|with|using)\b", "recipe_search"),
         (r"\bfind\s+(?:a\s+)?recipe\b", "recipe_search"),

@@ -17,6 +17,7 @@ SKILL = {
     "name": "web",
     "description": "Web search and page fetching via DuckDuckGo",
     "category": "information",
+    "risk": "read",
     "patterns": [
         (r"\bsearch\s+(?:the\s+)?(?:web|internet|online)\b", "web_search"),
         (r"\bgoogle\s+(?!doc|sheet|spreadsheet|slide|drive|form)", "web_search"),

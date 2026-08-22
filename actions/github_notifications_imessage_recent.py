@@ -23,6 +23,7 @@ SKILL = {
     "name": "github_notifications_imessage_recent",
     "description": "Unified communications dashboard — GitHub notifications + recent iMessages",
     "category": "extension",
+    "risk": "dangerous",
     "patterns": [
         (r"\b(?:comms|communications)\s*(?:dashboard)?", "comms_all"),
         (r"\bshow\s+(?:my\s+)?(?:notifications|comms)", "comms_all"),

@@ -18,6 +18,7 @@ SKILL = {
     "name": "voice",
     "description": "Voice interaction — transcribe speech and synthesize audio replies",
     "category": "system",
+    "risk": "write",
     "patterns": [
         (r"\b(?:say|speak|read\s+aloud)\b.*", "voice_tts"),
         (r"\bvoice\s+(?:mode|reply|response)\s+(?:on|off|enable|disable)\b", "voice_toggle"),

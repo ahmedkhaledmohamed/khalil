@@ -18,6 +18,7 @@ SKILL = {
     "name": "anki_connect",
     "description": "Manage Anki flashcards — create, review, search, stats",
     "category": "learning",
+    "risk": "read",
     "patterns": [
         (r"\banki\b", "anki_status"),
         (r"\bcreate\s+(?:an?\s+)?(?:anki\s+)?(?:flash)?card\b", "anki_create"),
@@ -33,9 +34,9 @@ SKILL = {
         (r"\blist\s+(?:my\s+)?decks?\b", "anki_decks"),
     ],
     "actions": [
-        {"type": "anki_create", "handler": "handle_intent", "keywords": "anki flashcard create add new card", "description": "Create a flashcard"},
+        {"type": "anki_create", "handler": "handle_intent", "keywords": "anki flashcard create add new card", "description": "Create a flashcard", "risk": "write"},
         {"type": "anki_status", "handler": "handle_intent", "keywords": "anki stats status due cards review count", "description": "Anki review stats"},
-        {"type": "anki_review", "handler": "handle_intent", "keywords": "anki review cards study flashcard", "description": "Start a review session"},
+        {"type": "anki_review", "handler": "handle_intent", "keywords": "anki review cards study flashcard", "description": "Start a review session", "risk": "write"},
         {"type": "anki_search", "handler": "handle_intent", "keywords": "anki search find cards flashcard", "description": "Search flashcards"},
         {"type": "anki_decks", "handler": "handle_intent", "keywords": "anki decks list collection", "description": "List Anki decks"},
     ],

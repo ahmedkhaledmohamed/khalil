@@ -23,6 +23,7 @@ SKILL = {
     "name": "imessage",
     "description": "Read and search iMessage conversations on macOS",
     "category": "communication",
+    "risk": "dangerous",
     "patterns": [
         (r"\b(?:imessage|iMessage)\s+(?:from|with)\b", "imessage_read"),
         (r"\bread\s+(?:my\s+)?(?:messages?|texts?|imessage)\b", "imessage_read"),

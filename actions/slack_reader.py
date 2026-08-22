@@ -28,6 +28,7 @@ SKILL = {
     "name": "slack",
     "description": "Read Slack messages and send messages via Slack Web API",
     "category": "communication",
+    "risk": "dangerous",
     "patterns": [
         (r"\bsend\s+(?:a\s+)?slack\s+message\b", "slack_send"),
         (r"\bpost\s+to\s+slack\b", "slack_send"),

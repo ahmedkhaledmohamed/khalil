@@ -18,6 +18,7 @@ SKILL = {
     "name": "coding_agent",
     "description": "Delegate coding tasks to Codex — fix bugs, refactor, add features",
     "category": "development",
+    "risk": "write",
     "patterns": [
         (r"\b(?:fix|debug)\s+(?:the\s+)?(?:bug|error|issue|test|failing)\b", "code_task"),
         (r"\brefactor\s+(?:the\s+)?\w+", "code_task"),
@@ -31,8 +32,8 @@ SKILL = {
     ],
     "actions": [
         {"type": "code_task", "handler": "handle_intent", "keywords": "fix refactor add implement code bug error feature debug", "description": "Run a coding task"},
-        {"type": "code_status", "handler": "handle_intent", "keywords": "coding task status progress how", "description": "Check coding task status"},
-        {"type": "code_diff", "handler": "handle_intent", "keywords": "diff changes code last show what changed", "description": "Show last coding task diff"},
+        {"type": "code_status", "handler": "handle_intent", "keywords": "coding task status progress how", "description": "Check coding task status", "risk": "read"},
+        {"type": "code_diff", "handler": "handle_intent", "keywords": "diff changes code last show what changed", "description": "Show last coding task diff", "risk": "read"},
     ],
     "examples": [
         "Fix the failing test in khalil",
