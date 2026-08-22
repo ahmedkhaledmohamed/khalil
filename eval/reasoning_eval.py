@@ -351,7 +351,7 @@ def run_identity_content_tests(verbose: bool = False) -> dict:
             ("strategy tools", "spawn_watcher"),
             ("principles", "Execute, don't plan"),
             ("principles", "reason from first principles"),
-            ("self-modification", "scripts/khalil"),
+            ("self-modification", "Self-modification: your code is at"),
         ]
 
         for label, marker in required_in_identity:
