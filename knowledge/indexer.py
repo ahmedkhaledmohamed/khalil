@@ -14,12 +14,14 @@ from config import (
     CURSOR_TRANSCRIPTS_DIR, CURSOR_CATALOG_FILE, WORK_DESCRIPTION_COLUMN,
 )
 from knowledge.embedder import embed_batch
+from execution_graph import ExecutionGraphRepository
 
 
 def init_db() -> sqlite3.Connection:
     """Initialize SQLite database with sqlite-vec for vector search."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.enable_load_extension(True)
     import sqlite_vec
     sqlite_vec.load(conn)
@@ -263,6 +265,8 @@ def init_db() -> sqlite3.Connection:
     except Exception:
         conn.execute("ALTER TABLE documents ADD COLUMN source_path TEXT")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_documents_source_path ON documents(source_path)")
+
+    ExecutionGraphRepository(conn).ensure_schema()
 
     conn.commit()
     return conn
