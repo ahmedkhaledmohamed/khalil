@@ -456,6 +456,8 @@ class AgentLoop:
         self._snapshot_cache: tuple[float, object] | None = None  # (monotonic_time, DomainSnapshot)
         self._daily_notification_count = 0
         self._daily_notification_date: str = ""  # YYYY-MM-DD, resets at midnight
+        from background_graph import register_background_handler
+        register_background_handler("agent_loop.action", self._execute_graph_action)
 
     async def start(self):
         """Start the background loop. Call as asyncio.create_task(loop.start())."""
@@ -678,22 +680,82 @@ class AgentLoop:
         )
 
     async def _execute_action(self, opp: Opportunity) -> str:
-        """Execute an action for an opportunity. Routes through execution bus when available."""
+        """Execute a proactive action through a durable one-node graph."""
+        from background_graph import execute_background_trigger, graph_output
+        from execution import ExecutionSource, get_execution_bus
+        from execution_graph import GraphStatus
+
+        bus = get_execution_bus()
+        if bus is None:
+            return await self._execute_action_legacy(opp)
+        graph = await execute_background_trigger(
+            execution_bus=bus,
+            source=ExecutionSource.AGENT_LOOP,
+            trigger_id=opp.id,
+            handler="agent_loop.action",
+            payload={
+                "id": opp.id,
+                "source": opp.source,
+                "summary": opp.summary,
+                "urgency": int(opp.urgency),
+                "action_type": opp.action_type,
+                "payload": opp.payload,
+                "requires_llm": opp.requires_llm,
+            },
+            chat_id=self.chat_id if isinstance(self.chat_id, int) else None,
+            idempotent=True,
+        )
+        if graph.status == GraphStatus.SUCCEEDED:
+            return graph_output(graph) or f"Completed: {opp.action_type}"
+        error = (graph.nodes[-1].error or {}).get("message") if graph.nodes else None
+        if graph.status == GraphStatus.WAITING_FOR_APPROVAL:
+            return f"{opp.action_type} waiting for approval: {error or 'approval required'}"
+        return f"{opp.action_type} failed: {error or graph.status.value}"
+
+    async def _execute_graph_action(
+        self, payload: dict, execution_context,
+    ) -> str:
+        """Rehydrate a persisted opportunity and run its existing action logic."""
+        opp = Opportunity(
+            id=str(payload.get("id") or "unknown"),
+            source=str(payload.get("source") or "agent_loop"),
+            summary=str(payload.get("summary") or ""),
+            urgency=Urgency(int(payload.get("urgency", Urgency.LOW))),
+            action_type=payload.get("action_type"),
+            payload=dict(payload.get("payload") or {}),
+            requires_llm=bool(payload.get("requires_llm")),
+        )
+        return await self._execute_action_legacy(
+            opp, execution_context, preserve_action_result=True,
+        )
+
+    async def _execute_action_legacy(
+        self, opp: Opportunity, execution_context=None, preserve_action_result=False,
+    ):
+        """Execute the existing proactive action logic inside a claimed graph node."""
         # Try execution bus first
         try:
             from execution import get_execution_bus, ExecutionContext, ExecutionSource
             bus = get_execution_bus()
             if bus and opp.action_type:
-                exec_ctx = ExecutionContext(
+                exec_ctx = execution_context.child(
+                    ExecutionSource.AGENT_LOOP,
+                    chat_id=self.chat_id if isinstance(self.chat_id, int) else None,
+                ) if execution_context else ExecutionContext(
                     source=ExecutionSource.AGENT_LOOP,
                     chat_id=self.chat_id if isinstance(self.chat_id, int) else None,
                 )
-                result = bus_result = await bus.execute(
+                result = await bus.execute(
                     opp.action_type, opp.payload, exec_ctx,
                 )
                 if result.success:
-                    return result.output or f"Completed: {opp.action_type}"
+                    return (
+                        result if preserve_action_result
+                        else result.output or f"Completed: {opp.action_type}"
+                    )
                 if result.error and "No handler" not in (result.error or ""):
+                    if preserve_action_result:
+                        return result
                     return f"{opp.action_type} failed: {result.error}"
                 # Fall through to legacy handlers if no bus handler
         except ImportError:

@@ -28,6 +28,7 @@ MAX_EXECUTION_DEPTH = 3
 class ExecutionSource(str, Enum):
     USER = "user"
     AGENT_LOOP = "agent_loop"
+    SCHEDULER = "scheduler"
     WORKFLOW = "workflow"
     ORCHESTRATOR = "orchestrator"
     TOOL_USE = "tool_use"
