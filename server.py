@@ -6945,6 +6945,50 @@ def _setup_scheduler():
     """Register scheduled jobs."""
     from scheduler.tasks import sync_emails, send_morning_brief, send_financial_alert, send_weekly_summary, send_career_alert, send_friday_reflection, run_reflection, run_micro_reflection
 
+    def _add_job(func, trigger=None, *args, id: str, **kwargs):
+        """Register an APScheduler job behind a durable one-node graph."""
+        import inspect
+        from background_graph import (
+            execute_background_trigger,
+            register_background_handler,
+        )
+
+        handler_name = f"scheduler.{id}"
+
+        async def _execute_scheduled_job(payload, execution_context):
+            result = func()
+            return await result if inspect.isawaitable(result) else result
+
+        async def _durable_job():
+            from execution import ExecutionSource, get_execution_bus
+            from execution_graph import GraphStatus
+
+            bus = get_execution_bus()
+            if bus is None:
+                return await _execute_scheduled_job({}, None)
+            graph = await execute_background_trigger(
+                execution_bus=bus,
+                source=ExecutionSource.SCHEDULER,
+                trigger_id=id,
+                handler=handler_name,
+                chat_id=OWNER_CHAT_ID,
+                idempotent=True,
+            )
+            if graph.status != GraphStatus.SUCCEEDED:
+                raise RuntimeError(
+                    f"Scheduled graph {graph.id} ended with {graph.status.value}"
+                )
+            return graph
+
+        register_background_handler(handler_name, _execute_scheduled_job)
+        return scheduler.add_job(
+            _durable_job,
+            trigger,
+            *args,
+            id=id,
+            **kwargs,
+        )
+
     def _can_send():
         return channel and OWNER_CHAT_ID
 
@@ -6990,7 +7034,7 @@ def _setup_scheduler():
             log.info(f"Recurring #{r['id']} fired: {r['text']}")
 
     # Morning brief at 7:00 AM every day
-    scheduler.add_job(
+    _add_job(
         _morning_brief_job,
         CronTrigger(hour=7, minute=0, timezone=TIMEZONE),
         id="morning_brief",
@@ -6998,7 +7042,7 @@ def _setup_scheduler():
         replace_existing=True,
     )
 
-    scheduler.add_job(
+    _add_job(
         _daily_anticipation_job,
         CronTrigger(hour=7, minute=10, timezone=TIMEZONE),
         id="daily_anticipation",
@@ -7034,7 +7078,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Daily plan generation failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _daily_plan_job,
         CronTrigger(hour=7, minute=5, timezone=TIMEZONE),
         id="daily_plan",
@@ -7043,7 +7087,7 @@ def _setup_scheduler():
     )
 
     # Financial alerts on the 1st and 15th of each month at 9 AM
-    scheduler.add_job(
+    _add_job(
         _financial_alert_job,
         CronTrigger(day="1,15", hour=9, minute=0, timezone=TIMEZONE),
         id="financial_alert",
@@ -7052,7 +7096,7 @@ def _setup_scheduler():
     )
 
     # Weekly summary every Sunday at 6 PM
-    scheduler.add_job(
+    _add_job(
         _weekly_summary_job,
         CronTrigger(day_of_week="sun", hour=18, minute=0, timezone=TIMEZONE),
         id="weekly_summary",
@@ -7061,7 +7105,7 @@ def _setup_scheduler():
     )
 
     # Check for due reminders every 60 seconds
-    scheduler.add_job(
+    _add_job(
         _reminder_check_job,
         "interval",
         seconds=60,
@@ -7071,7 +7115,7 @@ def _setup_scheduler():
     )
 
     # Email sync every 6 hours
-    scheduler.add_job(
+    _add_job(
         sync_emails,
         CronTrigger(hour="*/6", minute=15, timezone=TIMEZONE),
         id="email_sync",
@@ -7084,7 +7128,7 @@ def _setup_scheduler():
         if _can_send():
             await send_career_alert(channel, OWNER_CHAT_ID)
 
-    scheduler.add_job(
+    _add_job(
         _career_alert_job,
         CronTrigger(hour=10, minute=0, timezone=TIMEZONE),
         id="career_alert",
@@ -7097,7 +7141,7 @@ def _setup_scheduler():
         if _can_send():
             await send_friday_reflection(channel, OWNER_CHAT_ID, ask_claude)
 
-    scheduler.add_job(
+    _add_job(
         _friday_reflection_job,
         CronTrigger(day_of_week="fri", hour=17, minute=0, timezone=TIMEZONE),
         id="friday_reflection",
@@ -7115,7 +7159,7 @@ def _setup_scheduler():
             await channel.send_message(OWNER_CHAT_ID, msg)
             log.warning("Self-check found issues — notified owner")
 
-    scheduler.add_job(
+    _add_job(
         _self_check_job,
         CronTrigger(hour=20, minute=0, timezone=TIMEZONE),
         id="self_check",
@@ -7162,7 +7206,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Preference decay / signal GC failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _preference_decay_job,
         CronTrigger(day_of_week="sun", hour=20, minute=30, timezone=TIMEZONE),
         id="preference_decay",
@@ -7175,7 +7219,7 @@ def _setup_scheduler():
         if _can_send():
             await run_reflection(channel, OWNER_CHAT_ID, ask_claude)
 
-    scheduler.add_job(
+    _add_job(
         _weekly_reflection_job,
         CronTrigger(day_of_week=_refl_weekly_day, hour=_refl_weekly_hour, minute=0, timezone=TIMEZONE),
         id="weekly_reflection",
@@ -7208,7 +7252,7 @@ def _setup_scheduler():
             except Exception as e:
                 log.warning("Heal outcome check failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _micro_reflection_job,
         CronTrigger(hour=_refl_micro_hour, minute=0, timezone=TIMEZONE),
         id="micro_reflection",
@@ -7229,7 +7273,7 @@ def _setup_scheduler():
         else:
             log.info("Proactive check: all clear")
 
-    scheduler.add_job(
+    _add_job(
         _proactive_alerts_job,
         CronTrigger(day_of_week="wed", hour=12, minute=0, timezone=TIMEZONE),
         id="proactive_alerts",
@@ -7262,7 +7306,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Weekly eval metrics failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _weekly_eval_metrics_job,
         CronTrigger(day_of_week="sun", hour=4, minute=0, timezone=TIMEZONE),
         id="weekly_eval_metrics",
@@ -7278,7 +7322,7 @@ def _setup_scheduler():
                 await channel.send_message(OWNER_CHAT_ID, msg)
         await proactive_token_refresh(notify_fn=_notify)
 
-    scheduler.add_job(
+    _add_job(
         _oauth_refresh_job,
         CronTrigger(hour="*/6", minute=30, timezone=TIMEZONE),
         id="oauth_refresh",
@@ -7296,7 +7340,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Auto-extraction failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _auto_extract_job,
         CronTrigger(hour=2, minute=0, timezone=TIMEZONE),
         id="auto_extract_preferences",
@@ -7311,7 +7355,7 @@ def _setup_scheduler():
         from scheduler.state_alerts import run_state_aware_checks
         await run_state_aware_checks(channel, OWNER_CHAT_ID)
 
-    scheduler.add_job(
+    _add_job(
         _state_alerts_job,
         "interval",
         minutes=30,
@@ -7338,7 +7382,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Evolution cycle job failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _evolution_cycle_job,
         CronTrigger(hour="3,9,15,21", minute=0, timezone=TIMEZONE),
         id="evolution_cycle",
@@ -7353,7 +7397,7 @@ def _setup_scheduler():
         from scheduler.tasks import poll_dev_state
         await poll_dev_state(channel, OWNER_CHAT_ID)
 
-    scheduler.add_job(
+    _add_job(
         _dev_state_poll_job,
         "interval",
         seconds=60,
@@ -7374,7 +7418,7 @@ def _setup_scheduler():
             log.debug("Knowledge freshness poll: %s", e)
 
     from config import WATCH_POLL_INTERVAL
-    scheduler.add_job(
+    _add_job(
         _knowledge_freshness_poll,
         "interval",
         minutes=WATCH_POLL_INTERVAL,
@@ -7412,7 +7456,7 @@ def _setup_scheduler():
         except Exception as e:
             log.error("Failed to send meeting brief: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _meeting_brief_job,
         "interval",
         minutes=5,
@@ -7468,7 +7512,7 @@ def _setup_scheduler():
                 )
             log.info("Post-meeting follow-up prompt sent for: %s", title)
 
-    scheduler.add_job(
+    _add_job(
         _meeting_followup_job,
         "interval",
         minutes=5,
@@ -7483,7 +7527,7 @@ def _setup_scheduler():
             from scheduler.tasks import send_quarterly_planning
             await send_quarterly_planning(channel, OWNER_CHAT_ID, ask_claude)
 
-    scheduler.add_job(
+    _add_job(
         _quarterly_planning_job,
         CronTrigger(hour=9, minute=30, timezone=TIMEZONE),
         id="quarterly_planning",
@@ -7497,7 +7541,7 @@ def _setup_scheduler():
             from scheduler.tasks import send_mid_quarter_review
             await send_mid_quarter_review(channel, OWNER_CHAT_ID, ask_claude)
 
-    scheduler.add_job(
+    _add_job(
         _mid_quarter_review_job,
         CronTrigger(hour=9, minute=45, timezone=TIMEZONE),
         id="mid_quarter_review",
@@ -7511,7 +7555,7 @@ def _setup_scheduler():
             from scheduler.tasks import run_knowledge_enrichment
             await run_knowledge_enrichment(channel, OWNER_CHAT_ID)
 
-    scheduler.add_job(
+    _add_job(
         _knowledge_enrichment_job,
         CronTrigger(day_of_week="wed,sat", hour=14, minute=0, timezone=TIMEZONE),
         id="knowledge_enrichment",
@@ -7529,7 +7573,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Live source indexing failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _live_source_indexing_job,
         CronTrigger(hour=2, minute=30, timezone=TIMEZONE),
         id="live_source_indexing",
@@ -7547,7 +7591,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Scheduled knowledge export failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _knowledge_export_job,
         CronTrigger(hour=3, minute=0, timezone=TIMEZONE),
         id="knowledge_export",
@@ -7567,7 +7611,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Scheduled DB backup failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _full_db_backup_job,
         CronTrigger(hour=3, minute=15, timezone=TIMEZONE),
         id="full_db_backup",
@@ -7587,7 +7631,7 @@ def _setup_scheduler():
         except Exception as e:
             log.warning("Scheduled email categorization failed: %s", e)
 
-    scheduler.add_job(
+    _add_job(
         _email_categorize_job,
         CronTrigger(hour=8, minute=0, timezone=TIMEZONE),
         id="email_categorize",
@@ -7759,6 +7803,8 @@ async def startup():
     _exec_bus = get_execution_bus()
     if _exec_bus:
         _exec_bus._ask_llm = ask_llm
+        from background_graph import install_background_dispatch
+        install_background_dispatch(_exec_bus)
 
         # M8: Register composite action handlers
         async def _composite_orchestrate(params: dict, ctx: ExecutionContext) -> ActionResult:
@@ -7840,6 +7886,7 @@ async def startup():
         asyncio.create_task(resume_active_plans(_exec_bus, channel))
 
     # Initialize workflow engine
+    wf_engine = None
     try:
         from workflows import init_engine as init_workflow_engine
         from learning import register_signal_hook
@@ -7857,6 +7904,13 @@ async def startup():
         await start_telegram_bot()
     except Exception as e:
         log.error("Telegram bot startup failed: %s", e)
+
+    if wf_engine is not None:
+        wf_engine._channel = channel
+        wf_engine._chat_id = OWNER_CHAT_ID
+        if _exec_bus:
+            from workflows import resume_active_workflows
+            asyncio.create_task(resume_active_workflows(_exec_bus))
 
     # Start Slack channel if configured
     try:
@@ -7903,6 +7957,12 @@ async def startup():
 
     # Start scheduler
     _setup_scheduler()
+    if _exec_bus:
+        from background_graph import resume_background_graphs
+        asyncio.create_task(resume_background_graphs(
+            _exec_bus,
+            sources={ExecutionSource.SCHEDULER},
+        ))
     scheduler.start()
     log.info(f"Scheduler started with {len(scheduler.get_jobs())} jobs")
 
@@ -7944,6 +8004,12 @@ async def startup():
             interval_s=AGENT_LOOP_INTERVAL_S,
             quiet_hours=AGENT_LOOP_QUIET_HOURS,
         )
+        if _exec_bus:
+            from background_graph import resume_background_graphs
+            asyncio.create_task(resume_background_graphs(
+                _exec_bus,
+                sources={ExecutionSource.AGENT_LOOP},
+            ))
         asyncio.create_task(_agent_loop.start())
         log.info("Agent loop started (interval=%ds)", AGENT_LOOP_INTERVAL_S)
     else:

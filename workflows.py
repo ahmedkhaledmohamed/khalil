@@ -11,7 +11,23 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from config import DB_PATH, WORKFLOW_ENGINE_ENABLED, WORKFLOW_MAX_RUNS_PER_HOUR
+from config import (
+    ActionType,
+    AutonomyLevel,
+    DB_PATH,
+    WORKFLOW_ENGINE_ENABLED,
+    WORKFLOW_MAX_RUNS_PER_HOUR,
+)
+from execution import ActionResult, ExecutionContext, ExecutionSource, get_execution_bus
+from execution_graph import (
+    ExecutionGraphRepository,
+    GraphNode,
+    GraphRun,
+    GraphStatus,
+    NodeStatus,
+)
+from graph_runner import ExecutionGraphRunner
+from background_graph import DISPATCH_ACTION, register_background_handler
 
 log = logging.getLogger("khalil.workflows")
 
@@ -169,6 +185,7 @@ class WorkflowEngine:
         self._chat_id = chat_id
         self._ask_llm = ask_llm_fn
         self._execute_action = execute_action_fn
+        register_background_handler("workflow.step", self._execute_graph_step)
 
     def ensure_tables(self):
         """Create workflow tables and seed defaults."""
@@ -369,30 +386,168 @@ class WorkflowEngine:
         started = datetime.now(timezone.utc).isoformat()
         try:
             results = await self._execute_steps(wf, event_data)
-            status = "completed" if all(r.get("ok") for r in results) else "failed"
+            status = (
+                "waiting_for_approval"
+                if any(r.get("status") == NodeStatus.WAITING_FOR_APPROVAL.value for r in results)
+                else "completed" if all(r.get("ok") for r in results)
+                else "failed"
+            )
             self._record_run(wf.id, event_data, status, results, started)
             self._update_workflow_state(wf.id, status, results)
         finally:
             _executing.discard(wf.id)
 
-    async def _execute_steps(self, wf: Workflow, event_data: dict) -> list[dict]:
-        """Execute workflow action steps sequentially."""
-        results = []
-        step_context = dict(event_data)  # Accumulate results for downstream steps
+    async def _execute_steps(
+        self,
+        wf: Workflow,
+        event_data: dict,
+        *,
+        graph_id: str | None = None,
+        recover_interrupted: bool = False,
+        execution_bus=None,
+    ) -> list[dict]:
+        """Execute workflow steps as a durable sequential graph."""
+        bus = execution_bus or get_execution_bus()
+        if bus is None:
+            return await self._execute_steps_legacy(wf, event_data)
 
+        repository = ExecutionGraphRepository(self._conn)
+        repository.ensure_schema()
+        graph_id = graph_id or f"workflow_{wf.id}_{uuid.uuid4().hex}"
+        graph = repository.load_graph(graph_id)
+        if graph is None:
+            nodes = []
+            for index, step in enumerate(wf.actions):
+                node_id = f"step_{index + 1}"
+                declared_type = bus.get_declared_action_type(step.action)
+                protected = (
+                    step.action in {"notify", "shell"}
+                    or declared_type in {ActionType.WRITE, ActionType.DANGEROUS}
+                )
+                nodes.append(GraphNode(
+                    id=node_id,
+                    action=DISPATCH_ACTION,
+                    dependencies=[
+                        f"step_{prior_index}"
+                        for prior_index in range(1, index + 1)
+                    ],
+                    inputs={
+                        "handler": "workflow.step",
+                        "payload": {
+                            "workflow_id": wf.id,
+                            "step_index": index,
+                            "event_data": event_data,
+                        },
+                    },
+                    idempotency_key=f"{graph_id}:{node_id}" if protected else None,
+                    metadata={
+                        "workflow_id": wf.id,
+                        "step_action": step.action,
+                        "description": step.description,
+                    },
+                ))
+            graph = repository.create_graph(GraphRun(
+                id=graph_id,
+                source=ExecutionSource.WORKFLOW.value,
+                nodes=nodes,
+                inputs={"workflow_id": wf.id, "event_data": event_data},
+                metadata={
+                    "kind": "workflow",
+                    "workflow_id": wf.id,
+                    "chat_id": self._chat_id,
+                },
+            ))
+
+        graph = await ExecutionGraphRunner(repository, bus).run(
+            graph.id,
+            ExecutionContext(
+                source=ExecutionSource.WORKFLOW,
+                autonomy_override=(
+                    AutonomyLevel(wf.autonomy_override)
+                    if wf.autonomy_override else None
+                ),
+                chat_id=self._chat_id,
+                parent_plan_id=graph.id,
+                trigger_id=wf.id,
+            ),
+            recover_interrupted=recover_interrupted,
+        )
+        return self._results_from_graph(graph)
+
+    async def _execute_steps_legacy(self, wf: Workflow, event_data: dict) -> list[dict]:
+        """Compatibility path for callers that initialize workflows without a bus."""
+        results = []
+        step_context = dict(event_data)
         for step in wf.actions:
             try:
                 result = await self._execute_single_step(wf, step, step_context)
                 results.append({"action": step.action, "ok": True, "result": str(result)[:500]})
                 step_context[f"step_{len(results)}_result"] = result
-            except Exception as e:
-                log.error("Workflow %s step %s failed: %s", wf.id, step.action, e)
-                results.append({"action": step.action, "ok": False, "error": str(e)})
-                break  # Stop on first failure
-
+            except Exception as error:
+                log.error("Workflow %s step %s failed: %s", wf.id, step.action, error)
+                results.append({"action": step.action, "ok": False, "error": str(error)})
+                break
         return results
 
-    async def _execute_single_step(self, wf: Workflow, step: WorkflowStep, context: dict) -> Any:
+    async def _execute_graph_step(
+        self, payload: dict, execution_context: ExecutionContext,
+    ) -> ActionResult:
+        """Resolve a persisted workflow step and execute it after restart."""
+        workflow_id = str(payload.get("workflow_id") or "")
+        wf = self.get_workflow(workflow_id)
+        step_index = int(payload.get("step_index", -1))
+        if wf is None or not (0 <= step_index < len(wf.actions)):
+            return ActionResult.failed(
+                f"Workflow step is no longer available: {workflow_id}/{step_index}"
+            )
+        step_context = dict(payload.get("event_data") or {})
+        for index, output in enumerate(execution_context.prior_results.values(), 1):
+            step_context[f"step_{index}_result"] = output
+        try:
+            result = await self._execute_single_step(
+                wf,
+                wf.actions[step_index],
+                step_context,
+                execution_context=execution_context,
+                preserve_action_result=True,
+            )
+            if isinstance(result, ActionResult):
+                return result
+            return ActionResult.succeeded(str(result or ""))
+        except Exception as error:
+            return ActionResult.failed(str(error)[:500])
+
+    @staticmethod
+    def _results_from_graph(graph: GraphRun) -> list[dict]:
+        results = []
+        for node in graph.nodes:
+            outputs = node.outputs or {}
+            action = str(node.metadata.get("step_action") or node.action)
+            if node.status == NodeStatus.SUCCEEDED:
+                results.append({
+                    "action": action,
+                    "ok": True,
+                    "result": str(outputs.get("output") or "")[:500],
+                    "status": node.status.value,
+                })
+            else:
+                results.append({
+                    "action": action,
+                    "ok": False,
+                    "error": str((node.error or {}).get("message") or node.status.value),
+                    "status": node.status.value,
+                })
+        return results
+
+    async def _execute_single_step(
+        self,
+        wf: Workflow,
+        step: WorkflowStep,
+        context: dict,
+        *,
+        execution_context: ExecutionContext | None = None,
+        preserve_action_result: bool = False,
+    ) -> Any:
         """Execute a single workflow step.
 
         Routes through the execution bus when available, falls back to legacy dispatch.
@@ -410,19 +565,30 @@ class WorkflowEngine:
         # Try execution bus for non-special actions
         if action not in ("notify", "llm_summarize"):
             try:
-                from execution import get_execution_bus, ExecutionContext, ExecutionSource
                 bus = get_execution_bus()
                 if bus:
-                    exec_ctx = ExecutionContext(
+                    exec_ctx = execution_context.child(
+                        ExecutionSource.WORKFLOW,
+                        autonomy_override=(
+                            AutonomyLevel(wf.autonomy_override)
+                            if wf.autonomy_override else None
+                        ),
+                        trigger_id=wf.id,
+                    ) if execution_context else ExecutionContext(
                         source=ExecutionSource.WORKFLOW,
-                        autonomy_override=wf.autonomy_override if hasattr(wf, 'autonomy_override') and wf.autonomy_override else None,
+                        autonomy_override=(
+                            AutonomyLevel(wf.autonomy_override)
+                            if wf.autonomy_override else None
+                        ),
                         chat_id=self._chat_id,
                         trigger_id=wf.id,
                     )
                     result = await bus.execute(action, params, exec_ctx)
                     if result.success:
-                        return result.output or "ok"
+                        return result if preserve_action_result else result.output or "ok"
                     if result.error and "No handler" not in (result.error or ""):
+                        if preserve_action_result:
+                            return result
                         raise RuntimeError(result.error)
                     # Fall through to legacy dispatch if no handler found
             except ImportError:
@@ -912,3 +1078,58 @@ def init_engine(conn: sqlite3.Connection, channel=None, chat_id: int | None = No
     _engine = WorkflowEngine(conn, channel, chat_id, ask_llm_fn, execute_action_fn)
     _engine.ensure_tables()
     return _engine
+
+
+async def resume_active_workflows(execution_bus) -> list[GraphRun]:
+    """Resume interrupted workflow graphs after handlers have been registered."""
+    engine = get_engine()
+    if engine is None:
+        return []
+    repository = ExecutionGraphRepository(engine._conn)
+    repository.ensure_schema()
+    graphs = [
+        graph for graph in repository.list_resumable_runs(limit=100)
+        if graph.source == ExecutionSource.WORKFLOW.value
+        and graph.status in {GraphStatus.PENDING, GraphStatus.RUNNING}
+    ]
+    resumed = []
+    for graph in graphs:
+        workflow_id = str(graph.metadata.get("workflow_id") or "")
+        wf = engine.get_workflow(workflow_id)
+        if wf is None:
+            log.warning("Cannot resume workflow graph %s: workflow missing", graph.id)
+            continue
+        _executing.add(wf.id)
+        try:
+            results = await engine._execute_steps(
+                wf,
+                dict(graph.inputs.get("event_data") or {}),
+                graph_id=graph.id,
+                recover_interrupted=True,
+                execution_bus=execution_bus,
+            )
+            status = (
+                "waiting_for_approval"
+                if any(
+                    result.get("status") == NodeStatus.WAITING_FOR_APPROVAL.value
+                    for result in results
+                )
+                else "completed" if all(result.get("ok") for result in results)
+                else "failed"
+            )
+            engine._record_run(
+                wf.id,
+                dict(graph.inputs.get("event_data") or {}),
+                status,
+                results,
+                graph.created_at,
+            )
+            engine._update_workflow_state(wf.id, status, results)
+            refreshed = repository.load_graph(graph.id)
+            if refreshed is not None:
+                resumed.append(refreshed)
+        except Exception as error:
+            log.exception("Failed to resume workflow graph %s: %s", graph.id, error)
+        finally:
+            _executing.discard(wf.id)
+    return resumed
