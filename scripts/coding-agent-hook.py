@@ -156,6 +156,14 @@ def _secret() -> str | None:
     if configured:
         return configured
     try:
+        import keyring
+
+        configured = keyring.get_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
+        if configured:
+            return configured
+    except Exception:
+        pass
+    try:
         result = subprocess.run(
             [
                 "/usr/bin/security", "find-generic-password",
