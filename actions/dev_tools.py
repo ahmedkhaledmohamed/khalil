@@ -19,6 +19,7 @@ log = logging.getLogger("khalil.actions.dev_tools")
 
 _SESSION_STATE_KEY = "coding_session_bridge"
 _PROMPT_STABILITY_POLLS = 2
+_NATIVE_EVENT_TTL_SECONDS = 2 * 60 * 60
 _BRIDGE_STATE_LOCK = asyncio.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _APPROVAL_PATTERNS = (
@@ -164,7 +165,7 @@ def _session_key(process: dict) -> str:
 
 
 def _load_bridge_state() -> dict:
-    empty = {"sessions": {}, "message_index": {}}
+    empty = {"sessions": {}, "message_index": {}, "event_index": {}}
     try:
         conn = sqlite3.connect(str(DB_PATH))
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (_SESSION_STATE_KEY,)).fetchone()
@@ -174,6 +175,8 @@ def _load_bridge_state() -> dict:
         state = json.loads(row[0])
         if not isinstance(state.get("sessions"), dict) or not isinstance(state.get("message_index"), dict):
             return empty
+        if not isinstance(state.get("event_index"), dict):
+            state["event_index"] = {}
         return state
     except Exception as exc:
         log.debug("Failed to load coding-session bridge state: %s", exc)
@@ -333,11 +336,13 @@ def _format_session_notification(session: dict) -> str:
     project = session.get("cwd") or "Unknown project"
     interaction_id = session["interaction_id"]
     kind = "approval" if session.get("approval") else "input"
-    instructions = (
-        f"Reply with `approve <exact choice>` or `deny <exact choice>` (ID {interaction_id})."
-        if session.get("approval") else
-        f"Reply directly to this message with your answer (ID {interaction_id})."
-    )
+    controllable = session.get("target_kind") != "unavailable"
+    if not controllable:
+        instructions = "This terminal is not remotely controllable; answer in the original session."
+    elif session.get("approval"):
+        instructions = f"Reply with `approve <exact choice>` or `deny <exact choice>` (ID {interaction_id})."
+    else:
+        instructions = f"Reply directly to this message with your answer (ID {interaction_id})."
     return (
         f"Coding session needs {kind}\n\n"
         f"Agent: {session['agent']}\n"
@@ -345,6 +350,17 @@ def _format_session_notification(session: dict) -> str:
         f"Terminal: {session['target_kind']} {session.get('target_name') or session['target']}\n\n"
         f"{session['prompt']}\n\n{instructions}"
     )
+
+
+def _native_event_is_pending(session: dict) -> bool:
+    if session.get("source") != "native_hook" or session.get("status") != "needs_input":
+        return False
+    try:
+        updated = datetime.fromisoformat(session["native_event_at"])
+        age = datetime.now(timezone.utc) - updated.astimezone(timezone.utc)
+        return age.total_seconds() < _NATIVE_EVENT_TTL_SECONDS
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
@@ -365,14 +381,20 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
         previous = old_sessions.get(key, {})
         output = await _read_target(target)
         prompt, approval = _extract_input_prompt(output)
+        native_pending = _native_event_is_pending(previous)
         prompt_hash = hashlib.sha256((prompt or "").encode()).hexdigest()[:16] if prompt else None
+        if native_pending:
+            prompt_hash = previous.get("candidate_hash")
+            approval = previous.get("approval", False)
         same_candidate = prompt_hash and prompt_hash == previous.get("candidate_hash")
         candidate_polls = previous.get("candidate_polls", 0) + 1 if same_candidate else (1 if prompt else 0)
         answered_same_prompt = (
             previous.get("status") == "responded"
             and previous.get("candidate_hash") == prompt_hash
         )
-        if answered_same_prompt:
+        if native_pending:
+            status = "needs_input"
+        elif answered_same_prompt:
             status = "responded"
         else:
             status = "needs_input" if prompt and candidate_polls >= _PROMPT_STABILITY_POLLS else "running"
@@ -394,6 +416,10 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
             "candidate_hash": prompt_hash,
             "candidate_polls": candidate_polls,
             "notification_message_id": previous.get("notification_message_id"),
+            "source": previous.get("source") if native_pending else "terminal_poll",
+            "external_session_id": previous.get("external_session_id"),
+            "notified_at": previous.get("notified_at"),
+            "native_event_at": previous.get("native_event_at"),
             "updated_at": _utc_now(),
         }
 
@@ -419,6 +445,173 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
     state["sessions"] = active_sessions
     _save_bridge_state(state)
     return notifications
+
+
+def _normalise_event_agent(value: object) -> str | None:
+    agent = str(value or "").strip().lower()
+    if agent == "codex":
+        return "Codex"
+    if agent in {"claude", "claude-code", "claude_code", "claude code"}:
+        return "Claude Code"
+    return None
+
+
+def _event_process(payload: dict, processes: list[dict], agent: str) -> dict | None:
+    candidates = [process for process in processes if process["agent"] == agent]
+    try:
+        pid = int(payload.get("pid"))
+    except (TypeError, ValueError):
+        pid = None
+    if pid is not None:
+        exact = [process for process in candidates if process["pid"] == pid]
+        if len(exact) == 1:
+            return exact[0]
+
+    tty = _normalise_tty(str(payload.get("tty") or ""))
+    if tty:
+        exact = [
+            process for process in candidates
+            if _normalise_tty(process.get("tty", "")) == tty
+        ]
+        if len(exact) == 1:
+            return exact[0]
+
+    cwd = str(payload.get("cwd") or "").strip()
+    if cwd:
+        exact = [process for process in candidates if process.get("cwd") == cwd]
+        if len(exact) == 1:
+            return exact[0]
+    return None
+
+
+def _event_session_key(payload: dict, agent: str, process: dict | None) -> str:
+    if process:
+        return _session_key(process)
+    identity = ":".join((
+        agent,
+        str(payload.get("session_id") or ""),
+        str(payload.get("pid") or ""),
+        _normalise_tty(str(payload.get("tty") or "")),
+        str(payload.get("cwd") or ""),
+    ))
+    return hashlib.sha256(identity.encode()).hexdigest()[:16]
+
+
+def _remember_event(state: dict, event_id: str) -> None:
+    state["event_index"][event_id] = _utc_now()
+    if len(state["event_index"]) > 500:
+        newest = sorted(
+            state["event_index"].items(), key=lambda item: item[1], reverse=True,
+        )[:500]
+        state["event_index"] = dict(newest)
+
+
+async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str) -> dict:
+    """Apply one authenticated native hook event to the session bridge."""
+    if payload.get("schema_version") != 1:
+        return {"accepted": False, "reason": "unsupported_schema"}
+    agent = _normalise_event_agent(payload.get("agent"))
+    event = str(payload.get("event") or "")
+    if not agent or event not in {"needs_input", "completed"}:
+        return {"accepted": False, "reason": "unsupported_event"}
+
+    event_id = str(payload.get("event_id") or "")[:200]
+    if not event_id:
+        return {"accepted": False, "reason": "missing_event_id"}
+    state = _load_bridge_state()
+    if event_id in state["event_index"]:
+        return {"accepted": True, "duplicate": True}
+
+    external_session_id = str(payload.get("session_id") or "")[:300] or None
+    existing_key = next((
+        key for key, session in state["sessions"].items()
+        if external_session_id
+        and session.get("agent") == agent
+        and session.get("external_session_id") == external_session_id
+    ), None)
+    processes = await _get_coding_agent_processes()
+    process = _event_process(payload, processes, agent)
+    if event == "completed" and existing_key:
+        key = existing_key
+    else:
+        key = _event_session_key(payload, agent, process)
+    previous = state["sessions"].get(key, {})
+
+    if event == "completed":
+        _remember_event(state, event_id)
+        if previous:
+            state["message_index"] = {
+                message_id: indexed_key
+                for message_id, indexed_key in state["message_index"].items()
+                if indexed_key != key
+            }
+            previous["status"] = "responded"
+            previous["notification_message_id"] = None
+            previous["completed_at"] = _utc_now()
+            previous["updated_at"] = _utc_now()
+            state["sessions"][key] = previous
+        _save_bridge_state(state)
+        return {"accepted": True, "cleared": bool(previous)}
+
+    prompt = str(payload.get("prompt") or "").strip()[:8000]
+    if not prompt:
+        return {"accepted": False, "reason": "missing_prompt"}
+    prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    if (
+        previous.get("status") == "needs_input"
+        and previous.get("candidate_hash") == prompt_hash
+        and previous.get("notified_at")
+    ):
+        _remember_event(state, event_id)
+        _save_bridge_state(state)
+        return {"accepted": True, "duplicate": True}
+
+    # A background process may still share a TTY with an unrelated foreground
+    # command. Notify for it, but expose reply routing only while the coding
+    # agent itself owns the foreground terminal.
+    controllable_process = process if process and "+" in process.get("stat", "") else None
+    targets = await _resolve_control_targets([controllable_process] if controllable_process else [])
+    target = targets.get(_session_key(process)) if process else None
+    session = {
+        "key": key,
+        "interaction_id": key[:8],
+        "agent": agent,
+        "pid": process["pid"] if process else payload.get("pid"),
+        "started": process.get("started") if process else None,
+        "tty": _normalise_tty(process["tty"] if process else str(payload.get("tty") or "")),
+        "cwd": process.get("cwd") if process else str(payload.get("cwd") or "") or None,
+        "target_kind": target["kind"] if target else "unavailable",
+        "target": target["target"] if target else "original terminal",
+        "target_identity": target["identity"] if target else None,
+        "target_name": target.get("name") if target else None,
+        "bridge_url": target.get("bridge_url") if target else None,
+        "status": "needs_input",
+        "approval": bool(payload.get("approval")),
+        "candidate_hash": prompt_hash,
+        "candidate_polls": _PROMPT_STABILITY_POLLS,
+        "notification_message_id": None,
+        "external_session_id": external_session_id,
+        "source": "native_hook",
+        "notified_at": _utc_now(),
+        "native_event_at": _utc_now(),
+        "updated_at": _utc_now(),
+    }
+    sent = await channel.send_message(
+        chat_id, _format_session_notification({**session, "prompt": _redact_prompt(prompt)}),
+    )
+    session["notification_message_id"] = str(sent.message_id)
+    if target:
+        state["message_index"][str(sent.message_id)] = key
+    state["sessions"][key] = session
+    _remember_event(state, event_id)
+    _save_bridge_state(state)
+    return {"accepted": True, "notified": True, "controllable": bool(target)}
+
+
+async def record_coding_agent_event(payload: dict, channel, chat_id: int | str) -> dict:
+    """Serialize native hook delivery with polling and Telegram replies."""
+    async with _BRIDGE_STATE_LOCK:
+        return await _record_coding_agent_event(payload, channel, chat_id)
 
 
 async def poll_coding_sessions(channel, chat_id: int | str) -> int:
@@ -493,6 +686,7 @@ async def _handle_session_reply(ctx, query: str) -> bool:
     live_target = targets.get(key)
     if (
         not live or not live_target
+        or "+" not in live.get("stat", "")
         or live_target["kind"] != session["target_kind"]
         or live_target["identity"] != session.get("target_identity")
     ):

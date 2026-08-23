@@ -8093,6 +8093,38 @@ async def whatsapp_verify(request: Request):
     return PlainTextResponse("Forbidden", status_code=403)
 
 
+# --- Coding-agent webhook (must be before generic {source} catch-all) ---
+
+@app.post("/webhook/coding-agent")
+async def coding_agent_webhook(request: Request):
+    """Receive signed lifecycle events from local Codex and Claude hooks."""
+    client_host = request.client.host if request.client else None
+    if client_host not in {"127.0.0.1", "::1"}:
+        raise HTTPException(status_code=403, detail="Local requests only")
+
+    body = await request.body()
+    if len(body) > 64 * 1024:
+        raise HTTPException(status_code=413, detail="Payload too large")
+
+    from webhooks.coding_agent import CodingAgentWebhookHandler
+
+    handler = CodingAgentWebhookHandler()
+    if not await handler.validate(dict(request.headers), body):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+
+    primary = channel_registry.get("telegram") or channel_registry.get_primary()
+    if not primary or OWNER_CHAT_ID is None:
+        raise HTTPException(status_code=503, detail="Primary channel is unavailable")
+    result = await handler.deliver(payload, primary, OWNER_CHAT_ID)
+    return {"ok": True, **result}
+
+
 # --- Generic webhook endpoints (catch-all for GitHub, etc.) ---
 
 @app.post("/webhook/{source}")
