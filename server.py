@@ -772,7 +772,8 @@ async def get_conversation_context(chat_id: int, query: str) -> str:
                 plan_lines.append(f"  Status: {plan.status} (ID: {plan.plan_id})")
                 for step in plan.steps:
                     status_label = {"completed": "DONE", "failed": "FAILED", "pending": "TODO",
-                                    "running": "RUNNING", "blocked": "BLOCKED", "skipped": "SKIPPED"}.get(step.status, "?")
+                                    "running": "RUNNING", "blocked": "BLOCKED", "skipped": "SKIPPED",
+                                    "waiting_for_approval": "WAITING_APPROVAL"}.get(step.status, "?")
                     line = f"  [{status_label}] {step.description}"
                     if step.result:
                         line += f" -> {step.result[:150]}"
@@ -7775,19 +7776,16 @@ async def startup():
                     "Could not decompose into steps", kind=ActionErrorKind.VALIDATION,
                 )
             child_ctx = ctx.child(ExecutionSource.ORCHESTRATOR, parent_plan_id=None)
-            async def _step_fn(step, prior_results=None):
-                r = await _exec_bus.execute(
-                    step.action, {**step.params, "description": step.description},
-                    child_ctx,
-                )
-                return r.output if r.success else f"Error: {r.error}"
             plan_result = await execute_task_plan(
-                steps, task_desc, channel, ctx.chat_id or OWNER_CHAT_ID, _step_fn,
-                ask_llm_fn=ask_llm,
+                steps, task_desc, channel, ctx.chat_id or OWNER_CHAT_ID,
+                execution_bus=_exec_bus,
+                execution_context=child_ctx,
             )
             summary = format_plan_summary(plan_result)
             if plan_result.status == "completed":
                 return ActionResult.succeeded(summary)
+            if plan_result.status == "waiting_for_approval":
+                return ActionResult.waiting_for_approval(summary, output=summary)
             return ActionResult.failed(
                 f"Plan ended with status: {plan_result.status}", output=summary,
             )
@@ -7837,6 +7835,9 @@ async def startup():
         _exec_bus.register_composite_action("orchestrate", _composite_orchestrate)
         _exec_bus.register_composite_action("tool_reason", _composite_tool_reason)
         _exec_bus.register_composite_action("workflow", _composite_workflow)
+
+        from orchestrator import resume_active_plans
+        asyncio.create_task(resume_active_plans(_exec_bus, channel))
 
     # Initialize workflow engine
     try:

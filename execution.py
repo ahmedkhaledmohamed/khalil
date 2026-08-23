@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Awaitable
 
-from config import AutonomyLevel
+from config import ActionType, AutonomyLevel
 
 log = logging.getLogger("khalil.execution")
 
@@ -244,6 +244,12 @@ class ExecutionBus:
         """Register a handler for composite action types (orchestrate, tool_reason, workflow)."""
         self._composite_handlers[action_type] = handler
 
+    def get_declared_action_type(self, action: str) -> ActionType | None:
+        """Return the action's intrinsic risk type from the skill manifest."""
+        registry = self._get_registry()
+        get_action_type = getattr(registry, "get_action_type", None)
+        return get_action_type(action) if get_action_type else None
+
     async def execute(
         self,
         action: str,
@@ -289,10 +295,7 @@ class ExecutionBus:
                 return result
 
         registry = self._get_registry()
-        declared_type = None
-        get_action_type = getattr(registry, "get_action_type", None)
-        if get_action_type is not None:
-            declared_type = get_action_type(action)
+        declared_type = self.get_declared_action_type(action)
         handler = registry.get_handler(action)
         if handler is None:
             return ActionResult.failed(
