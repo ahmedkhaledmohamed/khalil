@@ -20,8 +20,14 @@ log = logging.getLogger("khalil.actions.dev_tools")
 _SESSION_STATE_KEY = "coding_session_bridge"
 _PROMPT_STABILITY_POLLS = 2
 _NATIVE_EVENT_TTL_SECONDS = 2 * 60 * 60
+_NATIVE_DUPLICATE_WINDOW_SECONDS = 30
 _BRIDGE_STATE_LOCK = asyncio.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+_CODEX_TUI_QUESTION = re.compile(
+    r"(?:^|\n)\s*[•●]\s+((?:what|which|how|where|when|why|would|should|do you|"
+    r"are you|can you|could you)[^\n?]{3,240}\?)",
+    re.I,
+)
 _APPROVAL_PATTERNS = (
     re.compile(r"\bdo you want to (?:proceed|continue|allow|run|execute)\b", re.I),
     re.compile(r"\b(?:allow|approve|permit|authorize)\b.{0,100}\?", re.I | re.S),
@@ -316,6 +322,10 @@ def _extract_input_prompt(output: str | None) -> tuple[str | None, bool]:
     tail = "\n".join(lines[-18:]).strip()
     if not tail:
         return None, False
+    if "Ask Codex to do anything" in tail:
+        questions = _CODEX_TUI_QUESTION.findall(tail)
+        if questions:
+            return questions[-1].strip(), False
     approval = any(pattern.search(tail) for pattern in _APPROVAL_PATTERNS)
     if not approval and not any(pattern.search(tail) for pattern in _INPUT_PATTERNS):
         return None, False
@@ -359,6 +369,23 @@ def _native_event_is_pending(session: dict) -> bool:
         updated = datetime.fromisoformat(session["native_event_at"])
         age = datetime.now(timezone.utc) - updated.astimezone(timezone.utc)
         return age.total_seconds() < _NATIVE_EVENT_TTL_SECONDS
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _recent_native_input(session: dict, agent: str, external_session_id: str | None) -> bool:
+    if (
+        not external_session_id
+        or session.get("source") != "native_hook"
+        or session.get("status") != "needs_input"
+        or session.get("agent") != agent
+        or session.get("external_session_id") != external_session_id
+    ):
+        return False
+    try:
+        notified = datetime.fromisoformat(session["notified_at"])
+        age = datetime.now(timezone.utc) - notified.astimezone(timezone.utc)
+        return age.total_seconds() < _NATIVE_DUPLICATE_WINDOW_SECONDS
     except (KeyError, TypeError, ValueError):
         return False
 
@@ -531,7 +558,7 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
     ), None)
     processes = await _get_coding_agent_processes()
     process = _event_process(payload, processes, agent)
-    if event == "completed" and existing_key:
+    if existing_key:
         key = existing_key
     else:
         key = _event_session_key(payload, agent, process)
@@ -559,9 +586,18 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
     if (
         previous.get("status") == "needs_input"
-        and previous.get("candidate_hash") == prompt_hash
+        and (
+            previous.get("candidate_hash") == prompt_hash
+            or _recent_native_input(previous, agent, external_session_id)
+        )
         and previous.get("notified_at")
     ):
+        current_message_id = str(previous.get("notification_message_id") or "")
+        state["message_index"] = {
+            message_id: indexed_key
+            for message_id, indexed_key in state["message_index"].items()
+            if indexed_key != key or message_id == current_message_id
+        }
         _remember_event(state, event_id)
         _save_bridge_state(state)
         return {"accepted": True, "duplicate": True}
@@ -600,6 +636,11 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         chat_id, _format_session_notification({**session, "prompt": _redact_prompt(prompt)}),
     )
     session["notification_message_id"] = str(sent.message_id)
+    state["message_index"] = {
+        message_id: indexed_key
+        for message_id, indexed_key in state["message_index"].items()
+        if indexed_key != key
+    }
     if target:
         state["message_index"][str(sent.message_id)] = key
     state["sessions"][key] = session
