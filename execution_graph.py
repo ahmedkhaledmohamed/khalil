@@ -43,6 +43,12 @@ class TerminationReason(str, Enum):
     COMPENSATED = "compensated"
 
 
+class IdempotencyClaimStatus(str, Enum):
+    ACQUIRED = "acquired"
+    COMPLETED = "completed"
+    AMBIGUOUS = "ambiguous"
+
+
 _GRAPH_TRANSITIONS = {
     GraphStatus.PENDING: {GraphStatus.RUNNING, GraphStatus.CANCELLED},
     GraphStatus.RUNNING: {
@@ -61,7 +67,7 @@ _GRAPH_TRANSITIONS = {
 
 _NODE_TRANSITIONS = {
     NodeStatus.PENDING: {NodeStatus.READY, NodeStatus.CANCELLED},
-    NodeStatus.READY: {NodeStatus.RUNNING, NodeStatus.CANCELLED},
+    NodeStatus.READY: {NodeStatus.RUNNING, NodeStatus.FAILED, NodeStatus.CANCELLED},
     NodeStatus.RUNNING: {
         NodeStatus.WAITING_FOR_APPROVAL,
         NodeStatus.SUCCEEDED,
@@ -102,6 +108,12 @@ _UNSET = object()
 
 class InvalidTransition(ValueError):
     """Raised when persisted execution state would move illegally."""
+
+
+@dataclass(frozen=True)
+class IdempotencyClaim:
+    status: IdempotencyClaimStatus
+    result: dict[str, Any] | None = None
 
 
 def _utc_now() -> str:
@@ -262,6 +274,18 @@ class ExecutionGraphRepository:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_execution_nodes_idempotency
                     ON execution_nodes(graph_id, idempotency_key)
                     WHERE idempotency_key IS NOT NULL;
+
+                CREATE TABLE IF NOT EXISTS execution_idempotency (
+                    idempotency_key TEXT PRIMARY KEY,
+                    graph_id TEXT NOT NULL,
+                    node_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    result_json TEXT,
+                    claimed_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    FOREIGN KEY (graph_id, node_id)
+                        REFERENCES execution_nodes(graph_id, node_id) ON DELETE CASCADE
+                );
             """)
 
     def create_graph(self, graph: GraphRun) -> GraphRun:
@@ -398,7 +422,14 @@ class ExecutionGraphRepository:
         current = NodeStatus(row[0])
         _validate_transition(current, target, _NODE_TRANSITIONS)
         now = _utc_now()
-        attempt_count = row[1] + 1 if target == NodeStatus.RUNNING else row[1]
+        if target == NodeStatus.RUNNING:
+            attempt_count = row[1] + 1
+        elif target == NodeStatus.WAITING_FOR_APPROVAL and current == NodeStatus.RUNNING:
+            # The Execution Bus returns before invoking a protected handler, so
+            # an approval pause does not consume an execution attempt.
+            attempt_count = max(0, row[1] - 1)
+        else:
+            attempt_count = row[1]
         started_at = row[2] or (now if target == NodeStatus.RUNNING else None)
         completed_at = now if target in _TERMINAL_NODE_STATUSES else None
         with self.conn:
@@ -423,6 +454,136 @@ class ExecutionGraphRepository:
         if graph is None:
             raise KeyError(f"Unknown execution graph {graph_id!r}")
         return next(node for node in graph.nodes if node.id == node_id)
+
+    def claim_node(self, graph_id: str, node_id: str) -> GraphNode | None:
+        """Atomically move one ready node to running.
+
+        Returning ``None`` means another runner claimed it or its retry budget
+        was already exhausted.
+        """
+        now = _utc_now()
+        with self.conn:
+            cursor = self.conn.execute(
+                """UPDATE execution_nodes
+                   SET status = ?, attempt_count = attempt_count + 1,
+                       started_at = COALESCE(started_at, ?), completed_at = NULL,
+                       updated_at = ?
+                   WHERE graph_id = ? AND node_id = ? AND status = ?
+                     AND attempt_count < max_attempts""",
+                (
+                    NodeStatus.RUNNING.value, now, now, graph_id, node_id,
+                    NodeStatus.READY.value,
+                ),
+            )
+            if cursor.rowcount == 1:
+                self.conn.execute(
+                    "UPDATE execution_graphs SET updated_at = ? WHERE id = ?",
+                    (now, graph_id),
+                )
+        if cursor.rowcount != 1:
+            return None
+        graph = self.load_graph(graph_id)
+        if graph is None:
+            raise KeyError(f"Unknown execution graph {graph_id!r}")
+        return next(node for node in graph.nodes if node.id == node_id)
+
+    def reset_interrupted_node(self, graph_id: str, node_id: str) -> bool:
+        """Return an interrupted read-only node to ready without a new attempt."""
+        now = _utc_now()
+        with self.conn:
+            cursor = self.conn.execute(
+                """UPDATE execution_nodes
+                   SET status = ?,
+                       attempt_count = CASE
+                           WHEN attempt_count > 0 THEN attempt_count - 1
+                           ELSE 0
+                       END,
+                       completed_at = NULL, updated_at = ?
+                   WHERE graph_id = ? AND node_id = ? AND status = ?""",
+                (
+                    NodeStatus.READY.value, now, graph_id, node_id,
+                    NodeStatus.RUNNING.value,
+                ),
+            )
+            if cursor.rowcount == 1:
+                self.conn.execute(
+                    "UPDATE execution_graphs SET updated_at = ? WHERE id = ?",
+                    (now, graph_id),
+                )
+        return cursor.rowcount == 1
+
+    def claim_idempotency(
+        self, idempotency_key: str, graph_id: str, node_id: str,
+    ) -> IdempotencyClaim:
+        """Claim a protected effect or return its durable prior outcome."""
+        now = _utc_now()
+        with self.conn:
+            cursor = self.conn.execute(
+                """INSERT OR IGNORE INTO execution_idempotency
+                   (idempotency_key, graph_id, node_id, status, claimed_at)
+                   VALUES (?, ?, ?, 'claimed', ?)""",
+                (idempotency_key, graph_id, node_id, now),
+            )
+            if cursor.rowcount == 1:
+                return IdempotencyClaim(IdempotencyClaimStatus.ACQUIRED)
+            row = self.conn.execute(
+                """SELECT status, result_json FROM execution_idempotency
+                   WHERE idempotency_key = ?""",
+                (idempotency_key,),
+            ).fetchone()
+        if row and row[0] == "completed":
+            return IdempotencyClaim(
+                IdempotencyClaimStatus.COMPLETED,
+                json.loads(row[1]) if row[1] is not None else None,
+            )
+        return IdempotencyClaim(IdempotencyClaimStatus.AMBIGUOUS)
+
+    def complete_idempotency(
+        self,
+        idempotency_key: str,
+        graph_id: str,
+        node_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        now = _utc_now()
+        with self.conn:
+            cursor = self.conn.execute(
+                """UPDATE execution_idempotency
+                   SET status = 'completed', result_json = ?, completed_at = ?
+                   WHERE idempotency_key = ? AND graph_id = ? AND node_id = ?
+                     AND status = 'claimed'""",
+                (_json(result), now, idempotency_key, graph_id, node_id),
+            )
+        if cursor.rowcount != 1:
+            raise InvalidTransition("Idempotency claim is not owned by this node")
+
+    def release_idempotency(
+        self, idempotency_key: str, graph_id: str, node_id: str,
+    ) -> bool:
+        """Release a claim only when execution stopped before its handler ran."""
+        with self.conn:
+            cursor = self.conn.execute(
+                """DELETE FROM execution_idempotency
+                   WHERE idempotency_key = ? AND graph_id = ? AND node_id = ?
+                     AND status = 'claimed'""",
+                (idempotency_key, graph_id, node_id),
+            )
+        return cursor.rowcount == 1
+
+    def get_idempotency_claim(self, idempotency_key: str) -> IdempotencyClaim | None:
+        row = self.conn.execute(
+            """SELECT status, result_json FROM execution_idempotency
+               WHERE idempotency_key = ?""",
+            (idempotency_key,),
+        ).fetchone()
+        if row is None:
+            return None
+        if row[0] == "completed":
+            return IdempotencyClaim(
+                IdempotencyClaimStatus.COMPLETED,
+                json.loads(row[1]) if row[1] is not None else None,
+            )
+        return IdempotencyClaim(IdempotencyClaimStatus.AMBIGUOUS)
 
     def checkpoint_node(
         self,

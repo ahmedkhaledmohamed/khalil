@@ -189,6 +189,7 @@ def _get_active_plans(chat_id: int) -> str:
                     status_label = {
                         "completed": "DONE", "failed": "FAILED", "pending": "TODO",
                         "running": "RUNNING", "blocked": "BLOCKED", "skipped": "SKIPPED",
+                        "waiting_for_approval": "WAITING_APPROVAL",
                     }.get(step.status, "?")
                     line = f"  [{status_label}] {step.description}"
                     if step.result:

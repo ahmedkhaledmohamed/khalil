@@ -1,6 +1,5 @@
 """Multi-step task orchestrator — decompose compound requests, execute with dependencies."""
 
-import asyncio
 import json
 import logging
 import re
@@ -9,7 +8,16 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from config import DB_PATH, SWARM_ENABLED
+from config import ActionType, DB_PATH
+from execution import ActionResult, ExecutionContext, ExecutionSource
+from execution_graph import (
+    ExecutionGraphRepository,
+    GraphNode,
+    GraphRun,
+    GraphStatus,
+    NodeStatus,
+)
+from graph_runner import ExecutionGraphRunner, NodePreparation
 
 log = logging.getLogger("khalil.orchestrator")
 
@@ -47,6 +55,8 @@ class TaskStep:
         }
         if self.condition:
             d["condition"] = self.condition
+        if self.replan_count:
+            d["replan_count"] = self.replan_count
         return d
 
     @classmethod
@@ -61,6 +71,7 @@ class TaskStep:
             result=d.get("result"),
             error=d.get("error"),
             condition=d.get("condition"),
+            replan_count=d.get("replan_count", 0),
         )
 
 
@@ -75,6 +86,8 @@ class PlanResult:
 
     @property
     def status(self) -> str:
+        if any(step.status == "waiting_for_approval" for step in self.steps):
+            return "waiting_for_approval"
         if self.failed_count > 0:
             return "partial_failure"
         if self.blocked_count > 0:
@@ -228,230 +241,136 @@ def substitute_step_params(step: TaskStep, step_results: dict[str, str]):
             step.params[k] = _re.sub(pattern, _replace, v)
 
 
-async def replan_on_failure(
-    failed_step: TaskStep,
-    remaining_steps: list[TaskStep],
-    step_results: dict[str, str],
-    query: str,
-    ask_llm_fn,
-) -> str:
-    """Ask LLM how to handle a step failure: retry, skip, adapt, or abort.
-
-    Returns one of: "retry", "skip", "adapt", "abort"
-    If "adapt", modifies remaining_steps in place with adapted descriptions.
-    """
-    if not ask_llm_fn:
-        return "abort"
-
-    remaining_desc = "\n".join(
-        f"  - {s.id}: {s.description}" for s in remaining_steps if s.status == "pending"
-    )
-    prior_desc = "\n".join(
-        f"  - {sid}: {result[:200]}" for sid, result in step_results.items()
-    )
-
-    prompt = (
-        f"A multi-step plan encountered a failure. Decide what to do.\n\n"
-        f"Original request: {query}\n\n"
-        f"Failed step: {failed_step.id} — {failed_step.description}\n"
-        f"Error: {failed_step.error}\n\n"
-        f"Completed step results:\n{prior_desc or '  (none)'}\n\n"
-        f"Remaining steps:\n{remaining_desc or '  (none)'}\n\n"
-        f"Choose ONE action and respond with ONLY that word:\n"
-        f"- retry: Retry the failed step (e.g., transient error)\n"
-        f"- skip: Skip this step and continue with remaining steps\n"
-        f"- adapt: Modify remaining steps to work without this step's output\n"
-        f"- abort: Stop the entire plan\n\n"
-        f"Decision:"
-    )
-
-    try:
-        response = await ask_llm_fn(prompt, "", "Respond with exactly one word: retry, skip, adapt, or abort.")
-        decision = response.strip().lower().split()[0] if response else "abort"
-        if decision not in ("retry", "skip", "adapt", "abort"):
-            decision = "abort"
-        log.info("Replan decision for %s: %s", failed_step.id, decision)
-        return decision
-    except Exception as e:
-        log.warning("Replan LLM call failed: %s — defaulting to abort", e)
-        return "abort"
-
-
 async def execute_plan(
     steps: list[TaskStep],
     query: str,
     channel,
     chat_id: int,
-    execute_step_fn,
+    execute_step_fn=None,
     ask_llm_fn=None,
+    *,
+    execution_bus=None,
+    execution_context: ExecutionContext | None = None,
+    plan_id: str | None = None,
+    recover_interrupted: bool = False,
 ) -> PlanResult:
-    """Execute a plan of TaskSteps respecting dependencies.
+    """Execute or resume an orchestrator plan through the durable graph runner."""
+    if execution_bus is None and execute_step_fn is None:
+        raise ValueError("execute_plan requires an ExecutionBus or execute_step_fn")
 
-    Args:
-        steps: list of TaskSteps to execute
-        query: original user query
-        channel: Channel instance for progress updates
-        chat_id: chat to send updates to
-        execute_step_fn: async callable(step: TaskStep, prior_results: dict[str, str]) -> str
-                         that executes a single step with results from completed dependencies,
-                         and returns a result string. Raises on failure.
-    """
-    plan_id = f"plan_{uuid.uuid4().hex[:8]}"
+    plan_id = plan_id or f"plan_{uuid.uuid4().hex[:8]}"
     total = len(steps)
-
-    # Build dependency graph: step_id -> set of step_ids it depends on
-    pending_deps = {s.id: set(s.depends_on) for s in steps}
     step_map = {s.id: s for s in steps}
-    # Accumulate results from completed steps for downstream consumption
-    step_results: dict[str, str] = {}
+    conn = _get_conn()
+    repository = ExecutionGraphRepository(conn)
+    repository.ensure_schema()
+    graph = repository.load_graph(plan_id)
+    if graph is None:
+        graph_nodes = []
+        for step in steps:
+            idempotency_key = step.params.get("idempotency_key")
+            if idempotency_key is None and execution_bus is not None:
+                get_action_type = getattr(execution_bus, "get_declared_action_type", None)
+                declared_type = get_action_type(step.action) if get_action_type else None
+                if declared_type in {ActionType.WRITE, ActionType.DANGEROUS}:
+                    idempotency_key = f"{plan_id}:{step.id}"
+            graph_nodes.append(GraphNode(
+                id=step.id,
+                action=step.action,
+                dependencies=list(step.depends_on),
+                inputs=dict(step.params),
+                idempotency_key=idempotency_key,
+                max_attempts=MAX_REPLANS + 1,
+                metadata={
+                    "description": step.description,
+                    "condition": step.condition,
+                },
+            ))
+        graph = repository.create_graph(GraphRun(
+            id=plan_id,
+            source=ExecutionSource.ORCHESTRATOR.value,
+            nodes=graph_nodes,
+            inputs={"query": query},
+            metadata={"chat_id": chat_id, "kind": "orchestrator"},
+        ))
 
-    result = PlanResult(plan_id=plan_id, query=query, steps=steps)
+    async def _prepare(node: GraphNode, prior_results: dict[str, str]) -> NodePreparation:
+        step = step_map[node.id]
+        if not evaluate_step_condition(step, prior_results):
+            return NodePreparation(
+                params=dict(step.params),
+                skip_output=f"Skipped: condition not met ({step.condition})",
+            )
+        substitute_step_params(step, prior_results)
+        return NodePreparation(params=dict(step.params))
 
-    # Save initial plan state
-    save_plan(result, chat_id=chat_id)
-
-    while True:
-        # Find steps ready to execute (pending, no unresolved dependencies)
-        ready = [
-            step_map[sid]
-            for sid, deps in pending_deps.items()
-            if step_map[sid].status == "pending" and not deps
-        ]
-
-        if not ready:
-            break  # No more steps can execute
-
-        # Swarm path: when 3+ independent steps are ready, use swarm coordinator
-        if len(ready) >= 3 and SWARM_ENABLED:
-            from agents.coordinator import SubAgent, run_swarm
-            sub_agents = [
-                SubAgent(name=s.id, task=s.description)
-                for s in ready
-            ]
+    async def _progress(event: str, node: GraphNode, action_result: ActionResult | None):
+        step = step_map[node.id]
+        step_num = steps.index(step) + 1
+        if event == "started":
+            step.status = "running"
+            await channel.send_message(
+                chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
+            )
+        elif event == "succeeded":
+            step.status = "completed"
+            step.result = action_result.output if action_result else ""
+            await channel.send_message(
+                chat_id, f"✅ Step {step_num}/{total}: {step.description}"
+            )
+        elif event == "skipped":
+            step.status = "skipped"
+            step.result = action_result.output if action_result else "Skipped"
+            await channel.send_message(
+                chat_id, f"⏭ Step {step_num}/{total}: {step.description} (skipped)"
+            )
+        elif event == "retrying":
+            step.status = "pending"
+            step.replan_count = node.attempt_count
+            await channel.send_message(chat_id, f"🔄 Retrying step {step_num}...")
+        elif event == "waiting_for_approval":
+            step.status = "waiting_for_approval"
+            step.error = action_result.error if action_result else "Approval required"
             await channel.send_message(
                 chat_id,
-                f"🐝 Running {len(ready)} steps as swarm...",
+                f"⏸ Step {step_num}/{total}: {step.description}\n{step.error}",
             )
-            swarm_result = await run_swarm(sub_agents)
-            for step in ready:
-                step_num = steps.index(step) + 1
-                if step.id in swarm_result.results:
-                    step.result = swarm_result.results[step.id]
-                    step.status = "completed"
-                    result.completed_count += 1
-                    await channel.send_message(
-                        chat_id, f"✅ Step {step_num}/{total}: {step.description}"
-                    )
-                elif step.id in swarm_result.errors:
-                    step.error = swarm_result.errors[step.id]
-                    step.status = "failed"
-                    result.failed_count += 1
-                    await channel.send_message(
-                        chat_id,
-                        f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}",
-                    )
-                    _block_downstream(step.id, step_map, pending_deps, result)
-        else:
-            # Standard path: execute ready steps in parallel
-            async def _run_step(step: TaskStep):
-                step_num = steps.index(step) + 1
-                step.status = "running"
-                # Gather results from this step's dependencies
-                prior = {dep_id: step_results.get(dep_id, "") for dep_id in step.depends_on}
+        elif event == "failed":
+            step.status = "failed"
+            step.error = action_result.error if action_result else "Execution failed"
+            await channel.send_message(
+                chat_id,
+                f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}",
+            )
 
-                # M2: Evaluate condition before execution
-                if not evaluate_step_condition(step, step_results):
-                    step.status = "skipped"
-                    step.result = f"Skipped: condition not met ({step.condition})"
-                    step_results[step.id] = step.result
-                    result.completed_count += 1  # Count skipped as completed for flow
-                    await channel.send_message(
-                        chat_id, f"⏭ Step {step_num}/{total}: {step.description} (skipped)"
-                    )
-                    return
+    async def _legacy_execute(node: GraphNode, request) -> ActionResult:
+        step = step_map[node.id]
+        try:
+            output = await execute_step_fn(step, request.context.prior_results)
+            if isinstance(output, ActionResult):
+                return output
+            return ActionResult.succeeded(str(output or ""))
+        except Exception as error:
+            return ActionResult.failed(str(error)[:500])
 
-                # M2: Template substitution — inject prior results into params
-                substitute_step_params(step, step_results)
-
-                try:
-                    await channel.send_message(
-                        chat_id, f"⏳ Step {step_num}/{total}: {step.description}..."
-                    )
-                    step_result = await execute_step_fn(step, prior)
-                    step.status = "completed"
-                    step.result = step_result
-                    step_results[step.id] = step_result or ""
-                    result.completed_count += 1
-                    await channel.send_message(
-                        chat_id, f"✅ Step {step_num}/{total}: {step.description}"
-                    )
-                except Exception as e:
-                    step.status = "failed"
-                    step.error = str(e)[:500]
-                    await channel.send_message(
-                        chat_id, f"❌ Step {step_num}/{total}: {step.description}\nError: {step.error}"
-                    )
-
-                    # M2: Re-plan on failure instead of immediately blocking
-                    remaining = [s for s in steps if s.status == "pending"]
-                    if remaining and step.replan_count < MAX_REPLANS and ask_llm_fn:
-                        decision = await replan_on_failure(
-                            step, remaining, step_results, query, ask_llm_fn,
-                        )
-                        if decision == "retry":
-                            step.status = "pending"
-                            step.error = None
-                            step.replan_count += 1
-                            await channel.send_message(
-                                chat_id, f"🔄 Retrying step {step_num}..."
-                            )
-                            return  # Will be picked up in next iteration
-                        elif decision == "skip":
-                            step_results[step.id] = f"[skipped due to error: {step.error}]"
-                            result.failed_count += 1
-                            await channel.send_message(
-                                chat_id, f"⏭ Skipping step {step_num}, continuing plan..."
-                            )
-                            return  # Don't block downstream
-                        elif decision == "adapt":
-                            step_results[step.id] = f"[failed: {step.error}]"
-                            result.failed_count += 1
-                            await channel.send_message(
-                                chat_id, f"🔧 Adapting remaining steps..."
-                            )
-                            return  # Don't block downstream, adapted params via template subst
-                        # "abort" falls through to block
-
-                    result.failed_count += 1
-                    _block_downstream(step.id, step_map, pending_deps, result)
-
-            tasks = [_run_step(s) for s in ready]
-            await asyncio.gather(*tasks)
-
-        # Remove completed/failed steps from dependency lists of remaining steps
-        done_ids = {s.id for s in steps if s.status in ("completed", "failed", "blocked")}
-        for sid in pending_deps:
-            pending_deps[sid] -= done_ids
-
-        # Safety: if nothing changed, break to avoid infinite loop
-        still_pending = [s for s in steps if s.status == "pending"]
-        if not still_pending:
-            break
-        # Check if all pending steps are stuck (circular deps or blocked)
-        ready_next = [
-            s for s in still_pending
-            if not pending_deps[s.id]
-        ]
-        if not ready_next:
-            # All remaining steps are blocked
-            for s in still_pending:
-                s.status = "blocked"
-                s.error = "Unresolvable dependency"
-                result.blocked_count += 1
-            break
-
-    # Save final state
-    save_plan(result, chat_id=chat_id)
+    context = execution_context or ExecutionContext(
+        source=ExecutionSource.ORCHESTRATOR,
+        chat_id=chat_id,
+        parent_plan_id=plan_id,
+    )
+    runner = ExecutionGraphRunner(repository, execution_bus)
+    try:
+        graph = await runner.run(
+            plan_id,
+            context,
+            prepare_node=_prepare,
+            progress=_progress,
+            execute_node=_legacy_execute if execution_bus is None else None,
+            recover_interrupted=recover_interrupted,
+        )
+        result = _plan_from_graph(graph)
+    finally:
+        conn.close()
 
     # Record signal
     try:
@@ -469,22 +388,85 @@ async def execute_plan(
     return result
 
 
-def _block_downstream(failed_id: str, step_map: dict, pending_deps: dict, result: PlanResult):
-    """Mark all steps that transitively depend on a failed step as blocked."""
-    to_block = set()
-    queue = [failed_id]
-    while queue:
-        current = queue.pop(0)
-        for sid, deps in pending_deps.items():
-            if current in deps and sid not in to_block:
-                to_block.add(sid)
-                queue.append(sid)
-    for sid in to_block:
-        step = step_map[sid]
-        if step.status == "pending":
-            step.status = "blocked"
-            step.error = f"Blocked: dependency '{failed_id}' failed"
-            result.blocked_count += 1
+def _plan_from_graph(graph: GraphRun) -> PlanResult:
+    """Project durable graph state onto the existing plan response contract."""
+    status_map = {
+        NodeStatus.PENDING: "pending",
+        NodeStatus.READY: "pending",
+        NodeStatus.RUNNING: "running",
+        NodeStatus.WAITING_FOR_APPROVAL: "waiting_for_approval",
+        NodeStatus.SUCCEEDED: "completed",
+        NodeStatus.FAILED: "failed",
+        NodeStatus.COMPENSATED: "blocked",
+        NodeStatus.CANCELLED: "blocked",
+    }
+    steps = []
+    for node in graph.nodes:
+        outputs = node.outputs or {}
+        status = status_map[node.status]
+        if node.status == NodeStatus.SUCCEEDED and outputs.get("skipped"):
+            status = "skipped"
+        error = node.error.get("message") if node.error else None
+        steps.append(TaskStep(
+            id=node.id,
+            action=node.action,
+            description=str(node.metadata.get("description") or node.action),
+            params=dict(node.inputs),
+            depends_on=list(node.dependencies),
+            status=status,
+            result=str(outputs.get("output") or "") or None,
+            error=error,
+            condition=node.metadata.get("condition"),
+            replan_count=max(0, node.attempt_count - 1),
+        ))
+    return PlanResult(
+        plan_id=graph.id,
+        query=str(graph.inputs.get("query") or ""),
+        steps=steps,
+        completed_count=sum(step.status in {"completed", "skipped"} for step in steps),
+        failed_count=sum(step.status == "failed" for step in steps),
+        blocked_count=sum(step.status == "blocked" for step in steps),
+    )
+
+
+async def resume_active_plans(execution_bus, channel) -> list[PlanResult]:
+    """Resume interrupted orchestrator graphs after a process restart."""
+    conn = _get_conn()
+    repository = ExecutionGraphRepository(conn)
+    repository.ensure_schema()
+    resumable = [
+        graph for graph in repository.list_resumable_runs(limit=100)
+        if graph.source == ExecutionSource.ORCHESTRATOR.value
+        and graph.status in {GraphStatus.PENDING, GraphStatus.RUNNING}
+    ]
+    conn.close()
+
+    results = []
+    for graph in resumable:
+        plan = _plan_from_graph(graph)
+        chat_id = int(graph.metadata.get("chat_id") or 0)
+        if not chat_id:
+            log.warning("Cannot resume graph %s without a chat id", graph.id)
+            continue
+        await channel.send_message(chat_id, f"🔄 Resuming interrupted plan {graph.id}...")
+        try:
+            results.append(await execute_plan(
+                plan.steps,
+                plan.query,
+                channel,
+                chat_id,
+                execution_bus=execution_bus,
+                execution_context=ExecutionContext(
+                    source=ExecutionSource.ORCHESTRATOR,
+                    chat_id=chat_id,
+                    parent_plan_id=graph.id,
+                ),
+                plan_id=graph.id,
+                recover_interrupted=True,
+            ))
+        except Exception as error:
+            log.exception("Failed to resume execution graph %s: %s", graph.id, error)
+    return results
 
 
 # --- Persistence ---
@@ -492,14 +474,16 @@ def _block_downstream(failed_id: str, step_map: dict, pending_deps: dict, result
 def _get_conn() -> sqlite3.Connection:
     """Get a DB connection for orchestrator persistence."""
     conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA foreign_keys=ON")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
 def ensure_table():
-    """Create the active_plans table if it doesn't exist."""
+    """Ensure durable graph state and the legacy plan-history table exist."""
     conn = _get_conn()
+    ExecutionGraphRepository(conn).ensure_schema()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS active_plans (
             plan_id TEXT PRIMARY KEY,
@@ -545,6 +529,12 @@ def save_plan(plan: PlanResult, chat_id: int = None):
 def load_plan(plan_id: str) -> PlanResult | None:
     """Load a plan from the database."""
     conn = _get_conn()
+    repository = ExecutionGraphRepository(conn)
+    repository.ensure_schema()
+    graph = repository.load_graph(plan_id)
+    if graph is not None and graph.source == ExecutionSource.ORCHESTRATOR.value:
+        conn.close()
+        return _plan_from_graph(graph)
     row = conn.execute(
         "SELECT plan_id, query, steps_json, status FROM active_plans WHERE plan_id = ?",
         (plan_id,),
@@ -568,13 +558,37 @@ def load_plan(plan_id: str) -> PlanResult | None:
 def list_active_plans() -> list[dict]:
     """List all active and recently completed plans."""
     conn = _get_conn()
+    repository = ExecutionGraphRepository(conn)
+    repository.ensure_schema()
+    graph_rows = conn.execute(
+        """SELECT id FROM execution_graphs WHERE source = ?
+           ORDER BY created_at DESC LIMIT 20""",
+        (ExecutionSource.ORCHESTRATOR.value,),
+    ).fetchall()
+    graph_plans = []
+    graph_ids = set()
+    for (graph_id,) in graph_rows:
+        graph = repository.load_graph(graph_id)
+        if graph is None:
+            continue
+        graph_ids.add(graph.id)
+        graph_plans.append({
+            "plan_id": graph.id,
+            "query": str(graph.inputs.get("query") or ""),
+            "step_count": len(graph.nodes),
+            "status": _plan_from_graph(graph).status,
+            "created_at": graph.created_at,
+            "completed_at": graph.completed_at,
+        })
     rows = conn.execute(
         "SELECT plan_id, query, steps_json, status, created_at, completed_at "
         "FROM active_plans ORDER BY created_at DESC LIMIT 20"
     ).fetchall()
     conn.close()
-    plans = []
+    plans = list(graph_plans)
     for r in rows:
+        if r[0] in graph_ids:
+            continue
         steps = json.loads(r[2])
         plans.append({
             "plan_id": r[0],
@@ -584,12 +598,24 @@ def list_active_plans() -> list[dict]:
             "created_at": r[4],
             "completed_at": r[5],
         })
-    return plans
+    return sorted(
+        plans,
+        key=lambda plan: plan.get("created_at") or "",
+        reverse=True,
+    )[:20]
 
 
 def get_active_plans_for_chat(chat_id: int) -> list[PlanResult]:
     """Get in-progress plans for a specific chat."""
     conn = _get_conn()
+    repository = ExecutionGraphRepository(conn)
+    repository.ensure_schema()
+    graph_plans = [
+        _plan_from_graph(graph)
+        for graph in repository.list_resumable_runs(limit=100)
+        if graph.source == ExecutionSource.ORCHESTRATOR.value
+        and graph.metadata.get("chat_id") == chat_id
+    ][:3]
     rows = conn.execute(
         "SELECT plan_id, query, steps_json, status FROM active_plans "
         "WHERE chat_id = ? AND status = 'in_progress' "
@@ -597,8 +623,11 @@ def get_active_plans_for_chat(chat_id: int) -> list[PlanResult]:
         (chat_id,),
     ).fetchall()
     conn.close()
-    plans = []
+    graph_ids = {plan.plan_id for plan in graph_plans}
+    plans = list(graph_plans)
     for r in rows:
+        if r[0] in graph_ids:
+            continue
         steps = [TaskStep.from_dict(s) for s in json.loads(r[2])]
         plans.append(PlanResult(
             plan_id=r[0], query=r[1], steps=steps,
@@ -606,7 +635,7 @@ def get_active_plans_for_chat(chat_id: int) -> list[PlanResult]:
             failed_count=sum(1 for s in steps if s.status == "failed"),
             blocked_count=sum(1 for s in steps if s.status == "blocked"),
         ))
-    return plans
+    return plans[:3]
 
 
 def format_plan_summary(plan: PlanResult) -> str:
@@ -614,7 +643,9 @@ def format_plan_summary(plan: PlanResult) -> str:
     status_icons = {
         "pending": "⏳",
         "running": "🔄",
+        "waiting_for_approval": "⏸",
         "completed": "✅",
+        "skipped": "⏭",
         "failed": "❌",
         "blocked": "🚫",
     }
