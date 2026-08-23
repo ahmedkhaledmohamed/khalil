@@ -20,7 +20,6 @@ log = logging.getLogger("khalil.actions.dev_tools")
 _SESSION_STATE_KEY = "coding_session_bridge"
 _PROMPT_STABILITY_POLLS = 2
 _NATIVE_EVENT_TTL_SECONDS = 2 * 60 * 60
-_NATIVE_DUPLICATE_WINDOW_SECONDS = 30
 _BRIDGE_STATE_LOCK = asyncio.Lock()
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _CODEX_TUI_QUESTION = re.compile(
@@ -373,21 +372,16 @@ def _native_event_is_pending(session: dict) -> bool:
         return False
 
 
-def _recent_native_input(session: dict, agent: str, external_session_id: str | None) -> bool:
-    if (
-        not external_session_id
-        or session.get("source") != "native_hook"
-        or session.get("status") != "needs_input"
-        or session.get("agent") != agent
-        or session.get("external_session_id") != external_session_id
-    ):
-        return False
-    try:
-        notified = datetime.fromisoformat(session["notified_at"])
-        age = datetime.now(timezone.utc) - notified.astimezone(timezone.utc)
-        return age.total_seconds() < _NATIVE_DUPLICATE_WINDOW_SECONDS
-    except (KeyError, TypeError, ValueError):
-        return False
+def _same_pending_native_session(
+    session: dict, agent: str, external_session_id: str | None,
+) -> bool:
+    return bool(
+        external_session_id
+        and session.get("source") == "native_hook"
+        and session.get("status") == "needs_input"
+        and session.get("agent") == agent
+        and session.get("external_session_id") == external_session_id
+    )
 
 
 async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
@@ -445,6 +439,7 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
             "notification_message_id": previous.get("notification_message_id"),
             "source": previous.get("source") if native_pending else "terminal_poll",
             "external_session_id": previous.get("external_session_id"),
+            "hook_event": previous.get("hook_event") if native_pending else None,
             "notified_at": previous.get("notified_at"),
             "native_event_at": previous.get("native_event_at"),
             "updated_at": _utc_now(),
@@ -550,6 +545,7 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         return {"accepted": True, "duplicate": True}
 
     external_session_id = str(payload.get("session_id") or "")[:300] or None
+    hook_event = str(payload.get("hook_event") or "").strip().lower()[:100] or None
     existing_key = next((
         key for key, session in state["sessions"].items()
         if external_session_id
@@ -588,7 +584,10 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         previous.get("status") == "needs_input"
         and (
             previous.get("candidate_hash") == prompt_hash
-            or _recent_native_input(previous, agent, external_session_id)
+            or (
+                hook_event == "notification"
+                and _same_pending_native_session(previous, agent, external_session_id)
+            )
         )
         and previous.get("notified_at")
     ):
@@ -598,6 +597,10 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
             for message_id, indexed_key in state["message_index"].items()
             if indexed_key != key or message_id == current_message_id
         }
+        if hook_event == "notification":
+            previous["native_event_at"] = _utc_now()
+            previous["updated_at"] = _utc_now()
+            state["sessions"][key] = previous
         _remember_event(state, event_id)
         _save_bridge_state(state)
         return {"accepted": True, "duplicate": True}
@@ -627,6 +630,7 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         "candidate_polls": _PROMPT_STABILITY_POLLS,
         "notification_message_id": None,
         "external_session_id": external_session_id,
+        "hook_event": hook_event,
         "source": "native_hook",
         "notified_at": _utc_now(),
         "native_event_at": _utc_now(),

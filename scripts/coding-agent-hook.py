@@ -198,6 +198,7 @@ def _relay(agent: str, raw_event: str, payload: dict) -> None:
         "event_id": _event_id(payload),
         "agent": agent,
         "event": event,
+        "hook_event": raw_event.lower().replace("-", "_")[:100],
         "session_id": str(session_id or ""),
         "pid": pid,
         "tty": tty,
