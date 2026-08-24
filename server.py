@@ -1774,7 +1774,7 @@ def _check_result_needs_reflection(tool_name: str, result_text: str, query: str)
     )
 
 
-async def _execute_tool_call(tool_call) -> str:
+async def _execute_tool_call_direct(tool_call) -> str:
     """Execute a single tool call from the LLM and return the result text.
 
     Tool name IS the action_type (one-tool-per-action design).
@@ -2188,6 +2188,76 @@ async def _execute_tool_call(tool_call) -> str:
             pass  # Audit should never break tool execution
 
 
+_MANUAL_TOOL_RISKS = {
+    "search_knowledge": ActionType.READ,
+    "read_full_document": ActionType.READ,
+    "delegate_tasks": ActionType.READ,
+    "generate_file": ActionType.WRITE,
+    "spawn_watcher": ActionType.WRITE,
+}
+
+
+def _foreground_tool_risk(registry, action: str) -> ActionType:
+    """Resolve intrinsic risk for registered and manual foreground tools."""
+    return (
+        registry.get_action_type(action)
+        or _MANUAL_TOOL_RISKS.get(action)
+        or ActionType.DANGEROUS
+    )
+
+
+async def _execute_tool_call(tool_call, execution_context=None):
+    """Execute one LLM tool call through the shared policy boundary."""
+    from execution import ActionStatus, get_execution_bus
+    from skills import get_registry
+
+    fn_name = tool_call.function.name
+    try:
+        params = json.loads(tool_call.function.arguments)
+    except json.JSONDecodeError:
+        return json.dumps({
+            "error": True,
+            "type": "invalid_input",
+            "message": f"Invalid JSON arguments for {fn_name}",
+        }), None
+    missing = _check_required_params(fn_name, params)
+    if missing:
+        return json.dumps({
+            "error": True,
+            "type": "missing_params",
+            "message": f"{fn_name} requires: {', '.join(missing)}",
+        }), None
+    action = str(params.get("action") or fn_name)
+    policy_params = {key: value for key, value in params.items() if key != "action"}
+    policy_params["tool_mode"] = True
+
+    bus = get_execution_bus()
+    if bus is None or execution_context is None:
+        return await _execute_tool_call_direct(tool_call), None
+
+    async def _run_direct(_action, _intent, ctx):
+        result_text = await _execute_tool_call_direct(tool_call)
+        await ctx.reply(result_text)
+        return True
+
+    result = await bus.execute(
+        action,
+        policy_params,
+        execution_context,
+        handler_override=_run_direct,
+        declared_type_override=_foreground_tool_risk(get_registry(), action),
+    )
+    if result.success:
+        return result.output, result
+    if result.status is ActionStatus.WAITING_FOR_APPROVAL:
+        return "", result
+    return json.dumps({
+        "error": True,
+        "type": result.failure.kind.value if result.failure else result.status.value,
+        "message": result.error or f"{action} was not executed",
+    }), result
+
+
 def _check_required_params(tool_name: str, args: dict) -> list[str]:
     """Check if required parameters are present. Returns list of missing param names."""
     _REQUIRED = {
@@ -2298,8 +2368,18 @@ async def _execute_recovered_tool_actions(
     phase: _PhaseTracker,
 ) -> None:
     """Re-run a checkpointed action batch after its recovery policy allows it."""
+    from execution import ActionStatus, ExecutionContext, ExecutionSource
     from types import SimpleNamespace
 
+    approval_granted = any(
+        action.action_type is not ActionType.READ for action in actions
+    )
+    execution_context = ExecutionContext(
+        source=ExecutionSource.TOOL_USE,
+        chat_id=int(runner.run.chat_id),
+        trigger_id=runner.id,
+        approval_granted=approval_granted,
+    )
     observations = []
     for action in actions:
         tool_call = SimpleNamespace(
@@ -2307,7 +2387,15 @@ async def _execute_recovered_tool_actions(
             function=SimpleNamespace(name=action.name, arguments=action.arguments),
         )
         log.info("Recovered tool call: %s(%s)", action.name, action.arguments[:100])
-        result_text = await _execute_tool_call(tool_call)
+        result_text, execution_result = await _execute_tool_call(
+            tool_call,
+            execution_context,
+        )
+        if (
+            execution_result is not None
+            and execution_result.status is ActionStatus.WAITING_FOR_APPROVAL
+        ):
+            raise RuntimeError(f"Recovered action {action.name!r} still needs approval")
         observations.append({
             "tool": action.name,
             "arguments": action.arguments[:500],
@@ -2339,6 +2427,30 @@ async def _execute_recovered_tool_actions(
     phase.record([action.name for action in actions])
     fingerprint = json.dumps(observations, sort_keys=True, ensure_ascii=False)
     runner.after_actions(messages, fingerprint, phase=phase.to_state())
+
+
+async def _pause_tool_loop_for_approval(
+    runner,
+    action_name: str,
+    progress_msg,
+    channel: Channel,
+) -> str:
+    """Persist an approval pause and show run-specific controls."""
+    runner.wait_for_approval()
+    text = (
+        f"Approval required before I run {action_name}. "
+        "The task is checkpointed and will continue from here."
+    )
+    await _safe_edit(progress_msg, text)
+    await channel.send_message(
+        runner.run.chat_id,
+        text,
+        buttons=[[
+            ActionButton("Resume action", f"loop_resume:{runner.id}"),
+            ActionButton("Cancel", f"loop_cancel:{runner.id}"),
+        ]],
+    )
+    return text
 
 
 async def call_llm_with_tools(
@@ -2456,6 +2568,12 @@ async def call_llm_with_tools(
             _runner.id,
             _resume_checkpoint.boundary.value if _resume_checkpoint else "created",
         )
+    from execution import ActionStatus, ExecutionContext, ExecutionSource
+    _tool_execution_context = ExecutionContext(
+        source=ExecutionSource.TOOL_USE,
+        chat_id=int(chat_id),
+        trigger_id=_runner.id,
+    )
     _tool_loop_active.add(int(chat_id))
     _progress_steps = []
     try:  # try/finally to ensure _tool_loop_active cleanup
@@ -2631,8 +2749,7 @@ async def call_llm_with_tools(
                 for tc in msg.tool_calls
             ]
             for tc in msg.tool_calls:
-                _declared_type = registry.get_action_type(tc.function.name)
-                _action_type = _declared_type or ActionType.DANGEROUS
+                _action_type = _foreground_tool_risk(registry, tc.function.name)
                 _pending_actions.append(PendingToolAction(
                     id=tc.id,
                     name=tc.function.name,
@@ -2714,7 +2831,20 @@ async def call_llm_with_tools(
                              metadata=json.dumps({"tool_name": tc.function.name,
                                                   "tool_call_id": tc.id}))
 
-                result_text = await _execute_tool_call(tc)
+                result_text, _execution_result = await _execute_tool_call(
+                    tc,
+                    _tool_execution_context,
+                )
+                if (
+                    _execution_result is not None
+                    and _execution_result.status is ActionStatus.WAITING_FOR_APPROVAL
+                ):
+                    return await _pause_tool_loop_for_approval(
+                        _runner,
+                        tc.function.name,
+                        progress_msg,
+                        channel,
+                    )
                 _iteration_observations.append({
                     "tool": tc.function.name,
                     "arguments": tc.function.arguments[:500],
@@ -2878,7 +3008,21 @@ async def call_llm_with_tools(
                 phase=_phase.to_state(),
             ):
                 try:
-                    _gen_result = await _execute_tool_call(_SynthToolCall())
+                    _gen_result, _execution_result = await _execute_tool_call(
+                        _SynthToolCall(),
+                        _tool_execution_context,
+                    )
+                    if (
+                        _execution_result is not None
+                        and _execution_result.status
+                        is ActionStatus.WAITING_FOR_APPROVAL
+                    ):
+                        return await _pause_tool_loop_for_approval(
+                            _runner,
+                            _SynthToolCall.function.name,
+                            progress_msg,
+                            channel,
+                        )
                     _programmatic_messages.append({
                         "role": "tool",
                         "tool_call_id": _SynthToolCall.id,
@@ -3072,6 +3216,7 @@ async def call_llm_with_tools(
     finally:
      try:
         if _runner.run.status not in {
+            ToolLoopStatus.WAITING_FOR_APPROVAL,
             ToolLoopStatus.SUCCEEDED,
             ToolLoopStatus.FAILED,
             ToolLoopStatus.CANCELLED,
@@ -3085,10 +3230,20 @@ async def call_llm_with_tools(
         try:
             from learning import record_signal
             _loop_state = _runner.snapshot()
-            record_signal("execution_loop_terminated", {
+            _signal_type = (
+                "execution_loop_waiting"
+                if _runner.run.status is ToolLoopStatus.WAITING_FOR_APPROVAL
+                else "execution_loop_terminated"
+            )
+            record_signal(_signal_type, {
                 "loop": "tool_use",
                 "run_id": _runner.id,
-                "reason": _loop_state.termination_reason.value,
+                "status": _runner.run.status.value,
+                "reason": (
+                    _loop_state.termination_reason.value
+                    if _loop_state.termination_reason is not None
+                    else _runner.run.status.value
+                ),
                 "iterations": _loop_state.iterations,
                 "actions": _loop_state.actions,
                 "no_progress_iterations": _loop_state.no_progress_iterations,
