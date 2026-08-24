@@ -331,6 +331,18 @@ _tool_loop_active: set[int] = set()
 _last_llm_error: tuple[str, float] = ("", 0.0)
 
 
+def _conversation_failure_reason(response: str) -> str | None:
+    """Classify known terminal responses that do not represent success."""
+    normalized = (response or "").strip().lower()
+    if normalized.startswith("⚠️ llm") or normalized.startswith("⚠️ still experiencing api issues"):
+        return "provider_unavailable"
+    if normalized.startswith("⚠️ rate limited across all providers"):
+        return "rate_limited"
+    if normalized.startswith("sorry, i hit an internal error processing that"):
+        return "internal_error"
+    return None
+
+
 # --- Globals ---
 app = FastAPI(title="Khalil", docs_url=None, redoc_url=None)
 scheduler = AsyncIOScheduler()
@@ -6797,15 +6809,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception:
         pass
 
-    # #1: Conversation success scoring — record completion signal
+    # #1: Conversation outcome scoring. A delivered response is not verified
+    # completion, and known terminal error responses must never count as success.
     try:
         topic = classify_message_topic(query)
-        record_signal("conversation_success", {
+        failure_reason = _conversation_failure_reason(display_response)
+        outcome_context = {
             "query": query[:200],
             "topic": topic,
             "latency_ms": round(_latency_ms, 1),
             "had_correction": any(re.search(p, query.lower()) for p in _CORRECTION_PATTERNS),
-        })
+            "verified": False,
+            "outcome": "failed" if failure_reason else "response_delivered",
+        }
+        if failure_reason:
+            outcome_context["failure_reason"] = failure_reason
+            record_signal("conversation_failure", outcome_context, value=0.0)
+        else:
+            record_signal("conversation_success", outcome_context)
     except Exception:
         pass
 

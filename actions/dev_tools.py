@@ -698,11 +698,24 @@ async def _handle_session_reply(ctx, query: str) -> bool:
     incoming = getattr(ctx, "incoming", None)
     reply_to = str(incoming.reply_to_msg_id) if incoming and incoming.reply_to_msg_id is not None else None
     if not reply_to:
+        if _looks_like_uncorrelated_approval_reply(query):
+            await ctx.reply(
+                "That approval isn't linked to a coding-session request. Reply directly to "
+                "the Telegram alert with `approve <exact terminal choice>` or "
+                "`deny <exact terminal choice>`."
+            )
+            return True
         return False
 
     state = _load_bridge_state()
     key = state["message_index"].get(reply_to)
     if not key:
+        if _looks_like_uncorrelated_approval_reply(query):
+            await ctx.reply(
+                "That approval isn't linked to an active coding-session request. Reply to "
+                "the latest Telegram alert and include the exact terminal choice."
+            )
+            return True
         return False
     session = state["sessions"].get(key)
     if not session or session.get("status") != "needs_input":
@@ -766,6 +779,16 @@ async def _handle_session_reply(ctx, query: str) -> bool:
             f"Response was written to {session['agent']}, but its terminal output has not changed yet."
         )
     return True
+
+
+def _looks_like_uncorrelated_approval_reply(query: str) -> bool:
+    """Recognize control replies that must never fall through to an LLM."""
+    lowered = query.strip().lower()
+    if lowered in {"approved", "approves", "denied", "denies"}:
+        return True
+    if lowered.startswith("approve ") and lowered != "approve plan":
+        return True
+    return lowered.startswith("deny ")
 
 
 async def handle_session_reply(ctx, query: str) -> bool:
