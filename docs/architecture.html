@@ -194,6 +194,102 @@ body::before {
   opacity: 0.4;
 }
 
+/* ── Durable execution map ────────────────── */
+.execution-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.execution-card {
+  padding: 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+}
+
+.execution-card h4 {
+  font-size: 0.9375rem;
+  margin-bottom: 0.5rem;
+}
+
+.execution-card p {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.execution-card .contract {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border: 1px solid var(--border-light);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font: 0.65rem var(--font-mono);
+}
+
+.recovery-flow {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 1.25rem;
+  border: 1px solid var(--amber-border);
+  border-radius: 12px;
+  background: var(--amber-dim);
+}
+
+.recovery-state {
+  min-height: 92px;
+  padding: 0.75rem;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  text-align: center;
+}
+
+.recovery-state strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.recovery-state span {
+  display: block;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+
+.recovery-arrow {
+  color: var(--amber);
+  font-family: var(--font-mono);
+}
+
+.proof-command {
+  margin-top: 1rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--green-border);
+  border-radius: 8px;
+  background: var(--green-dim);
+  color: var(--green);
+  font: 0.75rem var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.architecture-links {
+  margin-top: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.architecture-links a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.architecture-links a:hover { text-decoration: underline; }
+
 /* ── Node cards ────────────────────────────── */
 .nodes {
   display: flex;
@@ -646,6 +742,9 @@ footer {
 /* ── Responsive ────────────────────────────── */
 @media (max-width: 768px) {
   .pipeline { flex-direction: column; }
+  .execution-grid { grid-template-columns: 1fr; }
+  .recovery-flow { grid-template-columns: 1fr; }
+  .recovery-arrow { transform: rotate(90deg); text-align: center; }
   .action-groups { grid-template-columns: 1fr; }
   .data-tables { grid-template-columns: 1fr 1fr; }
   .split { grid-template-columns: 1fr; }
@@ -689,27 +788,27 @@ footer {
 <section class="hero" style="margin-top:52px;">
   <div>
     <h1>Khalil Architecture</h1>
-    <p>End-to-end system map — from user input to data persistence, and everything running in between.</p>
+    <p>End-to-end system map — including durable execution graphs, bounded foreground loops, approval checkpoints, and restart recovery.</p>
     <div class="hero-stats">
       <div class="hero-stat">
-        <div class="number">87</div>
-        <div class="label">Action Modules</div>
+        <div class="number">3</div>
+        <div class="label">Execution Paths</div>
       </div>
       <div class="hero-stat">
-        <div class="number">5</div>
-        <div class="label">Channels</div>
+        <div class="number">8</div>
+        <div class="label">Loop Checkpoints</div>
       </div>
       <div class="hero-stat">
-        <div class="number">4</div>
-        <div class="label">LLM Providers</div>
+        <div class="number">3</div>
+        <div class="label">Risk Classes</div>
       </div>
       <div class="hero-stat">
-        <div class="number">15+</div>
-        <div class="label">External APIs</div>
+        <div class="number">1</div>
+        <div class="label">Durable State Store</div>
       </div>
       <div class="hero-stat">
-        <div class="number">9</div>
-        <div class="label">DB Tables</div>
+        <div class="number">Codex</div>
+        <div class="label">Coding Agent Default</div>
       </div>
     </div>
   </div>
@@ -743,7 +842,7 @@ footer {
     <div class="node node--green" data-tooltip="HTTP endpoints for webhooks and health checks">
       <span class="icon">🌐</span> FastAPI REST
     </div>
-    <div class="node node--green" data-tooltip="Exposes search_knowledge, get_context, create_reminder to Claude Code and IDEs">
+    <div class="node node--green" data-tooltip="Exposes search_knowledge, get_context, and create_reminder to Codex and IDE sessions">
       <span class="icon">🔌</span> MCP Server <span class="tag">stdio</span>
     </div>
   </div>
@@ -799,14 +898,80 @@ footer {
     <div class="pipeline-or">or</div>
     <div class="pipeline-branch" style="border-color: var(--blue-border); flex: 1.2;">
       <h4><span style="color: var(--blue)">&#9881;</span> Tool-Use Loop</h4>
-      <p>Complex queries enter the LLM loop. Context is assembled in parallel, tools are filtered, and the LLM iterates until it has a final answer.</p>
+      <p>Complex queries enter a bounded, durable LLM loop. Every recoverable boundary is checkpointed before Khalil advances.</p>
       <div class="steps">
         <div class="step"><span class="dot" style="background: var(--blue)"></span> parallel context assembly (4 streams)</div>
         <div class="step"><span class="dot" style="background: var(--blue)"></span> build prompt + ~12 filtered tool schemas</div>
-        <div class="step"><span class="dot" style="background: var(--blue)"></span> LLM call &rarr; tool execution &rarr; loop (max 5)</div>
-        <div class="step"><span class="dot" style="background: var(--blue)"></span> stream final response to user</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> model &rarr; checkpoint &rarr; policy &rarr; action</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> bounded by iterations, actions, time, and progress</div>
+        <div class="step"><span class="dot" style="background: var(--blue)"></span> pause writes durably; resume after approval</div>
       </div>
     </div>
+  </div>
+</section>
+
+<div class="flow-arrow"><svg width="20" height="32" viewBox="0 0 20 32"><path d="M10 0 L10 24 M4 18 L10 26 L16 18" stroke="currentColor" stroke-width="1.5" fill="none"/></svg></div>
+
+<!-- ═══════ 3A. Durable Execution ═══════ -->
+<section class="layer animate-in">
+  <div class="layer-header">
+    <div class="layer-indicator" style="background: var(--amber)"></div>
+    <div>
+      <div class="layer-label" style="color: var(--amber)">Execution Core</div>
+      <div class="layer-title">Loops decide what comes next; graphs decide what can run next</div>
+      <div class="layer-desc">Both durable paths cross the same approval, rate-limit, audit, and telemetry boundary before side effects run.</div>
+    </div>
+  </div>
+  <div class="execution-grid">
+    <div class="execution-card" style="border-color: var(--blue-border);">
+      <h4 style="color: var(--blue);">Foreground Tool Loop</h4>
+      <p>Handles uncertain conversational work: ask a model, inspect the result, execute a tool, observe progress, and repeat within a fixed budget.</p>
+      <span class="contract">DurableToolLoopRunner</span>
+    </div>
+    <div class="execution-card" style="border-color: var(--purple-border);">
+      <h4 style="color: var(--purple);">Execution Graph</h4>
+      <p>Handles known multi-step work: claim dependency-ready nodes, run independent nodes concurrently, and preserve outputs and idempotency receipts.</p>
+      <span class="contract">ExecutionGraphRunner</span>
+    </div>
+    <div class="execution-card" style="border-color: var(--amber-border);">
+      <h4 style="color: var(--amber);">Shared Policy Boundary</h4>
+      <p>Classifies read, write, and dangerous actions; pauses protected work; enforces rate limits; and emits one execution contract for audit and learning.</p>
+      <span class="contract">ExecutionBus</span>
+    </div>
+  </div>
+  <div class="recovery-flow" aria-label="Restart recovery state flow">
+    <div class="recovery-state">
+      <strong>1. Checkpoint</strong>
+      <span>messages, counters, node outputs, pending actions</span>
+    </div>
+    <div class="recovery-arrow">&rarr;</div>
+    <div class="recovery-state">
+      <strong>2. Process stops</strong>
+      <span>SQLite remains the source of truth</span>
+    </div>
+    <div class="recovery-arrow">&rarr;</div>
+    <div class="recovery-state">
+      <strong>3. Restart scan</strong>
+      <span>load non-terminal loops and graphs</span>
+    </div>
+    <div class="recovery-arrow">&rarr;</div>
+    <div class="recovery-state">
+      <strong>4. Classify</strong>
+      <span>safe resume, approval, or ambiguous effect</span>
+    </div>
+    <div class="recovery-arrow">&rarr;</div>
+    <div class="recovery-state">
+      <strong>5. Continue safely</strong>
+      <span>skip completed work; never guess on writes</span>
+    </div>
+  </div>
+  <div class="proof-command">python scripts/demonstrate_recovery.py</div>
+  <div class="architecture-links">
+    C4 views:
+    <a href="https://github.com/ahmedkhaledmohamed/khalil/blob/main/docs/architecture/c4-context.md">context</a> &middot;
+    <a href="https://github.com/ahmedkhaledmohamed/khalil/blob/main/docs/architecture/c4-containers.md">containers</a> &middot;
+    <a href="https://github.com/ahmedkhaledmohamed/khalil/blob/main/docs/architecture/c4-components-execution.md">execution components</a> &middot;
+    <a href="https://github.com/ahmedkhaledmohamed/khalil/blob/main/docs/architecture/c4-dynamic-recovery.md">recovery flow</a>
   </div>
 </section>
 
@@ -847,7 +1012,7 @@ footer {
     <div>
       <div class="layer-label" style="color: var(--purple)">Layer 5</div>
       <div class="layer-title">LLM Layer</div>
-      <div class="layer-desc">Model router classifies complexity; an optional compatible gateway routes to providers with circuit-breaker failover</div>
+      <div class="layer-desc">Model router classifies complexity; the Taskforce-compatible gateway can route cloud calls with direct-provider and local fallbacks</div>
     </div>
   </div>
   <div class="split">
@@ -865,20 +1030,20 @@ footer {
       <div class="providers">
         <div class="provider">
           <span style="font-size: 1.25rem;">&#9883;</span>
-          <span class="name">Claude</span>
-          <span class="detail">Opus / Sonnet</span>
+          <span class="name">Taskforce API</span>
+          <span class="detail">compatible gateway</span>
           <span class="badge badge--primary">primary</span>
         </div>
         <div class="provider">
           <span style="font-size: 1.25rem;">&#9679;</span>
-          <span class="name">GPT-5.2</span>
-          <span class="detail">via gateway</span>
+          <span class="name">Claude</span>
+          <span class="detail">direct fallback</span>
           <span class="badge badge--fallback">fallback</span>
         </div>
         <div class="provider">
           <span style="font-size: 1.25rem;">&#10022;</span>
-          <span class="name">Gemini 2.5</span>
-          <span class="detail">via gateway</span>
+          <span class="name">GPT / Gemini</span>
+          <span class="detail">gateway fallbacks</span>
           <span class="badge badge--fallback">fallback</span>
         </div>
         <div class="provider">
@@ -888,7 +1053,7 @@ footer {
           <span class="badge badge--local">local</span>
         </div>
       </div>
-      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem;">An optional OpenAI-compatible gateway can route cloud calls. Circuit-breaker failover is supported, while sensitive queries can be forced to local Ollama.</p>
+      <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.75rem;">Cloud routing uses the configured compatible gateway when present. Circuit-breaker failover is supported, while sensitive queries can be forced to local Ollama.</p>
     </div>
   </div>
 </section>
@@ -915,7 +1080,7 @@ footer {
     <div class="node node--amber" data-tooltip="READ: always safe. WRITE: ask in supervised. DANGEROUS: always ask.">
       <span class="icon">🛡️</span> Autonomy Controller <span class="tag">read / write / dangerous</span>
     </div>
-    <div class="node node--red" data-tooltip="Claude Haiku reviews WRITE and DANGEROUS actions before execution.">
+    <div class="node node--red" data-tooltip="Guardian review supplements policy checks for WRITE and DANGEROUS actions.">
       <span class="icon">👁️</span> Guardian <span class="tag">safety review</span>
     </div>
     <div class="node node--blue" data-tooltip="Unified action dispatch for complex multi-step tasks. Wires LLM for decomposition.">
@@ -967,7 +1132,7 @@ footer {
         <span class="count">10 modules</span>
       </div>
       <ul>
-        <li>github_api</li><li>shell</li><li>terminal</li><li>tmux</li><li>claude_code</li><li>cursor</li><li>digitalocean</li><li>appstore</li><li>git_ops</li><li>ollama_check</li>
+        <li>github_api</li><li>shell</li><li>terminal</li><li>tmux</li><li>coding_agent (Codex)</li><li>cursor</li><li>digitalocean</li><li>appstore</li><li>git_ops</li><li>ollama_check</li>
       </ul>
     </div>
     <div class="action-group" style="border-color: var(--amber-border);">
@@ -1083,7 +1248,7 @@ footer {
       <div style="display: flex; flex-direction: column; gap: 0.75rem; margin-top: 0.75rem;">
         <div style="font-size: 0.8125rem;">
           <strong style="color: var(--text-primary);">Self-Healing</strong>
-          <span style="color: var(--text-secondary);"> — detects recurring failures, fingerprints patterns, generates patches via Claude, opens PRs</span>
+          <span style="color: var(--text-secondary);"> — detects recurring failures, fingerprints patterns, generates reviewed patches through the configured coding path, and opens PRs</span>
         </div>
         <div style="font-size: 0.8125rem;">
           <strong style="color: var(--text-primary);">Self-Extension</strong>
@@ -1280,7 +1445,7 @@ footer {
 </div><!-- /container -->
 
 <footer>
-  <div class="container">khalil &mdash; system architecture &mdash; auto-generated from codebase analysis</div>
+  <div class="container">khalil &mdash; system architecture &mdash; verified against the durable execution code paths</div>
 </footer>
 
 <script>
