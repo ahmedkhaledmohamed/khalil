@@ -516,6 +516,13 @@ fi
 if should_run 9; then
     header 9 "Start & verify"
 
+    if command -v codex &>/dev/null; then
+        hook_status=$($PYTHON "$SETUP_UTILS" install_coding_agent_hooks "$KHALIL_DIR")
+        ok "Codex coding-session hooks $hook_status"
+    else
+        skip "Codex CLI not installed — coding-session hooks skipped"
+    fi
+
     # Check port
     if lsof -i ":${PORT}" -sTCP:LISTEN &>/dev/null; then
         pid=$(lsof -ti ":${PORT}" -sTCP:LISTEN 2>/dev/null | head -1)
