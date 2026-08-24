@@ -66,6 +66,25 @@ class BoundedLoopController:
         self._last_progress_fingerprint: str | None = None
         self._termination_reason: LoopTerminationReason | None = None
 
+    @classmethod
+    def restore(
+        cls,
+        budget: LoopBudget,
+        snapshot: LoopSnapshot,
+        *,
+        last_progress_fingerprint: str | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> "BoundedLoopController":
+        """Rebuild a live controller from a durable checkpoint snapshot."""
+        controller = cls(budget, monotonic=monotonic)
+        controller._started_at = monotonic() - snapshot.elapsed_seconds
+        controller._iterations = snapshot.iterations
+        controller._actions = snapshot.actions
+        controller._no_progress_iterations = snapshot.no_progress_iterations
+        controller._last_progress_fingerprint = last_progress_fingerprint
+        controller._termination_reason = snapshot.termination_reason
+        return controller
+
     @property
     def termination_reason(self) -> LoopTerminationReason | None:
         return self._termination_reason

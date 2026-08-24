@@ -1616,6 +1616,20 @@ class _PhaseTracker:
             "generate_file_failed": self.generate_file_failed,
         }
 
+    @classmethod
+    def from_state(cls, state: dict | None) -> "_PhaseTracker":
+        """Restore the phase counters persisted with a tool-loop checkpoint."""
+        state = state or {}
+        tracker = cls(is_artifact=bool(state.get("is_artifact", False)))
+        tracker.consecutive_research = int(state.get("consecutive_research", 0))
+        tracker.total_research = int(state.get("total_research", 0))
+        tracker.has_called_action = bool(state.get("has_called_action", False))
+        tracker.generate_file_attempted = bool(
+            state.get("generate_file_attempted", False)
+        )
+        tracker.generate_file_failed = bool(state.get("generate_file_failed", False))
+        return tracker
+
     def get_config(self, iteration: int, base_tools: list[dict]) -> tuple:
         """Return (tool_choice, tools, phase_prompt) for this iteration.
 
@@ -2277,6 +2291,56 @@ def _build_system_prompt(query: str, style_hint: str = "", system_extra: str = "
     )
 
 
+async def _execute_recovered_tool_actions(
+    runner,
+    actions,
+    messages: list[dict],
+    phase: _PhaseTracker,
+) -> None:
+    """Re-run a checkpointed action batch after its recovery policy allows it."""
+    from types import SimpleNamespace
+
+    observations = []
+    for action in actions:
+        tool_call = SimpleNamespace(
+            id=action.id,
+            function=SimpleNamespace(name=action.name, arguments=action.arguments),
+        )
+        log.info("Recovered tool call: %s(%s)", action.name, action.arguments[:100])
+        result_text = await _execute_tool_call(tool_call)
+        observations.append({
+            "tool": action.name,
+            "arguments": action.arguments[:500],
+            "result": result_text[:1000],
+        })
+        save_message(
+            runner.run.chat_id,
+            "tool",
+            result_text[:2000],
+            message_type="tool_result",
+            metadata=json.dumps({
+                "tool_name": action.name,
+                "tool_call_id": action.id,
+                "recovered_run_id": runner.id,
+            }),
+        )
+        if len(result_text) > 8000:
+            result_text = (
+                result_text[:5000]
+                + "\n\n[...truncated...]\n\n"
+                + result_text[-2000:]
+            )
+        messages.append({
+            "role": "tool",
+            "tool_call_id": action.id,
+            "content": result_text[:8000],
+        })
+
+    phase.record([action.name for action in actions])
+    fingerprint = json.dumps(observations, sort_keys=True, ensure_ascii=False)
+    runner.after_actions(messages, fingerprint, phase=phase.to_state())
+
+
 async def call_llm_with_tools(
     query: str,
     context: str,
@@ -2284,6 +2348,8 @@ async def call_llm_with_tools(
     progress_msg,
     channel,
     system_extra: str = "",
+    *,
+    resume_run_id: str | None = None,
 ) -> str:
     """LLM tool-use loop: the LLM picks tools, we execute, loop until text response.
 
@@ -2300,7 +2366,7 @@ async def call_llm_with_tools(
                   "ok", "okay", "cool", "got it", "nice", "good", "great",
                   "sure", "yes", "no", "nah", "yep", "nope", "hmm", "hm"}
     _conversational = _q in _GREETINGS  # exact match only — no more "first word" heuristic
-    if _conversational:
+    if _conversational and resume_run_id is None:
         log.info("Conversational bypass for: %s", query[:50])
         stream_gen = ask_llm_stream(query, context, system_extra)
         result = await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
@@ -2355,25 +2421,119 @@ async def call_llm_with_tools(
     _phase = _PhaseTracker(is_artifact=_is_artifact)
     from config import DB_PATH
     from loop_controller import LoopBudget, LoopTerminationReason
-    from loop_state import PendingToolAction, ToolLoopStatus
-    from tool_loop_runner import DurableToolLoopRunner
-    _runner = DurableToolLoopRunner.create(
-        DB_PATH,
-        chat_id=chat_id,
-        query=query,
-        model=_routed_model,
-        budget=LoopBudget(
-            max_iterations=_MAX_TOOL_ITERATIONS,
-            max_actions=_MAX_TOOL_ACTIONS,
-            max_elapsed_seconds=_MAX_TOOL_ELAPSED_SECONDS,
-            max_no_progress_iterations=_MAX_TOOL_NO_PROGRESS_ITERATIONS,
-        ),
+    from loop_state import (
+        LoopCheckpointBoundary,
+        PendingToolAction,
+        ToolLoopStatus,
     )
+    from tool_loop_runner import DurableToolLoopRunner
+    if resume_run_id is None:
+        _runner = DurableToolLoopRunner.create(
+            DB_PATH,
+            chat_id=chat_id,
+            query=query,
+            model=_routed_model,
+            budget=LoopBudget(
+                max_iterations=_MAX_TOOL_ITERATIONS,
+                max_actions=_MAX_TOOL_ACTIONS,
+                max_elapsed_seconds=_MAX_TOOL_ELAPSED_SECONDS,
+                max_no_progress_iterations=_MAX_TOOL_NO_PROGRESS_ITERATIONS,
+            ),
+        )
+        _resume_checkpoint = None
+    else:
+        _runner = DurableToolLoopRunner.resume(DB_PATH, resume_run_id)
+        query = _runner.run.query
+        chat_id = _runner.run.chat_id
+        _routed_model = _runner.run.model
+        _resume_checkpoint = _runner.run.latest_checkpoint
+        if _resume_checkpoint and _resume_checkpoint.messages:
+            messages = list(_resume_checkpoint.messages)
+        if _resume_checkpoint:
+            _phase = _PhaseTracker.from_state(_resume_checkpoint.phase)
+        log.info(
+            "Resuming tool loop %s from %s",
+            _runner.id,
+            _resume_checkpoint.boundary.value if _resume_checkpoint else "created",
+        )
     _tool_loop_active.add(int(chat_id))
     _progress_steps = []
     try:  # try/finally to ensure _tool_loop_active cleanup
-     for iteration in range(_MAX_TOOL_ITERATIONS):
-        if not _runner.begin_iteration(messages, phase=_phase.to_state()):
+     _start_iteration = 0
+     _reuse_reserved_iteration = False
+     if _resume_checkpoint is not None:
+        _boundary = _resume_checkpoint.boundary
+        if _boundary is LoopCheckpointBoundary.BEFORE_MODEL:
+            _start_iteration = max(0, _resume_checkpoint.iteration_count - 1)
+            _reuse_reserved_iteration = True
+        elif _boundary in {
+            LoopCheckpointBoundary.AFTER_MODEL,
+            LoopCheckpointBoundary.BEFORE_ACTIONS,
+        }:
+            if not _resume_checkpoint.pending_actions:
+                _recovered_text = str(
+                    (_resume_checkpoint.messages[-1].get("content") or "")
+                    if _resume_checkpoint.messages else ""
+                )
+                if _is_preamble_response(_recovered_text):
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "Continue from the interrupted work and provide the actual result. "
+                            "Do not announce what you plan to do."
+                        ),
+                    })
+                    _start_iteration = _resume_checkpoint.iteration_count
+                else:
+                    await _safe_edit(
+                        progress_msg,
+                        _recovered_text or "Recovered response.",
+                    )
+                    _runner.terminate(
+                        _resume_checkpoint.messages,
+                        succeeded=bool(_recovered_text),
+                        phase=_phase.to_state(),
+                    )
+                    return _recovered_text
+            elif _boundary is LoopCheckpointBoundary.AFTER_MODEL:
+                if not _runner.reserve_actions(
+                    _resume_checkpoint.pending_actions,
+                    messages,
+                    phase=_phase.to_state(),
+                ):
+                    raise RuntimeError("Recovered action batch exceeds its loop budget")
+            if _resume_checkpoint.pending_actions:
+                await _execute_recovered_tool_actions(
+                    _runner,
+                    _resume_checkpoint.pending_actions,
+                    messages,
+                    _phase,
+                )
+                _start_iteration = _runner.snapshot().iterations
+        elif _boundary is LoopCheckpointBoundary.AFTER_ACTIONS:
+            _start_iteration = _resume_checkpoint.iteration_count
+        elif _boundary is LoopCheckpointBoundary.BEFORE_SYNTHESIS:
+            _synth_resp = await _gateway_client.chat.completions.create(
+                model=_routed_model,
+                max_tokens=4000,
+                messages=messages,
+                tool_choice="none",
+                timeout=CLAUDE_TIMEOUT,
+                temperature=0.0,
+            )
+            _recovered_text = _synth_resp.choices[0].message.content or ""
+            await _safe_edit(progress_msg, _recovered_text or "Recovery produced no response.")
+            _runner.terminate(
+                messages + [{"role": "assistant", "content": _recovered_text}],
+                succeeded=bool(_recovered_text),
+                phase=_phase.to_state(),
+            )
+            return _recovered_text
+
+     for iteration in range(_start_iteration, _MAX_TOOL_ITERATIONS):
+        if _reuse_reserved_iteration:
+            _reuse_reserved_iteration = False
+        elif not _runner.begin_iteration(messages, phase=_phase.to_state()):
             break
         # Phase-aware tool_choice and tool set
         _tc, _iter_tools, _phase_prompt = _phase.get_config(iteration, tools)
@@ -4465,6 +4625,48 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ctx = _ctx_from_update(update)
     query = update.callback_query
     await query.answer()
+
+    if query.data.startswith("loop_resume:"):
+        run_id = query.data.split(":", 1)[1]
+        from config import DB_PATH
+        from tool_loop_runner import DurableToolLoopRunner
+
+        try:
+            runner = DurableToolLoopRunner.resume(DB_PATH, run_id)
+            run_query = runner.run.query
+            run_chat_id = runner.run.chat_id
+            runner.resume_after_approval()
+            runner.close()
+        except Exception as e:
+            log.warning("Could not approve recovered tool loop %s: %s", run_id, e)
+            await query.edit_message_text("This recovered task is no longer awaiting review.")
+            return
+
+        await query.edit_message_text(
+            "Approved. I’ll resume the interrupted action batch now."
+        )
+        asyncio.create_task(_resume_recoverable_tool_loop(
+            run_id,
+            run_query,
+            run_chat_id,
+            channel,
+        ))
+        return
+
+    if query.data.startswith("loop_cancel:"):
+        run_id = query.data.split(":", 1)[1]
+        from config import DB_PATH
+        from tool_loop_runner import DurableToolLoopRunner
+
+        try:
+            runner = DurableToolLoopRunner.resume(DB_PATH, run_id)
+            runner.cancel()
+            runner.close()
+            await query.edit_message_text("Cancelled the interrupted task.")
+        except Exception as e:
+            log.warning("Could not cancel recovered tool loop %s: %s", run_id, e)
+            await query.edit_message_text("This recovered task is no longer active.")
+        return
 
     if query.data == "action_approve":
         action = autonomy.get_latest_pending()
@@ -8211,29 +8413,107 @@ async def startup():
 
 
 async def _auto_resume_after_restart(channel, chat_id: int):
-    """After a restart, check for unfinished work and proactively resume."""
-    await asyncio.sleep(5)  # Let everything initialize
+    """Recover durable foreground loops after the messaging channel is ready."""
+    await asyncio.sleep(2)
     try:
-        from memory.session_continuity import get_last_tool_use_context
-        tool_ctx = get_last_tool_use_context(chat_id, max_chars=1500)
-        if not tool_ctx:
-            log.info("Auto-resume: no in-progress work found")
+        import sqlite3
+        from config import DB_PATH
+        from loop_state import (
+            RecoveryDisposition,
+            ToolLoopRepository,
+            classify_recovery,
+        )
+        from tool_loop_runner import DurableToolLoopRunner
+
+        conn = sqlite3.connect(str(DB_PATH))
+        repository = ToolLoopRepository(conn)
+        repository.ensure_schema()
+        runs = repository.list_recoverable_runs(limit=20)
+        conn.close()
+        if not runs:
+            log.info("Tool-loop recovery: no recoverable runs found")
             return
 
-        # Extract the user's original query from the context
-        lines = tool_ctx.split("\n")
-        task_line = next((l for l in lines if l.startswith("User asked:")), "")
-        task_desc = task_line.replace("User asked:", "").strip()[:200] if task_line else "a task"
+        for run in runs:
+            recovery = classify_recovery(run)
+            run_chat_id = run.chat_id or chat_id
+            if recovery.disposition is RecoveryDisposition.RESUME:
+                asyncio.create_task(_resume_recoverable_tool_loop(
+                    run.id,
+                    run.query,
+                    run_chat_id,
+                    channel,
+                ))
+                continue
 
-        await channel.send_message(
-            chat_id,
-            f"🔄 I restarted and found unfinished work:\n\n"
-            f"**{task_desc}**\n\n"
-            f"Want me to continue where I left off?",
-        )
-        log.info("Auto-resume: notified user about unfinished work: %s", task_desc[:80])
+            if recovery.disposition in {
+                RecoveryDisposition.REVIEW_REQUIRED,
+                RecoveryDisposition.WAIT_FOR_APPROVAL,
+            }:
+                if recovery.disposition is RecoveryDisposition.REVIEW_REQUIRED:
+                    runner = DurableToolLoopRunner.resume(DB_PATH, run.id)
+                    runner.wait_for_approval()
+                    runner.close()
+                actions = ", ".join(
+                    action.name for action in run.latest_checkpoint.pending_actions
+                )
+                await channel.send_message(
+                    run_chat_id,
+                    "I restarted during a protected action. Its outcome may be "
+                    "ambiguous, so I did not repeat it automatically.\n\n"
+                    f"Task: {run.query[:300]}\n"
+                    f"Actions: {actions}\n\n"
+                    "Resume may repeat a side effect if it completed before the restart.",
+                    buttons=[[
+                        ActionButton("Resume action", f"loop_resume:{run.id}"),
+                        ActionButton("Cancel", f"loop_cancel:{run.id}"),
+                    ]],
+                )
+                log.info("Tool-loop recovery awaiting review: %s", run.id)
     except Exception as e:
-        log.warning("Auto-resume check failed: %s", e)
+        log.warning("Tool-loop recovery scan failed: %s", e)
+
+
+async def _resume_recoverable_tool_loop(
+    run_id: str,
+    query: str,
+    chat_id: int | str,
+    recovery_channel: Channel,
+) -> None:
+    """Resume one durable loop and surface its result on the original channel."""
+    progress = await recovery_channel.send_message(
+        chat_id,
+        f"Resuming interrupted work: {query[:300]}",
+    )
+    try:
+        await call_llm_with_tools(
+            query,
+            "",
+            chat_id,
+            progress,
+            recovery_channel,
+            resume_run_id=run_id,
+        )
+        log.info("Tool-loop recovery completed: %s", run_id)
+    except Exception as e:
+        log.exception("Tool-loop recovery failed for %s", run_id)
+        await progress.edit(f"Could not resume the interrupted task: {str(e)[:300]}")
+        try:
+            from config import DB_PATH
+            from loop_controller import LoopTerminationReason
+            from tool_loop_runner import DurableToolLoopRunner
+
+            runner = DurableToolLoopRunner.resume(DB_PATH, run_id)
+            checkpoint = runner.run.latest_checkpoint
+            runner.terminate(
+                checkpoint.messages if checkpoint else [],
+                succeeded=False,
+                reason=LoopTerminationReason.FAILED,
+                phase=checkpoint.phase if checkpoint else None,
+            )
+            runner.close()
+        except Exception:
+            log.exception("Could not terminally fail recovered tool loop %s", run_id)
 
 
 @app.get("/health")
