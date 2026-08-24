@@ -62,6 +62,58 @@ class DurableToolLoopRunner:
         ))
         return cls(repository, run, owned_connection=conn)
 
+    @classmethod
+    def resume(
+        cls,
+        database: str | Path,
+        run_id: str,
+    ) -> "DurableToolLoopRunner":
+        """Open a recoverable run and restore its bounded-loop counters."""
+        conn = sqlite3.connect(str(database))
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        repository = ToolLoopRepository(conn)
+        repository.ensure_schema()
+        run = repository.load_run(run_id)
+        if run is None:
+            conn.close()
+            raise KeyError(f"Unknown tool loop run {run_id!r}")
+        if run.status in {
+            ToolLoopStatus.SUCCEEDED,
+            ToolLoopStatus.FAILED,
+            ToolLoopStatus.CANCELLED,
+        }:
+            conn.close()
+            raise ValueError(f"Cannot resume terminal tool loop {run_id!r}")
+
+        checkpoint = run.latest_checkpoint
+        recovered_reason = None
+        if checkpoint and checkpoint.phase.get("_loop_termination_reason"):
+            recovered_reason = LoopTerminationReason(
+                checkpoint.phase["_loop_termination_reason"]
+            )
+        snapshot = LoopSnapshot(
+            iterations=checkpoint.iteration_count if checkpoint else 0,
+            actions=checkpoint.action_count if checkpoint else 0,
+            no_progress_iterations=(checkpoint.no_progress_count if checkpoint else 0),
+            elapsed_seconds=checkpoint.elapsed_seconds if checkpoint else 0.0,
+            termination_reason=recovered_reason,
+        )
+        controller = BoundedLoopController.restore(
+            run.budget,
+            snapshot,
+            last_progress_fingerprint=(
+                checkpoint.progress_fingerprint if checkpoint else None
+            ),
+        )
+        return cls(
+            repository,
+            run,
+            controller=controller,
+            owned_connection=conn,
+        )
+
     @property
     def id(self) -> str:
         return self.run.id
@@ -165,10 +217,59 @@ class DurableToolLoopRunner:
         *,
         phase: dict[str, Any] | None = None,
     ) -> None:
+        durable_phase = dict(phase or {})
+        if self.controller.termination_reason is not None:
+            durable_phase["_loop_termination_reason"] = (
+                self.controller.termination_reason.value
+            )
         self._checkpoint(
             LoopCheckpointBoundary.BEFORE_SYNTHESIS,
             messages,
-            phase=phase,
+            phase=durable_phase,
+        )
+
+    def wait_for_approval(self) -> None:
+        """Pause an ambiguous action batch at a durable approval boundary."""
+        checkpoint = self.run.latest_checkpoint
+        if checkpoint is None or not checkpoint.pending_actions:
+            raise ValueError("Approval waits require pending actions")
+        if checkpoint.boundary is LoopCheckpointBoundary.AFTER_MODEL:
+            if not self.controller.reserve_actions(len(checkpoint.pending_actions)):
+                raise ValueError("Pending actions exceed the remaining loop budget")
+        self._checkpoint(
+            LoopCheckpointBoundary.WAITING_FOR_APPROVAL,
+            checkpoint.messages,
+            pending_actions=checkpoint.pending_actions,
+            phase=checkpoint.phase,
+            progress_fingerprint=checkpoint.progress_fingerprint,
+            status=ToolLoopStatus.WAITING_FOR_APPROVAL,
+        )
+
+    def resume_after_approval(self) -> None:
+        """Return an explicitly approved action batch to its execution boundary."""
+        checkpoint = self.run.latest_checkpoint
+        if (
+            self.run.status is not ToolLoopStatus.WAITING_FOR_APPROVAL
+            or checkpoint is None
+        ):
+            raise ValueError("Tool loop is not waiting for approval")
+        self._checkpoint(
+            LoopCheckpointBoundary.BEFORE_ACTIONS,
+            checkpoint.messages,
+            pending_actions=checkpoint.pending_actions,
+            phase=checkpoint.phase,
+            progress_fingerprint=checkpoint.progress_fingerprint,
+            status=ToolLoopStatus.RUNNING,
+        )
+
+    def cancel(self) -> None:
+        """Persist an explicit cancellation as a terminal checkpoint."""
+        checkpoint = self.run.latest_checkpoint
+        self.terminate(
+            checkpoint.messages if checkpoint else [],
+            succeeded=False,
+            reason=LoopTerminationReason.CANCELLED,
+            phase=checkpoint.phase if checkpoint else None,
         )
 
     def terminate(
@@ -193,11 +294,15 @@ class DurableToolLoopRunner:
             self.controller.terminate(LoopTerminationReason.FAILED)
         terminal_reason = self.controller.termination_reason
         assert terminal_reason is not None
+        if terminal_reason is LoopTerminationReason.CANCELLED:
+            status = ToolLoopStatus.CANCELLED
+        else:
+            status = ToolLoopStatus.SUCCEEDED if succeeded else ToolLoopStatus.FAILED
         self._checkpoint(
             LoopCheckpointBoundary.TERMINAL,
             messages,
             phase=phase,
-            status=(ToolLoopStatus.SUCCEEDED if succeeded else ToolLoopStatus.FAILED),
+            status=status,
             termination_reason=terminal_reason,
         )
 

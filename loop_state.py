@@ -199,16 +199,23 @@ def classify_recovery(run: ToolLoopRun) -> RecoveryClassification:
             "Run is paused at an approval boundary",
         )
 
-    if checkpoint and checkpoint.boundary is LoopCheckpointBoundary.BEFORE_ACTIONS:
+    if checkpoint and checkpoint.boundary in {
+        LoopCheckpointBoundary.AFTER_MODEL,
+        LoopCheckpointBoundary.BEFORE_ACTIONS,
+    }:
         unsafe = [
             action.name
             for action in checkpoint.pending_actions
             if action.action_type is not ActionType.READ
         ]
         if unsafe:
+            if checkpoint.boundary is LoopCheckpointBoundary.BEFORE_ACTIONS:
+                reason = "Interrupted action outcome may be ambiguous: "
+            else:
+                reason = "Interrupted write requires confirmation before recovery: "
             return RecoveryClassification(
                 RecoveryDisposition.REVIEW_REQUIRED,
-                "Interrupted action outcome may be ambiguous: " + ", ".join(unsafe),
+                reason + ", ".join(unsafe),
             )
 
     return RecoveryClassification(
