@@ -89,6 +89,7 @@ class ExecutionContext:
     chat_id: int | None = None
     # Metadata for audit trail
     trigger_id: str | None = None  # workflow_id, plan_id, etc.
+    approval_granted: bool = False
 
     def child(self, source: ExecutionSource, **overrides) -> ExecutionContext:
         """Create a child context with incremented depth."""
@@ -100,6 +101,9 @@ class ExecutionContext:
             prior_results=overrides.get("prior_results", dict(self.prior_results)),
             chat_id=overrides.get("chat_id", self.chat_id),
             trigger_id=overrides.get("trigger_id", self.trigger_id),
+            approval_granted=overrides.get(
+                "approval_granted", self.approval_granted,
+            ),
         )
 
 
@@ -258,6 +262,8 @@ class ExecutionBus:
         context: ExecutionContext,
         *,
         response_context: Any = None,
+        handler_override: Callable | None = None,
+        declared_type_override: ActionType | None = None,
     ) -> ActionResult:
         """Execute an action through the bus.
 
@@ -267,12 +273,15 @@ class ExecutionBus:
 
         # Depth guard
         if context.depth > MAX_EXECUTION_DEPTH:
-            return ActionResult.rejected(
+            result = ActionResult.rejected(
                 f"Max execution depth ({MAX_EXECUTION_DEPTH}) exceeded",
                 kind=ActionErrorKind.VALIDATION,
                 action=action,
                 source=context.source.value,
             )
+            self._audit(action, params, context, result)
+            self._record_signal(action, context, result)
+            return result
 
         # Check composite handlers first (M8: orchestrate, tool_reason, workflow)
         if action in self._composite_handlers:
@@ -296,43 +305,62 @@ class ExecutionBus:
                 return result
 
         registry = self._get_registry()
-        declared_type = self.get_declared_action_type(action)
-        handler = registry.get_handler(action)
+        declared_type = (
+            declared_type_override
+            if declared_type_override is not None
+            else self.get_declared_action_type(action)
+        )
+        handler = handler_override or registry.get_handler(action)
         if handler is None:
-            return ActionResult.failed(
+            result = ActionResult.failed(
                 f"No handler found for '{action}'",
                 kind=ActionErrorKind.NOT_FOUND,
                 action=action, source=context.source.value,
                 latency_ms=(time.monotonic() - t0) * 1000,
             )
+            self._audit(action, params, context, result)
+            self._record_signal(action, context, result)
+            return result
 
         # Autonomy check
         effective_autonomy = context.autonomy_override or (
             self._autonomy.level if self._autonomy else AutonomyLevel.SUPERVISED
         )
-        if self._autonomy and self._autonomy.needs_approval(
-            action, params, declared_type=declared_type,
-        ):
+        approval_needed = bool(
+            self._autonomy and self._autonomy.needs_approval(
+                action, params, declared_type=declared_type,
+            )
+        )
+        if approval_needed and not context.approval_granted:
             # For non-user sources, check if autonomy allows auto-execution
             if context.source != ExecutionSource.USER:
-                if effective_autonomy == AutonomyLevel.SUPERVISED:
-                    return ActionResult.waiting_for_approval(
-                        f"Action '{action}' requires approval (supervised mode)",
+                if (
+                    context.autonomy_override is None
+                    or effective_autonomy == AutonomyLevel.SUPERVISED
+                ):
+                    result = ActionResult.waiting_for_approval(
+                        f"Action '{action}' requires approval",
                         action=action,
                         source=context.source.value,
                         latency_ms=(time.monotonic() - t0) * 1000,
                     )
+                    self._audit(action, params, context, result)
+                    self._record_signal(action, context, result)
+                    return result
 
         # Rate limit check
         if self._autonomy:
             allowed, reason = self._autonomy.check_rate_limit(action)
             if not allowed:
-                return ActionResult.rejected(
+                result = ActionResult.rejected(
                     reason, kind=ActionErrorKind.RATE_LIMITED,
                     retryable=True,
                     action=action, source=context.source.value,
                     latency_ms=(time.monotonic() - t0) * 1000,
                 )
+                self._audit(action, params, context, result)
+                self._record_signal(action, context, result)
+                return result
 
         # Build intent dict matching existing handler signature
         intent = {"action": action, **params}
@@ -358,6 +386,8 @@ class ExecutionBus:
                 result = ActionResult.not_handled(**result_kwargs)
             else:
                 result = ActionResult.succeeded(**result_kwargs)
+            if approval_needed and context.approval_granted:
+                result.approval = ApprovalDecision.APPROVED
         except asyncio.TimeoutError:
             elapsed = (time.monotonic() - t0) * 1000
             result = ActionResult.failed(
@@ -400,6 +430,7 @@ class ExecutionBus:
                     "depth": context.depth,
                     "parent_plan_id": context.parent_plan_id,
                     "trigger_id": context.trigger_id,
+                    "approval_granted": context.approval_granted,
                 },
                 result=(
                     "ok" if result.success
@@ -422,6 +453,7 @@ class ExecutionBus:
                 "error_kind": result.failure.kind.value if result.failure else None,
                 "latency_ms": round(result.latency_ms, 1),
                 "depth": context.depth,
+                "approval": result.approval.value,
                 "error": result.error[:100] if result.error else None,
             })
         except Exception:
