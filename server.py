@@ -1605,6 +1605,17 @@ class _PhaseTracker:
             self.consecutive_research += 1
             self.total_research += 1
 
+    def to_state(self) -> dict:
+        """Return the durable subset needed to resume phase enforcement."""
+        return {
+            "is_artifact": self.is_artifact,
+            "consecutive_research": self.consecutive_research,
+            "total_research": self.total_research,
+            "has_called_action": self.has_called_action,
+            "generate_file_attempted": self.generate_file_attempted,
+            "generate_file_failed": self.generate_file_failed,
+        }
+
     def get_config(self, iteration: int, base_tools: list[dict]) -> tuple:
         """Return (tool_choice, tools, phase_prompt) for this iteration.
 
@@ -2342,22 +2353,27 @@ async def call_llm_with_tools(
     from intent import is_artifact_request as _is_artifact_req
     _is_artifact = _is_artifact_req(query)
     _phase = _PhaseTracker(is_artifact=_is_artifact)
-    from loop_controller import (
-        BoundedLoopController,
-        LoopBudget,
-        LoopTerminationReason,
+    from config import DB_PATH
+    from loop_controller import LoopBudget, LoopTerminationReason
+    from loop_state import PendingToolAction, ToolLoopStatus
+    from tool_loop_runner import DurableToolLoopRunner
+    _runner = DurableToolLoopRunner.create(
+        DB_PATH,
+        chat_id=chat_id,
+        query=query,
+        model=_routed_model,
+        budget=LoopBudget(
+            max_iterations=_MAX_TOOL_ITERATIONS,
+            max_actions=_MAX_TOOL_ACTIONS,
+            max_elapsed_seconds=_MAX_TOOL_ELAPSED_SECONDS,
+            max_no_progress_iterations=_MAX_TOOL_NO_PROGRESS_ITERATIONS,
+        ),
     )
-    _loop = BoundedLoopController(LoopBudget(
-        max_iterations=_MAX_TOOL_ITERATIONS,
-        max_actions=_MAX_TOOL_ACTIONS,
-        max_elapsed_seconds=_MAX_TOOL_ELAPSED_SECONDS,
-        max_no_progress_iterations=_MAX_TOOL_NO_PROGRESS_ITERATIONS,
-    ))
     _tool_loop_active.add(int(chat_id))
     _progress_steps = []
     try:  # try/finally to ensure _tool_loop_active cleanup
      for iteration in range(_MAX_TOOL_ITERATIONS):
-        if not _loop.begin_iteration():
+        if not _runner.begin_iteration(messages, phase=_phase.to_state()):
             break
         # Phase-aware tool_choice and tool set
         _tc, _iter_tools, _phase_prompt = _phase.get_config(iteration, tools)
@@ -2382,9 +2398,17 @@ async def call_llm_with_tools(
         # Circuit breaker check — don't waste iterations on a known-broken API
         if _cb_claude_fg.is_open():
             log.warning("Foreground circuit breaker open at iteration %d — falling back to streaming", iteration)
-            _loop.terminate(LoopTerminationReason.FAILED)
+            _runner.stop(LoopTerminationReason.FAILED)
             stream_gen = ask_llm_stream(query, context, system_extra)
-            return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+            _fallback_text = await stream_to_telegram(
+                chat_id, progress_msg, stream_gen, channel,
+            )
+            _runner.terminate(
+                messages + [{"role": "assistant", "content": _fallback_text}],
+                succeeded=False,
+                phase=_phase.to_state(),
+            )
+            return _fallback_text
 
         # API call with 1 retry for transient errors (429, 503, timeout)
         # Timeout scales with iteration — later iterations have larger message histories
@@ -2413,17 +2437,57 @@ async def call_llm_with_tools(
                     continue
                 log.error("Tool-use LLM call failed (iteration %d, attempt %d): %s", iteration, _tool_attempt + 1, e)
                 if iteration == 0:
-                    _loop.terminate(LoopTerminationReason.FAILED)
+                    _runner.stop(LoopTerminationReason.FAILED)
                     stream_gen = ask_llm_stream(query, context, system_extra)
-                    return await stream_to_telegram(chat_id, progress_msg, stream_gen, channel)
+                    _fallback_text = await stream_to_telegram(
+                        chat_id, progress_msg, stream_gen, channel,
+                    )
+                    _runner.terminate(
+                        messages + [{"role": "assistant", "content": _fallback_text}],
+                        succeeded=False,
+                        phase=_phase.to_state(),
+                    )
+                    return _fallback_text
                 response = None
                 break
         if response is None:
-            _loop.terminate(LoopTerminationReason.FAILED)
+            _runner.stop(LoopTerminationReason.FAILED)
             break
 
         choice = response.choices[0]
         msg = choice.message
+        _assistant_checkpoint_message = {"role": "assistant", "content": msg.content or ""}
+        _pending_actions = []
+        if msg.tool_calls:
+            _assistant_checkpoint_message["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
+                    },
+                }
+                for tc in msg.tool_calls
+            ]
+            for tc in msg.tool_calls:
+                _declared_type = registry.get_action_type(tc.function.name)
+                _action_type = _declared_type or ActionType.DANGEROUS
+                _pending_actions.append(PendingToolAction(
+                    id=tc.id,
+                    name=tc.function.name,
+                    arguments=tc.function.arguments,
+                    action_type=_action_type,
+                    idempotency_key=(
+                        f"{_runner.id}:{tc.id}"
+                        if _action_type is not ActionType.READ else None
+                    ),
+                ))
+        _runner.after_model(
+            messages + [_assistant_checkpoint_message],
+            pending_actions=_pending_actions,
+            phase=_phase.to_state(),
+        )
 
         # #12: Track token usage and cost per iteration
         _usage = getattr(response, 'usage', None)
@@ -2454,27 +2518,20 @@ async def call_llm_with_tools(
 
         # If the model returned tool calls, execute them
         if msg.tool_calls:
-            if not _loop.reserve_actions(len(msg.tool_calls)):
+            if not _runner.reserve_actions(
+                _pending_actions,
+                messages + [_assistant_checkpoint_message],
+                phase=_phase.to_state(),
+            ):
                 log.warning(
                     "Tool-use loop stopped before %d tool call(s): %s",
                     len(msg.tool_calls),
-                    _loop.termination_reason.value,
+                    _runner.termination_reason.value,
                 )
                 break
 
             # Append assistant message with tool calls
-            messages.append({
-                "role": "assistant",
-                "content": msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in msg.tool_calls
-                ],
-            })
+            messages.append(_assistant_checkpoint_message)
 
             # Update progress message to show what's happening (accumulative)
             tool_names = [tc.function.name for tc in msg.tool_calls]
@@ -2546,10 +2603,14 @@ async def call_llm_with_tools(
                 sort_keys=True,
                 ensure_ascii=False,
             )
-            if not _loop.observe_progress(_progress_fingerprint):
+            if not _runner.after_actions(
+                messages,
+                _progress_fingerprint,
+                phase=_phase.to_state(),
+            ):
                 log.warning(
                     "Tool-use loop stopped after repeated state: %s",
-                    _loop.termination_reason.value,
+                    _runner.termination_reason.value,
                 )
                 break
 
@@ -2564,12 +2625,14 @@ async def call_llm_with_tools(
         # Preamble interception for artifact tasks — re-enter loop instead of exiting
         if _is_artifact and iteration < 8 and _is_preamble_response(final_text):
             log.warning("Preamble at iteration %d — re-entering loop for artifact task", iteration)
-            if not _loop.observe_progress(
-                f"preamble:{final_text.strip().lower()[:1000]}"
+            if not _runner.observe_model_progress(
+                messages + [_assistant_checkpoint_message],
+                f"preamble:{final_text.strip().lower()[:1000]}",
+                phase=_phase.to_state(),
             ):
                 log.warning(
                     "Tool-use loop stopped after repeated preamble: %s",
-                    _loop.termination_reason.value,
+                    _runner.termination_reason.value,
                 )
                 break
             messages.append({"role": "assistant", "content": final_text})
@@ -2589,6 +2652,7 @@ async def call_llm_with_tools(
                     "Please synthesize all the tool results above into a complete response NOW."
                 ),
             })
+            _runner.before_synthesis(messages, phase=_phase.to_state())
             try:
                 _synth_resp = await _gateway_client.chat.completions.create(
                     model=_routed_model,
@@ -2629,9 +2693,46 @@ async def call_llm_with_tools(
                     })
                 id = f"programmatic_fallback_{iteration}"
 
-            if _loop.reserve_actions(1):
+            _programmatic_action = PendingToolAction(
+                id=_SynthToolCall.id,
+                name=_SynthToolCall.function.name,
+                arguments=_SynthToolCall.function.arguments,
+                action_type=ActionType.WRITE,
+                idempotency_key=f"{_runner.id}:{_SynthToolCall.id}",
+            )
+            _programmatic_messages = messages + [{
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{
+                    "id": _SynthToolCall.id,
+                    "type": "function",
+                    "function": {
+                        "name": _SynthToolCall.function.name,
+                        "arguments": _SynthToolCall.function.arguments,
+                    },
+                }],
+            }]
+            if _runner.reserve_actions(
+                [_programmatic_action],
+                _programmatic_messages,
+                phase=_phase.to_state(),
+            ):
                 try:
                     _gen_result = await _execute_tool_call(_SynthToolCall())
+                    _programmatic_messages.append({
+                        "role": "tool",
+                        "tool_call_id": _SynthToolCall.id,
+                        "content": _gen_result[:8000],
+                    })
+                    _runner.after_actions(
+                        _programmatic_messages,
+                        json.dumps({
+                            "tool": _SynthToolCall.function.name,
+                            "arguments": _SynthToolCall.function.arguments[:500],
+                            "result": _gen_result[:1000],
+                        }, sort_keys=True, ensure_ascii=False),
+                        phase=_phase.to_state(),
+                    )
                     if '"success"' in _gen_result[:200]:
                         final_text = _gen_result
                         log.info("Programmatic generate_file fallback succeeded")
@@ -2642,7 +2743,7 @@ async def call_llm_with_tools(
             else:
                 log.warning(
                     "Skipping programmatic generate_file fallback: %s",
-                    _loop.termination_reason.value,
+                    _runner.termination_reason.value,
                 )
 
         if final_text:
@@ -2665,6 +2766,7 @@ async def call_llm_with_tools(
                         "to the original question. Do not call any more tools."
                     ),
                 })
+                _runner.before_synthesis(messages, phase=_phase.to_state())
                 try:
                     _synth_resp = await _gateway_client.chat.completions.create(
                         model=_routed_model,
@@ -2725,17 +2827,22 @@ async def call_llm_with_tools(
         except Exception as _te:
             log.debug("Task state update failed: %s", _te)
 
-        _loop.complete()
+        _runner.terminate(
+            messages + [{"role": "assistant", "content": final_text}],
+            succeeded=True,
+            phase=_phase.to_state(),
+        )
         return final_text
 
      # Exhausted iterations — try one final synthesis before giving up
-     _termination_reason = _loop.ensure_iteration_termination()
+     _termination_reason = _runner.ensure_iteration_termination()
+     _runner_state = _runner.snapshot()
      log.warning(
          "Tool-use loop stopped (%s) after %d iteration(s) and %d action(s) — "
          "attempting final synthesis",
          _termination_reason.value,
-         _loop.snapshot().iterations,
-         _loop.snapshot().actions,
+         _runner_state.iterations,
+         _runner_state.actions,
      )
      messages.append({
         "role": "user",
@@ -2743,8 +2850,9 @@ async def call_llm_with_tools(
             f"Execution stopped because {_termination_reason.value.replace('_', ' ')}. "
             "Based on everything gathered so far, "
             "please provide your best answer to the original question. Do not call any more tools."
-        ),
+         ),
      })
+     _runner.before_synthesis(messages, phase=_phase.to_state())
      try:
         _final_resp = await _gateway_client.chat.completions.create(
             model=_routed_model,
@@ -2757,6 +2865,11 @@ async def call_llm_with_tools(
         final_text = _final_resp.choices[0].message.content or ""
         if final_text:
             await _safe_edit(progress_msg, final_text[:4096])
+            _runner.terminate(
+                messages + [{"role": "assistant", "content": final_text}],
+                succeeded=True,
+                phase=_phase.to_state(),
+            )
             return final_text
      except Exception as e:
         log.error("Final synthesis after exhaustion failed: %s", e)
@@ -2774,6 +2887,11 @@ async def call_llm_with_tools(
                 if final_text:
                     log.info("Exhaustion synthesis succeeded via backup %s", _bp_model)
                     await _safe_edit(progress_msg, final_text[:4096])
+                    _runner.terminate(
+                        messages + [{"role": "assistant", "content": final_text}],
+                        succeeded=True,
+                        phase=_phase.to_state(),
+                    )
                     return final_text
             except Exception:
                 continue
@@ -2785,26 +2903,44 @@ async def call_llm_with_tools(
         "Could you try breaking this into smaller steps?"
      )
      await _safe_edit(progress_msg, _fallback)
+     _runner.terminate(
+        messages + [{"role": "assistant", "content": _fallback}],
+        succeeded=False,
+        phase=_phase.to_state(),
+     )
      return _fallback
     finally:
-     if _loop.termination_reason is None:
-        _loop.terminate(LoopTerminationReason.FAILED)
      try:
-        from learning import record_signal
-        _loop_state = _loop.snapshot()
-        record_signal("execution_loop_terminated", {
-            "loop": "tool_use",
-            "reason": _loop_state.termination_reason.value,
-            "iterations": _loop_state.iterations,
-            "actions": _loop_state.actions,
-            "no_progress_iterations": _loop_state.no_progress_iterations,
-            "elapsed_seconds": round(_loop_state.elapsed_seconds, 3),
-        })
-     except Exception:
-        pass
-     # Release summarization gate — deferred summaries can now run
-     _tool_loop_active.discard(int(chat_id))
-     _check_summarization_needed(int(chat_id))
+        if _runner.run.status not in {
+            ToolLoopStatus.SUCCEEDED,
+            ToolLoopStatus.FAILED,
+            ToolLoopStatus.CANCELLED,
+        }:
+            _runner.terminate(
+                messages,
+                succeeded=False,
+                reason=LoopTerminationReason.FAILED,
+                phase=_phase.to_state(),
+            )
+        try:
+            from learning import record_signal
+            _loop_state = _runner.snapshot()
+            record_signal("execution_loop_terminated", {
+                "loop": "tool_use",
+                "run_id": _runner.id,
+                "reason": _loop_state.termination_reason.value,
+                "iterations": _loop_state.iterations,
+                "actions": _loop_state.actions,
+                "no_progress_iterations": _loop_state.no_progress_iterations,
+                "elapsed_seconds": round(_loop_state.elapsed_seconds, 3),
+            })
+        except Exception:
+            pass
+     finally:
+        _runner.close()
+        # Release summarization gate — deferred summaries can now run
+        _tool_loop_active.discard(int(chat_id))
+        _check_summarization_needed(int(chat_id))
 
 
 async def _safe_edit(msg, text: str):
