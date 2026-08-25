@@ -3,8 +3,9 @@ import * as http from "http";
 
 let server: http.Server | null = null;
 let boundPort: number | null = null;
-// Terminal output buffer: terminal name -> last N lines
-const terminalOutput: Map<string, string[]> = new Map();
+// Key output by the terminal object so identically named terminals never share
+// captured output. HTTP callers can still address a terminal by index or name.
+const terminalOutput: Map<vscode.Terminal, string[]> = new Map();
 const OUTPUT_BUFFER_LINES = 200;
 
 interface TerminalInfo {
@@ -202,14 +203,19 @@ async function handleRequest(
     const outputMatch = path.match(/^\/output\/(.+)$/);
     if (outputMatch && req.method === "GET") {
       const target = decodeURIComponent(outputMatch[1]);
+      const idx = parseInt(target, 10);
+      const terminal = findTerminal(isNaN(idx) ? target : idx);
+      if (!terminal) {
+        return jsonResponse(res, 404, { error: `Terminal not found: ${target}` });
+      }
       const lines = url.searchParams.get("lines");
       const limit = lines ? parseInt(lines, 10) : 50;
-      const buffer = terminalOutput.get(target);
+      const buffer = terminalOutput.get(terminal);
       if (!buffer) {
-        return jsonResponse(res, 200, { terminal: target, output: [], note: "No output captured yet" });
+        return jsonResponse(res, 200, { terminal: terminal.name, output: [], note: "No output captured yet" });
       }
       return jsonResponse(res, 200, {
-        terminal: target,
+        terminal: terminal.name,
         output: buffer.slice(-limit),
       });
     }
@@ -285,11 +291,10 @@ function startServer(ctx: vscode.ExtensionContext) {
     const onWrite = (vscode.window as any).onDidWriteTerminalData;
     if (onWrite) {
       const disposable = onWrite((e: { terminal: vscode.Terminal; data: string }) => {
-        const name = e.terminal.name;
-        if (!terminalOutput.has(name)) {
-          terminalOutput.set(name, []);
+        if (!terminalOutput.has(e.terminal)) {
+          terminalOutput.set(e.terminal, []);
         }
-        const buffer = terminalOutput.get(name)!;
+        const buffer = terminalOutput.get(e.terminal)!;
         // Split by newlines and append
         const lines = e.data.split(/\r?\n/);
         buffer.push(...lines.filter((l: string) => l.length > 0));
@@ -330,7 +335,7 @@ export function activate(ctx: vscode.ExtensionContext) {
   // Clean up terminal output buffers when terminals close
   ctx.subscriptions.push(
     vscode.window.onDidCloseTerminal((t) => {
-      terminalOutput.delete(t.name);
+      terminalOutput.delete(t);
     })
   );
 }

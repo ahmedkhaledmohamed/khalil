@@ -12,6 +12,7 @@ import logging
 import re
 import sqlite3
 from datetime import datetime, timezone
+from pathlib import Path
 
 from config import DB_PATH
 
@@ -19,8 +20,11 @@ log = logging.getLogger("khalil.actions.dev_tools")
 
 _SESSION_STATE_KEY = "coding_session_bridge"
 _PROMPT_STABILITY_POLLS = 2
+_NATIVE_APPROVAL_CONFIRMATION_SECONDS = 3.0
 _NATIVE_EVENT_TTL_SECONDS = 2 * 60 * 60
 _BRIDGE_STATE_LOCK = asyncio.Lock()
+_CONFIRMATION_TASKS: set[asyncio.Task] = set()
+_LSOF_PATH = "/usr/sbin/lsof" if Path("/usr/sbin/lsof").exists() else "lsof"
 _ANSI_ESCAPE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 _CODEX_TUI_QUESTION = re.compile(
     r"(?:^|\n)\s*[•●]\s+((?:what|which|how|where|when|why|would|should|do you|"
@@ -251,10 +255,6 @@ async def _resolve_control_targets(processes: list[dict]) -> dict[str, dict]:
         for terminal in instance["terminals"]:
             cursor_terminals.append({**terminal, "bridge_url": instance["base_url"]})
     cursor_by_pid = {terminal.get("pid"): terminal for terminal in cursor_terminals if terminal.get("pid")}
-    cursor_name_counts = {}
-    for terminal in cursor_terminals:
-        name = terminal.get("name")
-        cursor_name_counts[name] = cursor_name_counts.get(name, 0) + 1
     targets = {}
     for process in processes:
         key = _session_key(process)
@@ -278,9 +278,7 @@ async def _resolve_control_targets(processes: list[dict]) -> dict[str, dict]:
                 "identity": f"cursor:{terminal['pid']}",
                 "name": name,
                 "bridge_url": terminal["bridge_url"],
-                # The installed bridge indexes captured output by name. Never
-                # read it when duplicate names could mix separate terminals.
-                "read_target": name if cursor_name_counts.get(name) == 1 else None,
+                "read_target": str(terminal["id"]),
                 "tty": tty,
             }
     return targets
@@ -304,6 +302,8 @@ async def _read_target(target: dict, lines: int = 50) -> str | None:
         return None
     from actions.terminal import bridge_get_output
     result = await bridge_get_output(read_target, lines=lines, base_url=target["bridge_url"])
+    if result.get("error") or result.get("note"):
+        return None
     output = result.get("output")
     return "\n".join(output) if isinstance(output, list) else output
 
@@ -325,7 +325,11 @@ def _extract_input_prompt(output: str | None) -> tuple[str | None, bool]:
         questions = _CODEX_TUI_QUESTION.findall(tail)
         if questions:
             return questions[-1].strip(), False
-    approval = any(pattern.search(tail) for pattern in _APPROVAL_PATTERNS)
+    # Approval UI is actionable only while it remains at the bottom of the
+    # terminal. Searching the full scrollback re-detects prompts that an
+    # automatic reviewer already resolved.
+    actionable_tail = "\n".join(lines[-8:]).strip()
+    approval = any(pattern.search(actionable_tail) for pattern in _APPROVAL_PATTERNS)
     if not approval and not any(pattern.search(tail) for pattern in _INPUT_PATTERNS):
         return None, False
     return tail[-1800:], approval
@@ -361,15 +365,21 @@ def _format_session_notification(session: dict) -> str:
     )
 
 
-def _native_event_is_pending(session: dict) -> bool:
-    if session.get("source") != "native_hook" or session.get("status") != "needs_input":
-        return False
+def _native_event_age_seconds(session: dict) -> float:
     try:
         updated = datetime.fromisoformat(session["native_event_at"])
         age = datetime.now(timezone.utc) - updated.astimezone(timezone.utc)
-        return age.total_seconds() < _NATIVE_EVENT_TTL_SECONDS
+        return age.total_seconds()
     except (KeyError, TypeError, ValueError):
-        return False
+        return float("inf")
+
+
+def _native_event_is_pending(session: dict) -> bool:
+    return bool(
+        session.get("source") == "native_hook"
+        and session.get("status") == "needs_input"
+        and _native_event_age_seconds(session) < _NATIVE_EVENT_TTL_SECONDS
+    )
 
 
 def _same_pending_native_session(
@@ -378,7 +388,7 @@ def _same_pending_native_session(
     return bool(
         external_session_id
         and session.get("source") == "native_hook"
-        and session.get("status") == "needs_input"
+        and session.get("status") in {"pending_confirmation", "needs_input"}
         and session.get("agent") == agent
         and session.get("external_session_id") == external_session_id
     )
@@ -396,17 +406,56 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
     for process in processes:
         key = _session_key(process)
         target = targets.get(key)
+        previous = old_sessions.get(key, {})
         # Only an explicit prompt in a foreground interactive CLI is eligible.
         if not target or "+" not in process.get("stat", ""):
+            if (
+                previous.get("status") == "pending_confirmation"
+                and _native_event_age_seconds(previous) < _NATIVE_EVENT_TTL_SECONDS
+            ):
+                active_sessions[key] = {
+                    **previous,
+                    "cwd": process.get("cwd") or previous.get("cwd"),
+                    "updated_at": _utc_now(),
+                }
             continue
-        previous = old_sessions.get(key, {})
+
+        if (
+            previous.get("status") == "pending_confirmation"
+            and _native_event_age_seconds(previous) < 10
+        ):
+            active_sessions[key] = {
+                **previous,
+                "cwd": process.get("cwd") or previous.get("cwd"),
+                "target_kind": target["kind"],
+                "target": target["target"],
+                "target_identity": target["identity"],
+                "target_name": target.get("name"),
+                "bridge_url": target.get("bridge_url"),
+                "updated_at": _utc_now(),
+            }
+            continue
+
         output = await _read_target(target)
+        if output is None and previous.get("status") == "pending_confirmation":
+            active_sessions[key] = {
+                **previous,
+                "cwd": process.get("cwd") or previous.get("cwd"),
+                "target_kind": target["kind"],
+                "target": target["target"],
+                "target_identity": target["identity"],
+                "target_name": target.get("name"),
+                "bridge_url": target.get("bridge_url"),
+                "updated_at": _utc_now(),
+            }
+            continue
         prompt, approval = _extract_input_prompt(output)
         native_pending = _native_event_is_pending(previous)
         prompt_hash = hashlib.sha256((prompt or "").encode()).hexdigest()[:16] if prompt else None
         if native_pending:
             prompt_hash = previous.get("candidate_hash")
             approval = previous.get("approval", False)
+            prompt = prompt or previous.get("prompt")
         same_candidate = prompt_hash and prompt_hash == previous.get("candidate_hash")
         candidate_polls = previous.get("candidate_polls", 0) + 1 if same_candidate else (1 if prompt else 0)
         answered_same_prompt = (
@@ -415,6 +464,8 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
         )
         if native_pending:
             status = "needs_input"
+        elif previous.get("status") == "pending_confirmation" and not prompt:
+            status = "auto_resolved"
         elif answered_same_prompt:
             status = "responded"
         else:
@@ -426,7 +477,7 @@ async def _poll_coding_sessions(channel, chat_id: int | str) -> int:
             "pid": process["pid"],
             "started": process.get("started"),
             "tty": _normalise_tty(process["tty"]),
-            "cwd": process.get("cwd"),
+            "cwd": process.get("cwd") or previous.get("cwd"),
             "target_kind": target["kind"],
             "target": target["target"],
             "target_identity": target["identity"],
@@ -528,6 +579,134 @@ def _remember_event(state: dict, event_id: str) -> None:
         state["event_index"] = dict(newest)
 
 
+async def _confirm_pending_approval(
+    key: str,
+    native_candidate_hash: str,
+    channel,
+    chat_id: int | str,
+) -> dict:
+    """Notify only when a native approval remains visible in the exact terminal."""
+    state = _load_bridge_state()
+    session = state["sessions"].get(key)
+    if (
+        not session
+        or session.get("status") != "pending_confirmation"
+        or session.get("native_candidate_hash") != native_candidate_hash
+    ):
+        return {"confirmed": False, "reason": "no_longer_pending"}
+
+    processes = await _get_coding_agent_processes()
+    live = next((process for process in processes if _session_key(process) == key), None)
+    if not live or "+" not in live.get("stat", ""):
+        session["status"] = "auto_resolved" if live else "stale"
+        session["resolution"] = "agent_not_waiting" if live else "session_ended"
+        session["updated_at"] = _utc_now()
+        _save_bridge_state(state)
+        return {"confirmed": False, "reason": session["resolution"]}
+
+    targets = await _resolve_control_targets([live])
+    target = targets.get(key)
+    if not target:
+        session["confirmation_error"] = "control_target_unavailable"
+        session["updated_at"] = _utc_now()
+        _save_bridge_state(state)
+        return {"confirmed": False, "pending": True, "reason": "target_unavailable"}
+
+    output = await _read_target(target)
+    if output is None:
+        session["confirmation_error"] = "terminal_output_unavailable"
+        session["updated_at"] = _utc_now()
+        _save_bridge_state(state)
+        return {"confirmed": False, "pending": True, "reason": "output_unavailable"}
+
+    prompt, approval = _extract_input_prompt(output)
+    if not prompt or not approval:
+        session["status"] = "auto_resolved"
+        session["resolution"] = "approval_prompt_cleared"
+        session["updated_at"] = _utc_now()
+        _save_bridge_state(state)
+        return {"confirmed": False, "reason": "approval_prompt_cleared"}
+
+    confirmation_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
+    same_confirmation = confirmation_hash == session.get("confirmation_hash")
+    confirmation_polls = session.get("confirmation_polls", 0) + 1 if same_confirmation else 1
+    session.update({
+        "cwd": live.get("cwd") or session.get("cwd"),
+        "target_kind": target["kind"],
+        "target": target["target"],
+        "target_identity": target["identity"],
+        "target_name": target.get("name"),
+        "bridge_url": target.get("bridge_url"),
+        "candidate_hash": confirmation_hash,
+        "confirmation_hash": confirmation_hash,
+        "confirmation_polls": confirmation_polls,
+        "confirmation_error": None,
+        "prompt": _redact_prompt(prompt),
+        "updated_at": _utc_now(),
+    })
+    if confirmation_polls < _PROMPT_STABILITY_POLLS:
+        _save_bridge_state(state)
+        return {"confirmed": False, "pending": True, "reason": "awaiting_stability"}
+
+    sent = await channel.send_message(
+        chat_id,
+        _format_session_notification({**session, "prompt": _redact_prompt(prompt)}),
+    )
+    session["status"] = "needs_input"
+    session["notification_message_id"] = str(sent.message_id)
+    session["notified_at"] = _utc_now()
+    state["message_index"] = {
+        message_id: indexed_key
+        for message_id, indexed_key in state["message_index"].items()
+        if indexed_key != key
+    }
+    state["message_index"][str(sent.message_id)] = key
+    _save_bridge_state(state)
+    return {"confirmed": True, "notified": True}
+
+
+async def _confirm_pending_approval_after_delay(
+    key: str,
+    native_candidate_hash: str,
+    channel,
+    chat_id: int | str,
+) -> None:
+    """Run two bounded probes after the hook returns so auto-review can finish."""
+    for delay in (_NATIVE_APPROVAL_CONFIRMATION_SECONDS, 2.0):
+        await asyncio.sleep(delay)
+        async with _BRIDGE_STATE_LOCK:
+            result = await _confirm_pending_approval(
+                key, native_candidate_hash, channel, chat_id,
+            )
+        if not result.get("pending"):
+            return
+
+
+def _schedule_pending_approval_confirmation(
+    key: str,
+    native_candidate_hash: str,
+    channel,
+    chat_id: int | str,
+) -> None:
+    task = asyncio.create_task(_confirm_pending_approval_after_delay(
+        key, native_candidate_hash, channel, chat_id,
+    ))
+    _CONFIRMATION_TASKS.add(task)
+    task.add_done_callback(_pending_confirmation_done)
+
+
+def _pending_confirmation_done(task: asyncio.Task) -> None:
+    _CONFIRMATION_TASKS.discard(task)
+    if task.cancelled():
+        return
+    try:
+        error = task.exception()
+    except asyncio.CancelledError:
+        return
+    if error:
+        log.warning("Coding-session approval confirmation failed: %s", error)
+
+
 async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str) -> dict:
     """Apply one authenticated native hook event to the session bridge."""
     if payload.get("schema_version") != 1:
@@ -581,15 +760,19 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         return {"accepted": False, "reason": "missing_prompt"}
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()[:16]
     if (
-        previous.get("status") == "needs_input"
+        previous.get("status") in {"pending_confirmation", "needs_input"}
         and (
-            previous.get("candidate_hash") == prompt_hash
+            previous.get("native_candidate_hash") == prompt_hash
+            or previous.get("candidate_hash") == prompt_hash
             or (
                 hook_event == "notification"
                 and _same_pending_native_session(previous, agent, external_session_id)
             )
         )
-        and previous.get("notified_at")
+        and (
+            previous.get("status") == "pending_confirmation"
+            or previous.get("notified_at")
+        )
     ):
         current_message_id = str(previous.get("notification_message_id") or "")
         state["message_index"] = {
@@ -611,6 +794,7 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
     controllable_process = process if process and "+" in process.get("stat", "") else None
     targets = await _resolve_control_targets([controllable_process] if controllable_process else [])
     target = targets.get(_session_key(process)) if process else None
+    approval = bool(payload.get("approval"))
     session = {
         "key": key,
         "interaction_id": key[:8],
@@ -618,28 +802,46 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
         "pid": process["pid"] if process else payload.get("pid"),
         "started": process.get("started") if process else None,
         "tty": _normalise_tty(process["tty"] if process else str(payload.get("tty") or "")),
-        "cwd": process.get("cwd") if process else str(payload.get("cwd") or "") or None,
+        "cwd": (
+            (process.get("cwd") if process else None)
+            or str(payload.get("cwd") or "").strip()
+            or previous.get("cwd")
+        ),
         "target_kind": target["kind"] if target else "unavailable",
         "target": target["target"] if target else "original terminal",
         "target_identity": target["identity"] if target else None,
         "target_name": target.get("name") if target else None,
         "bridge_url": target.get("bridge_url") if target else None,
-        "status": "needs_input",
-        "approval": bool(payload.get("approval")),
+        "status": "pending_confirmation" if approval else "needs_input",
+        "approval": approval,
+        "prompt": _redact_prompt(prompt),
         "candidate_hash": prompt_hash,
+        "native_candidate_hash": prompt_hash,
         "candidate_polls": _PROMPT_STABILITY_POLLS,
         "notification_message_id": None,
         "external_session_id": external_session_id,
         "hook_event": hook_event,
         "source": "native_hook",
-        "notified_at": _utc_now(),
+        "notified_at": None,
         "native_event_at": _utc_now(),
         "updated_at": _utc_now(),
     }
+    state["sessions"][key] = session
+    _remember_event(state, event_id)
+    if approval:
+        _save_bridge_state(state)
+        return {
+            "accepted": True,
+            "pending_confirmation": True,
+            "key": key,
+            "native_candidate_hash": prompt_hash,
+        }
+
     sent = await channel.send_message(
         chat_id, _format_session_notification({**session, "prompt": _redact_prompt(prompt)}),
     )
     session["notification_message_id"] = str(sent.message_id)
+    session["notified_at"] = _utc_now()
     state["message_index"] = {
         message_id: indexed_key
         for message_id, indexed_key in state["message_index"].items()
@@ -647,8 +849,6 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
     }
     if target:
         state["message_index"][str(sent.message_id)] = key
-    state["sessions"][key] = session
-    _remember_event(state, event_id)
     _save_bridge_state(state)
     return {"accepted": True, "notified": True, "controllable": bool(target)}
 
@@ -656,7 +856,12 @@ async def _record_coding_agent_event(payload: dict, channel, chat_id: int | str)
 async def record_coding_agent_event(payload: dict, channel, chat_id: int | str) -> dict:
     """Serialize native hook delivery with polling and Telegram replies."""
     async with _BRIDGE_STATE_LOCK:
-        return await _record_coding_agent_event(payload, channel, chat_id)
+        result = await _record_coding_agent_event(payload, channel, chat_id)
+    if result.get("pending_confirmation"):
+        _schedule_pending_approval_confirmation(
+            result["key"], result["native_candidate_hash"], channel, chat_id,
+        )
+    return result
 
 
 async def poll_coding_sessions(channel, chat_id: int | str) -> int:
@@ -809,7 +1014,7 @@ async def _resolve_cwd(pid: int) -> str | None:
     """Resolve the current working directory of a process via lsof."""
     try:
         proc = await asyncio.create_subprocess_exec(
-            "lsof", "-a", "-d", "cwd", "-p", str(pid), "-Fn",
+            _LSOF_PATH, "-a", "-d", "cwd", "-p", str(pid), "-Fn",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
